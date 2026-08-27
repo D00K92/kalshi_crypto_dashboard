@@ -147,6 +147,8 @@ async def test_time_trigger_uses_age_of_oldest_buffered_row(settings) -> None:
     await service._ingest([make_entry()])
     assert service._buffer_started_at is not None
 
+    # Add a tiny epsilon: monotonic timestamps are floats, so subtracting an
+    # exact boundary can round just below the configured interval.
     assert service._should_flush(
-        service._buffer_started_at + settings.flush_interval_seconds
+        service._buffer_started_at + settings.flush_interval_seconds + 1e-6
     )
