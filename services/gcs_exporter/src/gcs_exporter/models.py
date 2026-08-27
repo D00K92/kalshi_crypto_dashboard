@@ -143,10 +143,8 @@ class OrderBookRow:
             raw = payload.get(name)
             if not isinstance(raw, list) or not raw:
                 raise ValueError(f"{name} must be a non-empty array")
-            if len(raw) > 15:
-                raise ValueError(f"{name} exceeds maximum depth of 15")
             result: list[tuple[str, str]] = []
-            for index, level in enumerate(raw):
+            for index, level in enumerate(raw[:15]):
                 if not isinstance(level, dict):
                     raise ValueError(f"{name}[{index}] must be an object")
                 result.append((_text(level.get("price"), f"{name}.price"), _text(level.get("quantity"), f"{name}.quantity")))
@@ -169,7 +167,7 @@ class OrderBookRow:
             asks=asks,
             exchange_ts_ms=_positive_int(payload.get("exchange_ts_ms") or received, "exchange_ts_ms"),
             received_ts_ms=received,
-            depth=_positive_int(payload.get("depth"), "depth"),
+            depth=min(_positive_int(payload.get("depth"), "depth"), 15),
             schema_version=schema_version,
         )
 

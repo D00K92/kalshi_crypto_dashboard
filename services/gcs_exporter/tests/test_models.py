@@ -67,9 +67,10 @@ def test_order_book_row_decodes_snapshot() -> None:
     assert row.bids == (("100", "1"),)
 
 
-def test_order_book_row_rejects_more_than_15_levels() -> None:
+def test_order_book_row_truncates_more_than_15_levels() -> None:
     payload = {"event_type": "book_snapshot", "venue": "binance", "instrument": "BTCUSDT",
                "event_id": "x", "sequence": 1, "bids": [{"price": str(100-i), "quantity": "1"} for i in range(16)],
                "asks": [{"price": "200", "quantity": "1"}], "received_ts_ms": 2, "depth": 16, "schema_version": 1}
-    with pytest.raises(ValueError, match="maximum depth"):
-        OrderBookRow.from_entry(RawStreamEntry("1-0", {b"payload": orjson.dumps(payload)}))
+    row = OrderBookRow.from_entry(RawStreamEntry("1-0", {b"payload": orjson.dumps(payload)}))
+    assert len(row.bids) == 15
+    assert row.depth == 15
