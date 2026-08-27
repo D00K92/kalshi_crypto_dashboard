@@ -3,5 +3,6 @@
 from ingestion.adapters.binance import BinanceFeed
 from ingestion.adapters.coinbase import CoinbaseFeed
 from ingestion.adapters.deribit import DeribitFeed
+from ingestion.adapters.bybit import BybitFeed
 
-__all__ = ["BinanceFeed", "CoinbaseFeed", "DeribitFeed"]
+__all__ = ["BinanceFeed", "CoinbaseFeed", "DeribitFeed", "BybitFeed"]

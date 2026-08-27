@@ -35,6 +35,8 @@ class Settings:
     coinbase_product_id: str
     deribit_ws_url: str
     deribit_instrument: str
+    bybit_ws_url: str
+    bybit_symbol: str
     queue_maxsize: int
     stream_maxlen: int
     shutdown_grace_seconds: int
@@ -54,6 +56,8 @@ class Settings:
             coinbase_product_id=os.getenv("COINBASE_PRODUCT_ID", "BTC-USD"),
             deribit_ws_url=os.getenv("DERIBIT_WS_URL", "wss://www.deribit.com/ws/api/v2"),
             deribit_instrument=os.getenv("DERIBIT_INSTRUMENT", "BTC_USDT"),
+            bybit_ws_url=os.getenv("BYBIT_WS_URL", "wss://stream.bybit.com/v5/public/spot"),
+            bybit_symbol=os.getenv("BYBIT_SYMBOL", "BTCUSDT"),
             queue_maxsize=_positive_int("INGESTION_QUEUE_MAXSIZE", 10_000),
             stream_maxlen=_positive_int("INGESTION_STREAM_MAXLEN", 1_000_000),
             shutdown_grace_seconds=_positive_int(
