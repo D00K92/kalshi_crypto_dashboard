@@ -1,7 +1,8 @@
 # Ingestion service
 
-The first production slice ingests Binance Spot `BTCUSDT` trades and top-20
-order-book snapshots over WebSocket. Normalized events are appended to Redis
+The ingestion service consumes Binance Spot `BTCUSDT`, Coinbase Exchange
+`BTC-USD`, and Deribit spot `BTC_USDT` trades over WebSocket. Binance also
+provides top-20 order-book snapshots. Normalized events are appended to Redis
 Streams before a best-effort Redis Pub/Sub broadcast.
 
 Hot-path JSON encoding and decoding uses `orjson`. On supported CPython Unix
@@ -41,6 +42,10 @@ uv run pytest
 | `REDIS_PORT` | `6379` |
 | `BINANCE_SYMBOL` | `btcusdt` |
 | `BINANCE_WS_URL` | Binance combined trade/depth stream |
+| `COINBASE_WS_URL` | `wss://ws-feed.exchange.coinbase.com` |
+| `COINBASE_PRODUCT_ID` | `BTC-USD` |
+| `DERIBIT_WS_URL` | `wss://www.deribit.com/ws/api/v2` |
+| `DERIBIT_INSTRUMENT` | `BTC_USDT` |
 | `INGESTION_QUEUE_MAXSIZE` | `10000` |
 | `INGESTION_STREAM_MAXLEN` | `1000000` |
 | `INGESTION_SHUTDOWN_GRACE_SECONDS` | `10` |
