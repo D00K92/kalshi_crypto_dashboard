@@ -1,0 +1,97 @@
+name: Deploy GCS Exporter
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write  # Required for OIDC Workload Identity authentication
+
+env:
+  GCP_PROJECT_ID: kalshi-crypto-506614
+  GCP_REGION: asia-northeast3
+  GAR_REPOSITORY: quant-repo
+  IMAGE_NAME: gcs-exporter
+  GKE_CLUSTER: quant-cluster
+  GCS_BUCKET_NAME: kalshi-crypto-tick-data
+  REDIS_PORT: "6379"
+
+concurrency:
+  group: deploy-gcs-exporter
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+    - name: Check out tested commit
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+        persist-credentials: false
+
+    - name: Authenticate to Google Cloud
+      uses: google-github-actions/auth@v3
+      with:
+        workload_identity_provider: projects/229993998036/locations/global/workloadIdentityPools/github-pool/providers/github-provider
+        service_account: gh-actions-deployer@kalshi-crypto-506614.iam.gserviceaccount.com
+
+    - name: Set up Google Cloud SDK
+      uses: google-github-actions/setup-gcloud@v3
+      with:
+        project_id: ${{ env.GCP_PROJECT_ID }}
+
+    - name: Configure Docker authentication
+      run: gcloud auth configure-docker "${GCP_REGION}-docker.pkg.dev" --quiet
+
+    - name: Build and push immutable image
+      env:
+        IMAGE_URI: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/${{ env.IMAGE_NAME }}
+        IMAGE_TAG: ${{ github.event.workflow_run.head_sha || github.sha }}
+      run: |
+        set -euo pipefail
+        docker build --platform linux/amd64 -t "${IMAGE_URI}:${IMAGE_TAG}" services/gcs_exporter
+        docker push "${IMAGE_URI}:${IMAGE_TAG}"
+
+    - name: Get GKE credentials
+      uses: google-github-actions/get-gke-credentials@v3
+      with:
+        cluster_name: ${{ env.GKE_CLUSTER }}
+        location: ${{ env.GCP_REGION }}
+        project_id: ${{ env.GCP_PROJECT_ID }}
+
+    - name: Resolve Redis endpoint
+      id: redis
+      run: |
+        set -euo pipefail
+        redis_host="$(gcloud redis instances list \
+          --project="${GCP_PROJECT_ID}" \
+          --region="${GCP_REGION}" \
+          --format='value(host)' | head -n1)"
+        if [[ -z "${redis_host}" ]]; then
+          echo "No Memorystore Redis instance was found in ${GCP_REGION}." >&2
+          exit 1
+        fi
+        echo "host=${redis_host}" >> "${GITHUB_OUTPUT}"
+
+    - name: Apply Kubernetes manifest
+      env:
+        GCS_EXPORTER_IMAGE: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/${{ env.IMAGE_NAME }}:${{ github.event.workflow_run.head_sha || github.sha }}
+        REDIS_HOST: ${{ steps.redis.outputs.host }}
+      run: |
+        set -euo pipefail
+        envsubst '${GCS_EXPORTER_IMAGE} ${REDIS_HOST} ${REDIS_PORT} ${GCS_BUCKET_NAME}' \
+          < k8s/gcs-exporter-deployment.yaml \
+          | kubectl apply -f -
+
+    - name: Verify rollout
+      run: kubectl rollout status deployment/gcs-exporter --timeout=5m
