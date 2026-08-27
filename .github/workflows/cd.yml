@@ -1,4 +1,4 @@
-name: Deploy GCS Exporter
+name: Deploy Services
 
 on:
   workflow_run:
@@ -21,7 +21,7 @@ env:
   REDIS_PORT: "6379"
 
 concurrency:
-  group: deploy-gcs-exporter
+  group: deploy-services
   cancel-in-progress: false
 
 jobs:
@@ -53,13 +53,22 @@ jobs:
     - name: Configure Docker authentication
       run: gcloud auth configure-docker "${GCP_REGION}-docker.pkg.dev" --quiet
 
-    - name: Build and push immutable image
+    - name: Build and push GCS exporter image
       env:
         IMAGE_URI: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/${{ env.IMAGE_NAME }}
         IMAGE_TAG: ${{ github.event.workflow_run.head_sha || github.sha }}
       run: |
         set -euo pipefail
         docker build --platform linux/amd64 -t "${IMAGE_URI}:${IMAGE_TAG}" services/gcs_exporter
+        docker push "${IMAGE_URI}:${IMAGE_TAG}"
+
+    - name: Build and push ingestion image
+      env:
+        IMAGE_URI: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/ingestion
+        IMAGE_TAG: ${{ github.event.workflow_run.head_sha || github.sha }}
+      run: |
+        set -euo pipefail
+        docker build --platform linux/amd64 -t "${IMAGE_URI}:${IMAGE_TAG}" services/ingestion
         docker push "${IMAGE_URI}:${IMAGE_TAG}"
 
     - name: Get GKE credentials
@@ -83,15 +92,22 @@ jobs:
         fi
         echo "host=${redis_host}" >> "${GITHUB_OUTPUT}"
 
-    - name: Apply Kubernetes manifest
+    - name: Apply Kubernetes manifests
       env:
         GCS_EXPORTER_IMAGE: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/${{ env.IMAGE_NAME }}:${{ github.event.workflow_run.head_sha || github.sha }}
+        INGESTION_IMAGE: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/ingestion:${{ github.event.workflow_run.head_sha || github.sha }}
         REDIS_HOST: ${{ steps.redis.outputs.host }}
       run: |
         set -euo pipefail
         envsubst '${GCS_EXPORTER_IMAGE} ${REDIS_HOST} ${REDIS_PORT} ${GCS_BUCKET_NAME}' \
           < k8s/gcs-exporter-deployment.yaml \
           | kubectl apply -f -
+        envsubst '${INGESTION_IMAGE} ${REDIS_HOST} ${REDIS_PORT}' \
+          < k8s/ingestion-deployment.yaml \
+          | kubectl apply -f -
 
-    - name: Verify rollout
-      run: kubectl rollout status deployment/gcs-exporter --timeout=5m
+    - name: Verify rollouts
+      run: |
+        set -euo pipefail
+        kubectl rollout status deployment/gcs-exporter --timeout=5m
+        kubectl rollout status deployment/ingestion-service --timeout=5m
