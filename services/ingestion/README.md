@@ -2,7 +2,7 @@
 
 The ingestion service consumes Binance Spot `BTCUSDT`, Coinbase Exchange
 `BTC-USD`, and Deribit spot `BTC_USDT` trades over WebSocket. Binance also
-provides top-20 order-book snapshots. Normalized events are appended to Redis
+provides top-15 order-book snapshots. Normalized events are appended to Redis
 Streams before a best-effort Redis Pub/Sub broadcast.
 
 Hot-path JSON encoding and decoding uses `orjson`. On supported CPython Unix

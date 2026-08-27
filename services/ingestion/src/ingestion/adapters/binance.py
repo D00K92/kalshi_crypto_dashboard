@@ -17,6 +17,7 @@ from ingestion.pipeline.event_pipeline import EventPipeline
 
 LOGGER = logging.getLogger(__name__)
 VENUE = "binance"
+MAX_BOOK_LEVELS = 15
 
 
 class BinanceMessageError(ValueError):
@@ -108,8 +109,8 @@ def parse_binance_message(
     if isinstance(stream, str) and "@depth" in stream:
         instrument = stream.split("@", 1)[0].upper()
         sequence = _integer(data.get("lastUpdateId"), "data.lastUpdateId")
-        bids = _levels(data.get("bids"), "data.bids")
-        asks = _levels(data.get("asks"), "data.asks")
+        bids = _levels(data.get("bids"), "data.bids")[:MAX_BOOK_LEVELS]
+        asks = _levels(data.get("asks"), "data.asks")[:MAX_BOOK_LEVELS]
         depth = max(len(bids), len(asks))
         if depth == 0:
             raise BinanceMessageError("depth snapshot must contain at least one level")
