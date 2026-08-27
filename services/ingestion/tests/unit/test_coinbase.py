@@ -17,6 +17,15 @@ def test_ignore_non_match() -> None:
     assert parse_coinbase_message('{"type":"subscriptions"}', received_ts_ms=2) is None
 
 
+def test_parse_coinbase_numeric_trade_id_and_last_match() -> None:
+    event = parse_coinbase_message(
+        '{"type":"last_match","trade_id":43,"product_id":"BTC-USD","price":"100000","size":"0.01","side":"sell","time":"2026-08-27T10:00:00Z"}',
+        received_ts_ms=2,
+    )
+    assert event is not None
+    assert event.trade_id == "43"
+
+
 def test_reject_invalid_side() -> None:
     with pytest.raises(CoinbaseMessageError):
         parse_coinbase_message(

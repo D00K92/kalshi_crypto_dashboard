@@ -50,10 +50,13 @@ def parse_coinbase_message(raw: str | bytes, *, received_ts_ms: int | None = Non
         data = orjson.loads(raw)
     except orjson.JSONDecodeError as exc:
         raise CoinbaseMessageError("frame is not valid JSON") from exc
-    if not isinstance(data, dict) or data.get("type") != "match":
+    if not isinstance(data, dict) or data.get("type") not in {"match", "last_match"}:
         return None
     product = _text(data.get("product_id"), "product_id")
-    trade_id = _text(data.get("trade_id"), "trade_id")
+    raw_trade_id = data.get("trade_id")
+    if isinstance(raw_trade_id, bool) or not isinstance(raw_trade_id, (str, int)):
+        raise CoinbaseMessageError("trade_id must be a string or integer")
+    trade_id = str(raw_trade_id)
     side = _text(data.get("side"), "side").lower()
     if side not in {"buy", "sell"}:
         raise CoinbaseMessageError("side must be buy or sell")
