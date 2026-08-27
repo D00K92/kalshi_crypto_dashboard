@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import pyarrow as pa
 import pyarrow.parquet as pq
+import orjson
 
-from gcs_exporter.models import TradeRow
+from gcs_exporter.models import OrderBookRow, TradeRow
 
 
 TRADE_SCHEMA = pa.schema(
@@ -55,6 +56,57 @@ def write_trades(rows: list[TradeRow]) -> bytes:
         output,
         compression="snappy",
         use_dictionary=["venue", "instrument", "taker_side"],
+        write_statistics=True,
+    )
+    return output.getvalue().to_pybytes()
+
+
+BOOK_SCHEMA = pa.schema(
+    [
+        pa.field("redis_id", pa.string(), nullable=False),
+        pa.field("event_id", pa.string(), nullable=False),
+        pa.field("venue", pa.string(), nullable=False),
+        pa.field("instrument", pa.string(), nullable=False),
+        pa.field("sequence", pa.int64(), nullable=False),
+        pa.field("bids", pa.string(), nullable=False),
+        pa.field("asks", pa.string(), nullable=False),
+        pa.field("exchange_ts_ms", pa.int64(), nullable=False),
+        pa.field("received_ts_ms", pa.int64(), nullable=False),
+        pa.field("depth", pa.int16(), nullable=False),
+        pa.field("schema_version", pa.int16(), nullable=False),
+    ],
+    metadata={b"dataset": b"crypto_orderbooks", b"schema_version": b"1"},
+)
+
+
+def write_books(rows: list[OrderBookRow]) -> bytes:
+    if not rows:
+        raise ValueError("cannot serialize an empty order-book batch")
+    table = pa.Table.from_pylist(
+        [
+            {
+                "redis_id": row.redis_id,
+                "event_id": row.event_id,
+                "venue": row.venue,
+                "instrument": row.instrument,
+                "sequence": row.sequence,
+                "bids": orjson.dumps([{"price": p, "quantity": q} for p, q in row.bids]).decode(),
+                "asks": orjson.dumps([{"price": p, "quantity": q} for p, q in row.asks]).decode(),
+                "exchange_ts_ms": row.exchange_ts_ms,
+                "received_ts_ms": row.received_ts_ms,
+                "depth": row.depth,
+                "schema_version": row.schema_version,
+            }
+            for row in rows
+        ],
+        schema=BOOK_SCHEMA,
+    )
+    output = pa.BufferOutputStream()
+    pq.write_table(
+        table,
+        output,
+        compression="snappy",
+        use_dictionary=["venue", "instrument"],
         write_statistics=True,
     )
     return output.getvalue().to_pybytes()

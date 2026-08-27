@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 import orjson
 import pytest
 
-from gcs_exporter.models import RawStreamEntry, TradeRow
+from gcs_exporter.models import OrderBookRow, RawStreamEntry, TradeRow
 
 
 def make_entry(
@@ -51,3 +51,25 @@ def test_unknown_schema_version_is_rejected() -> None:
 
     with pytest.raises(ValueError, match="unsupported schema_version"):
         TradeRow.from_entry(RawStreamEntry("1-0", {b"payload": orjson.dumps(payload)}))
+
+
+def test_order_book_row_decodes_snapshot() -> None:
+    payload = {
+        "event_id": "bybit:BTCUSDT:book:42", "event_type": "book_snapshot",
+        "venue": "bybit", "instrument": "BTCUSDT", "sequence": 42,
+        "bids": [{"price": "100", "quantity": "1"}],
+        "asks": [{"price": "101", "quantity": "2"}],
+        "exchange_ts_ms": 1_724_677_200_000, "received_ts_ms": 1_724_677_200_001,
+        "depth": 1, "schema_version": 1,
+    }
+    row = OrderBookRow.from_entry(RawStreamEntry("1-0", {b"payload": orjson.dumps(payload)}))
+    assert row.partition == ("bybit", "BTCUSDT", "2024-08-26", "13")
+    assert row.bids == (("100", "1"),)
+
+
+def test_order_book_row_rejects_more_than_15_levels() -> None:
+    payload = {"event_type": "book_snapshot", "venue": "binance", "instrument": "BTCUSDT",
+               "event_id": "x", "sequence": 1, "bids": [{"price": str(100-i), "quantity": "1"} for i in range(16)],
+               "asks": [{"price": "200", "quantity": "1"}], "received_ts_ms": 2, "depth": 16, "schema_version": 1}
+    with pytest.raises(ValueError, match="maximum depth"):
+        OrderBookRow.from_entry(RawStreamEntry("1-0", {b"payload": orjson.dumps(payload)}))

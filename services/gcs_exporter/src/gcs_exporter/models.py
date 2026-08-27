@@ -110,3 +110,70 @@ class TradeRow:
             instant.strftime("%Y-%m-%d"),
             instant.strftime("%H"),
         )
+
+
+@dataclass(frozen=True, slots=True)
+class OrderBookRow:
+    """Validated, source-compatible top-15 order-book snapshot."""
+
+    redis_id: str
+    event_id: str
+    venue: str
+    instrument: str
+    sequence: int
+    bids: tuple[tuple[str, str], ...]
+    asks: tuple[tuple[str, str], ...]
+    exchange_ts_ms: int
+    received_ts_ms: int
+    depth: int
+    schema_version: int
+
+    @classmethod
+    def from_entry(cls, entry: RawStreamEntry) -> "OrderBookRow":
+        try:
+            payload = orjson.loads(entry.payload_bytes())
+        except orjson.JSONDecodeError as exc:
+            raise ValueError("payload is not valid JSON") from exc
+        if not isinstance(payload, dict):
+            raise ValueError("payload must be a JSON object")
+        if payload.get("event_type") != "book_snapshot":
+            raise ValueError("payload event_type must be 'book_snapshot'")
+
+        def levels(name: str) -> tuple[tuple[str, str], ...]:
+            raw = payload.get(name)
+            if not isinstance(raw, list) or not raw:
+                raise ValueError(f"{name} must be a non-empty array")
+            if len(raw) > 15:
+                raise ValueError(f"{name} exceeds maximum depth of 15")
+            result: list[tuple[str, str]] = []
+            for index, level in enumerate(raw):
+                if not isinstance(level, dict):
+                    raise ValueError(f"{name}[{index}] must be an object")
+                result.append((_text(level.get("price"), f"{name}.price"), _text(level.get("quantity"), f"{name}.quantity")))
+            return tuple(result)
+
+        bids, asks = levels("bids"), levels("asks")
+        if float(bids[0][0]) >= float(asks[0][0]):
+            raise ValueError("book is crossed or locked")
+        schema_version = _positive_int(payload.get("schema_version"), "schema_version")
+        if schema_version != 1:
+            raise ValueError(f"unsupported schema_version {schema_version}")
+        received = _positive_int(payload.get("received_ts_ms"), "received_ts_ms")
+        return cls(
+            redis_id=entry.redis_id,
+            event_id=_text(payload.get("event_id"), "event_id"),
+            venue=_text(payload.get("venue"), "venue").lower(),
+            instrument=_text(payload.get("instrument"), "instrument").upper(),
+            sequence=_positive_int(payload.get("sequence"), "sequence"),
+            bids=bids,
+            asks=asks,
+            exchange_ts_ms=_positive_int(payload.get("exchange_ts_ms") or received, "exchange_ts_ms"),
+            received_ts_ms=received,
+            depth=_positive_int(payload.get("depth"), "depth"),
+            schema_version=schema_version,
+        )
+
+    @property
+    def partition(self) -> tuple[str, str, str, str]:
+        instant = datetime.fromtimestamp(self.exchange_ts_ms / 1000, tz=timezone.utc)
+        return self.venue, self.instrument, instant.strftime("%Y-%m-%d"), instant.strftime("%H")
