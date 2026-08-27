@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ingestion-service
+  labels:
+    app: ingestion-service
+spec:
+  replicas: 1  # Always 1 replica for WebSocket sources to prevent duplicate streams
+  selector:
+    matchLabels:
+      app: ingestion-service
+  template:
+    metadata:
+      labels:
+        app: ingestion-service
+    spec:
+      containers:
+      - name: ingestion
+        image: asia-northeast3-docker.pkg.dev/kalshi-crypto-506614/quant-repo/ingestion:v1
+        imagePullPolicy: Always
+        env:
+        - name: REDIS_HOST
+          value: "${REDIS_HOST}"  # Insert Redis Private IP here
+        - name: REDIS_PORT
+          value: "${REDIS_PORT}"
+        resources:
+          requests:
+            cpu: "250m"
+            memory: "256Mi"
+          limits:
+            cpu: "1000m"
+            memory: "512Mi"

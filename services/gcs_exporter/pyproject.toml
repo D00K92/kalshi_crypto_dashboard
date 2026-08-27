@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kalshi-crypto-gcs-exporter"
+version = "0.1.0"
+description = "Redis Streams to GCS Parquet tick archiver"
+requires-python = ">=3.11"
+dependencies = [
+    "google-cloud-storage>=3.4,<4",
+    "google-crc32c>=1.7,<2",
+    "orjson>=3.10,<4",
+    "pyarrow>=20,<24",
+    "redis>=6.2,<9",
+    "uvloop>=0.22,<1; sys_platform != 'win32' and platform_python_implementation == 'CPython'",
+]
+
+[project.scripts]
+gcs-exporter = "gcs_exporter.__main__:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4,<10",
+    "pytest-asyncio>=1.2,<2",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]

@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kalshi-crypto-ingestion"
+version = "0.1.0"
+description = "Low-latency, multi-venue market data ingestion service"
+requires-python = ">=3.11"
+dependencies = [
+    "redis>=6.2,<9",
+    "websockets>=15,<18",
+    "orjson>=3.10,<4",
+    "uvloop>=0.22,<1; sys_platform != 'win32' and platform_python_implementation == 'CPython'",
+]
+
+[project.scripts]
+ingestion = "ingestion.__main__:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4,<10",
+    "pytest-asyncio>=1.2,<2",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
