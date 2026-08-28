@@ -119,6 +119,7 @@ class CoinbaseFeed:
         self._ws_url, self._product_id, self._pipeline = ws_url, product_id, pipeline
         self.health = CoinbaseHealth()
         self._book = CoinbaseBook(product_id)
+        self._diagnostic_logged = False
 
     async def run(self) -> None:
         async for websocket in connect(self._ws_url, open_timeout=10, close_timeout=5, ping_interval=20,
@@ -134,8 +135,15 @@ class CoinbaseFeed:
                         event = parse_coinbase_message(raw, received_ts_ms=received)
                         if event is None:
                             decoded = orjson.loads(raw)
-                            if isinstance(decoded, dict) and decoded.get("product_id") == self._product_id:
-                                event = self._book.apply(decoded, received)
+                            if isinstance(decoded, dict):
+                                message_type = decoded.get("type")
+                                if message_type in {"subscriptions", "error"}:
+                                    LOGGER.info("coinbase_control_frame", extra={"venue": VENUE, "type": message_type, "message": decoded.get("message")})
+                                if not self._diagnostic_logged and message_type in {"snapshot", "l2update"}:
+                                    LOGGER.info("coinbase_book_frame_shape", extra={"venue": VENUE, "type": message_type, "product_id": decoded.get("product_id"), "keys": sorted(decoded.keys())})
+                                    self._diagnostic_logged = True
+                                if message_type in {"snapshot", "l2update"} and decoded.get("product_id", self._product_id) == self._product_id:
+                                    event = self._book.apply(decoded, received)
                     except CoinbaseMessageError as exc:
                         self.health.last_error = str(exc)
                         LOGGER.warning("venue_message_rejected", extra={"venue": VENUE, "reason": str(exc)})
