@@ -29,7 +29,7 @@ spec:
         command: ["sh", "-c"]
         args:
         - >-
-          market-aggregator &
+          python -m market_aggregator &
           aggregator_pid=$!;
           python scripts/integration_test.py --wait-seconds 30;
           status=$?;
