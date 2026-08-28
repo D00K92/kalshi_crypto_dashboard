@@ -1,6 +1,8 @@
 name: Staging Integration
 
 on:
+  pull_request:
+    branches: [main]
   workflow_dispatch:
   workflow_run:
     workflows: [CI]
@@ -22,6 +24,7 @@ env:
 jobs:
   integration:
     if: >-
+      github.event_name == 'pull_request' ||
       github.event_name == 'workflow_dispatch' ||
       (github.event.workflow_run.conclusion == 'success' &&
        github.event.workflow_run.head_branch == 'main')
