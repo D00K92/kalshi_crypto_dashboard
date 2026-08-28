@@ -34,7 +34,7 @@ spec:
         - name: AGGREGATOR_GROUP_START_ID
           value: "$"
         - name: AGGREGATION_PRICE_TICK
-          value: "1.00"
+          value: "auto"
         - name: HEALTH_PORT
           value: "8080"
         ports:

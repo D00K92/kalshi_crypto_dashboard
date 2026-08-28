@@ -28,9 +28,9 @@ class VenueBook:
 class MarketAggregator:
     """Pure state machine for venue books and trade-derived market data."""
 
-    def __init__(self, price_tick: str = "1.00", depth: int = 10, freshness_ms: int = 5000) -> None:
-        self.tick = _dec(price_tick)
-        if self.tick <= 0:
+    def __init__(self, price_tick: str | None = None, depth: int = 10, freshness_ms: int = 5000) -> None:
+        self.tick = _dec(price_tick) if price_tick else None
+        if self.tick is not None and self.tick <= 0:
             raise ValueError("price_tick must be positive")
         self.depth = depth
         self.freshness_ms = freshness_ms
@@ -61,9 +61,11 @@ class MarketAggregator:
         ts = int(event.get("exchange_ts_ms") or event.get("received_ts_ms") or time.time() * 1000)
         received = int(event.get("received_ts_ms") or time.time() * 1000)
         bucket = _bucket(ts)
-        state = self.trade_buckets.setdefault(bucket, {"notional": Decimal("0"), "volume": Decimal("0"), "open": None, "high": None, "low": None, "close": None, "delta": Decimal("0"), "venues": defaultdict(lambda: {"notional": Decimal("0"), "volume": Decimal("0")})})
+        state = self.trade_buckets.setdefault(bucket, {"notional": Decimal("0"), "volume": Decimal("0"), "price_sum": Decimal("0"), "trade_count": 0, "open": None, "high": None, "low": None, "close": None, "delta": Decimal("0"), "venues": defaultdict(lambda: {"notional": Decimal("0"), "volume": Decimal("0"), "price_sum": Decimal("0"), "trade_count": 0})})
         state["notional"] += price * quantity
         state["volume"] += quantity
+        state["price_sum"] += price
+        state["trade_count"] += 1
         state["open"] = price if state["open"] is None else state["open"]
         state["high"] = price if state["high"] is None else max(state["high"], price)
         state["low"] = price if state["low"] is None else min(state["low"], price)
@@ -72,6 +74,8 @@ class MarketAggregator:
         venue_state = state["venues"][venue]
         venue_state["notional"] += price * quantity
         venue_state["volume"] += quantity
+        venue_state["price_sum"] += price
+        venue_state["trade_count"] += 1
         self.latest_trades[venue] = {"price": price, "received_ts_ms": received}
         self.cvd += quantity if event.get("taker_side") == "buy" else -quantity
         self._trim_buckets(bucket)
@@ -80,21 +84,22 @@ class MarketAggregator:
     def book_snapshot(self, now_ms: int, instrument: str) -> dict[str, Any]:
         active = {v: b for v, b in self.books.items() if now_ms - b.received_ts_ms <= self.freshness_ms}
         stale = sorted(set(self.books) - set(active))
-        bid_buckets = self._aggregate_side(active, "bids", reverse=True, rounding=ROUND_DOWN)
-        ask_buckets = self._aggregate_side(active, "asks", reverse=False, rounding=ROUND_CEILING)
+        tick = self._resolve_tick(active)
+        bid_buckets = self._aggregate_side(active, "bids", tick, reverse=True, rounding=ROUND_DOWN)
+        ask_buckets = self._aggregate_side(active, "asks", tick, reverse=False, rounding=ROUND_CEILING)
 
         # A bucket boundary can still overlap after quantization. Drop the
         # crossing bid buckets so the published ladder is always non-crossed.
         if bid_buckets and ask_buckets:
             lowest_ask = Decimal(ask_buckets[0]["price"])
             bid_buckets = [level for level in bid_buckets if Decimal(level["price"]) < lowest_ask]
-        return {"schema_version": 1, "event_type": "aggregated_book", "instrument": instrument, "generated_ts_ms": now_ms, "depth": self.depth, "price_tick": str(self.tick), "bucket_method": "bid_floor_ask_ceiling", "venues": sorted(active), "stale_venues": stale, "bids": bid_buckets[: self.depth], "asks": ask_buckets[: self.depth]}
+        return {"schema_version": 1, "event_type": "aggregated_book", "instrument": instrument, "generated_ts_ms": now_ms, "depth": self.depth, "price_tick": str(tick), "bucket_method": "bid_floor_ask_ceiling", "venues": sorted(active), "stale_venues": stale, "bids": bid_buckets[: self.depth], "asks": ask_buckets[: self.depth]}
 
     def spot_snapshot(self, bucket: int, instrument: str, state: dict[str, Any]) -> dict[str, Any]:
-        venues = {venue: {"vwap": self._fmt(v["notional"] / v["volume"]), "volume": self._fmt(v["volume"]), "last_received_ts_ms": self.latest_trades[venue]["received_ts_ms"]} for venue, v in state["venues"].items() if v["volume"] > 0}
+        venues = {venue: {"average_price": self._fmt(v["price_sum"] / v["trade_count"]), "volume": self._fmt(v["volume"]), "last_received_ts_ms": self.latest_trades[venue]["received_ts_ms"]} for venue, v in state["venues"].items() if v["trade_count"] > 0}
         total = state["volume"]
-        price = self._fmt(state["notional"] / total) if total else None
-        return {"schema_version": 1, "event_type": "aggregated_spot", "instrument": instrument, "price": price, "method": "five_second_trade_vwap", "generated_ts_ms": int(time.time() * 1000), "bucket_start_ts_ms": bucket, "bucket_end_ts_ms": bucket + 5000, "total_volume": self._fmt(total), "venues": venues, "used_venues": sorted(venues), "stale_venues": []}
+        price = self._fmt(state["price_sum"] / state["trade_count"]) if state["trade_count"] else None
+        return {"schema_version": 1, "event_type": "aggregated_spot", "instrument": instrument, "price": price, "method": "five_second_trade_average", "generated_ts_ms": int(time.time() * 1000), "bucket_start_ts_ms": bucket, "bucket_end_ts_ms": bucket + 5000, "total_volume": self._fmt(total), "venues": venues, "used_venues": sorted(venues), "stale_venues": []}
 
     def candle_snapshot(self, instrument: str) -> list[dict[str, Any]]:
         return [{"instrument": instrument, "bucket_start_ts_ms": start, "open": self._fmt(s["open"]), "high": self._fmt(s["high"]), "low": self._fmt(s["low"]), "close": self._fmt(s["close"]), "volume": self._fmt(s["volume"]), "vwap": self._fmt(s["notional"] / s["volume"])} for start, s in sorted(self.trade_buckets.items()) if s["volume"] > 0]
@@ -113,11 +118,21 @@ class MarketAggregator:
         levels = [(_dec(level["price"]), _dec(level["quantity"])) for level in raw[:15]]
         return sorted(levels, key=lambda x: x[0], reverse=reverse)
 
-    def _aggregate_side(self, books: dict[str, VenueBook], side: str, reverse: bool, rounding: str) -> list[dict[str, Any]]:
+    def _resolve_tick(self, books: dict[str, VenueBook]) -> Decimal:
+        if self.tick is not None:
+            return self.tick
+        precision = max(
+            (-price.as_tuple().exponent)
+            for book in books.values()
+            for price, _ in (*book.bids, *book.asks)
+        ) if books else 0
+        return Decimal(1).scaleb(-precision)
+
+    def _aggregate_side(self, books: dict[str, VenueBook], side: str, tick: Decimal, reverse: bool, rounding: str) -> list[dict[str, Any]]:
         grouped: dict[Decimal, dict[str, Decimal]] = defaultdict(lambda: defaultdict(Decimal))
         for venue, book in books.items():
             for price, quantity in getattr(book, side):
-                bucket = (price / self.tick).to_integral_value(rounding=rounding) * self.tick
+                bucket = (price / tick).to_integral_value(rounding=rounding) * tick
                 grouped[bucket][venue] += quantity
         result = []
         for price in sorted(grouped, reverse=reverse)[: self.depth]:

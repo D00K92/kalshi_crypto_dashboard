@@ -16,7 +16,8 @@ def test_trade_vwap_and_cvd():
     second["event_id"] = "two"
     agg.apply_trade(first)
     spot = agg.apply_trade(second)
-    assert spot["price"] == "107.5"
+    assert spot["price"] == "105"
+    assert spot["method"] == "five_second_trade_average"
     assert spot["total_volume"] == "4"
     assert spot["used_venues"] == ["binance", "coinbase"]
     assert agg.cvd == Decimal("-2")
@@ -68,3 +69,20 @@ def test_book_freshness_uses_redis_publication_time():
         "asks": [{"price": "101", "quantity": "1"}],
     }, published_ts_ms=now)
     assert snapshot["venues"] == ["binance"]
+
+
+def test_adaptive_tick_uses_finest_common_price_precision():
+    agg = MarketAggregator(depth=10)
+    now = int(time.time() * 1000)
+    snapshot = agg.apply_book({
+        "event_id": "adaptive-tick",
+        "event_type": "book_snapshot",
+        "venue": "binance",
+        "instrument": "BTCUSDT",
+        "received_ts_ms": now,
+        "bids": [{"price": "100.01", "quantity": "1"}],
+        "asks": [{"price": "100.03", "quantity": "1"}],
+    })
+    assert snapshot["price_tick"] == "0.01"
+    assert snapshot["bids"][0]["price"] == "100.01"
+    assert snapshot["asks"][0]["price"] == "100.03"
