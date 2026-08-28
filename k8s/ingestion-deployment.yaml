@@ -23,6 +23,10 @@ spec:
           value: "${REDIS_HOST}"  # Insert Redis Private IP here
         - name: REDIS_PORT
           value: "${REDIS_PORT}"
+        - name: KRAKEN_WS_URL
+          value: "wss://ws.kraken.com/v2"
+        - name: KRAKEN_SYMBOL
+          value: "BTC/USD"
         - name: COINBASE_API_KEY
           valueFrom:
             secretKeyRef:

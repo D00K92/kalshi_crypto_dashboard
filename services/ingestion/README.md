@@ -1,8 +1,9 @@
 # Ingestion service
 
 The ingestion service consumes Binance Spot `BTCUSDT`, Coinbase Advanced Trade
-`BTC-USD`, and Deribit spot `BTC_USDT` trades over WebSocket. Binance, Coinbase,
-and Bybit provide top-15 order-book snapshots. Normalized events are appended to Redis
+`BTC-USD`, Deribit spot `BTC_USDT`, and Kraken Spot `BTC/USD` trades over
+WebSocket. Binance, Coinbase, Bybit, and Kraken provide top-15 order-book
+snapshots. Normalized events are appended to Redis
 Streams before a best-effort Redis Pub/Sub broadcast.
 
 Hot-path JSON encoding and decoding uses `orjson`. On supported CPython Unix
@@ -59,6 +60,8 @@ the API key, private key, or JWT. Use `--seconds 0` to run until interrupted.
 | `COINBASE_SECRET` | unset; CDP ES256 private-key PEM (preserve newlines) |
 | `DERIBIT_WS_URL` | `wss://www.deribit.com/ws/api/v2` |
 | `DERIBIT_INSTRUMENT` | `BTC_USDT` |
+| `KRAKEN_WS_URL` | `wss://ws.kraken.com/v2` |
+| `KRAKEN_SYMBOL` | `BTC/USD` |
 | `INGESTION_QUEUE_MAXSIZE` | `10000` |
 | `INGESTION_STREAM_MAXLEN` | `1000000` |
 | `INGESTION_SHUTDOWN_GRACE_SECONDS` | `10` |
