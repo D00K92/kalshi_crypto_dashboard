@@ -1,0 +1,92 @@
+name: Staging Integration
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  GCP_PROJECT_ID: kalshi-crypto-506614
+  GCP_REGION: asia-northeast3
+  GAR_REPOSITORY: quant-repo
+  GKE_CLUSTER: quant-cluster
+  STAGING_NAMESPACE: quant-staging
+  STAGING_REDIS_HOST: ${{ vars.STAGING_REDIS_HOST }}
+
+jobs:
+  integration:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main')
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 20
+    steps:
+    - name: Check out tested commit
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+        persist-credentials: false
+
+    - name: Validate staging configuration
+      run: |
+        set -euo pipefail
+        test -n "${STAGING_REDIS_HOST}" || {
+          echo "Set STAGING_REDIS_HOST as a staging environment variable." >&2
+          exit 1
+        }
+
+    - name: Authenticate to Google Cloud
+      uses: google-github-actions/auth@v3
+      with:
+        workload_identity_provider: projects/229993998036/locations/global/workloadIdentityPools/github-pool/providers/github-provider
+        service_account: gh-actions-deployer@kalshi-crypto-506614.iam.gserviceaccount.com
+
+    - name: Set up Google Cloud SDK
+      uses: google-github-actions/setup-gcloud@v3
+      with:
+        project_id: ${{ env.GCP_PROJECT_ID }}
+
+    - name: Configure Docker authentication
+      run: gcloud auth configure-docker "${GCP_REGION}-docker.pkg.dev" --quiet
+
+    - name: Build and push aggregator test image
+      env:
+        IMAGE_URI: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/market-aggregator
+        IMAGE_TAG: ${{ github.event.workflow_run.head_sha || github.sha }}
+      run: |
+        set -euo pipefail
+        docker build --platform linux/amd64 -t "${IMAGE_URI}:${IMAGE_TAG}" services/market_aggregator
+        docker push "${IMAGE_URI}:${IMAGE_TAG}"
+
+    - name: Get GKE credentials
+      uses: google-github-actions/get-gke-credentials@v3
+      with:
+        cluster_name: ${{ env.GKE_CLUSTER }}
+        location: ${{ env.GCP_REGION }}
+        project_id: ${{ env.GCP_PROJECT_ID }}
+
+    - name: Run integration Job in GKE
+      env:
+        JOB_NAME: "market-aggregator-it-${{ github.run_id }}"
+        NAMESPACE: ${{ env.STAGING_NAMESPACE }}
+        AGGREGATOR_IMAGE: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/market-aggregator:${{ github.event.workflow_run.head_sha || github.sha }}
+        REDIS_URL: redis://${{ env.STAGING_REDIS_HOST }}:6379/0
+        BOOK_STREAM: "ci:${{ github.run_id }}:orderbooks"
+        TRADE_STREAM: "ci:${{ github.run_id }}:trades"
+        OUTPUT_PREFIX: "ci:${{ github.run_id }}:market"
+      run: |
+        set -euo pipefail
+        kubectl get namespace "${NAMESPACE}" >/dev/null
+        envsubst '${JOB_NAME} ${NAMESPACE} ${AGGREGATOR_IMAGE} ${REDIS_URL} ${BOOK_STREAM} ${TRADE_STREAM} ${OUTPUT_PREFIX}' \
+          < services/market_aggregator/k8s/integration-job.yaml \
+          | kubectl apply -f -
+        kubectl wait --for=condition=complete "job/${JOB_NAME}" -n "${NAMESPACE}" --timeout=5m
+        kubectl logs "job/${JOB_NAME}" -n "${NAMESPACE}"

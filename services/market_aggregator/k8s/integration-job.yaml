@@ -1,0 +1,38 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: "${JOB_NAME}"
+  namespace: "${NAMESPACE}"
+  labels:
+    app: market-aggregator-integration
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app: market-aggregator-integration
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: integration
+        image: "${AGGREGATOR_IMAGE}"
+        env:
+        - name: MARKET_AGGREGATOR_REDIS_URL
+          value: "${REDIS_URL}"
+        - name: BOOK_STREAM
+          value: "${BOOK_STREAM}"
+        - name: TRADE_STREAM
+          value: "${TRADE_STREAM}"
+        - name: AGGREGATOR_OUTPUT_PREFIX
+          value: "${OUTPUT_PREFIX}"
+        command: ["sh", "-c"]
+        args:
+        - >-
+          market-aggregator &
+          aggregator_pid=$!;
+          python scripts/integration_test.py --wait-seconds 30;
+          status=$?;
+          kill "${aggregator_pid}" 2>/dev/null || true;
+          wait "${aggregator_pid}" 2>/dev/null || true;
+          exit "${status}"
