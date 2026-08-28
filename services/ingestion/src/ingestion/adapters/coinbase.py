@@ -138,7 +138,7 @@ class CoinbaseFeed:
                             if isinstance(decoded, dict):
                                 message_type = decoded.get("type")
                                 if message_type in {"subscriptions", "error"}:
-                                    LOGGER.info("coinbase_control_frame", extra={"venue": VENUE, "type": message_type, "message": decoded.get("message")})
+                                    LOGGER.info("coinbase_control_frame", extra={"venue": VENUE, "type": message_type, "detail": decoded.get("message")})
                                 if not self._diagnostic_logged and message_type in {"snapshot", "l2update"}:
                                     LOGGER.info("coinbase_book_frame_shape", extra={"venue": VENUE, "type": message_type, "product_id": decoded.get("product_id"), "keys": sorted(decoded.keys())})
                                     self._diagnostic_logged = True
