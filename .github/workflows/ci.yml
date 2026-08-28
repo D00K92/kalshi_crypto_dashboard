@@ -31,6 +31,8 @@ jobs:
             path: services/gcs_exporter
           - service: market-aggregator
             path: services/market_aggregator
+          - service: dashboard
+            path: services/dashboard
     defaults:
       run:
         working-directory: ${{ matrix.path }}
@@ -68,6 +70,8 @@ jobs:
             context: services/gcs_exporter
           - service: market-aggregator
             context: services/market_aggregator
+          - service: dashboard
+            context: services/dashboard
     steps:
       - name: Check out repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1

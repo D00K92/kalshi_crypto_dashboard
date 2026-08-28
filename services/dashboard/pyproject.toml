@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kalshi-crypto-dashboard"
+version = "0.1.0"
+description = "Real-time Plotly Dash market dashboard"
+requires-python = ">=3.11"
+dependencies = [
+    "dash>=3.0,<4",
+    "orjson>=3.10,<4",
+    "redis>=6.2,<9",
+    "uvloop>=0.22,<1; sys_platform != 'win32' and platform_python_implementation == 'CPython'",
+]
+
+[dependency-groups]
+dev = ["pytest>=8.4,<10"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]

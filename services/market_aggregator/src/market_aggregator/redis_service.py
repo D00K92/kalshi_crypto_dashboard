@@ -83,7 +83,7 @@ class AggregatorService:
 
     async def _ensure_group(self, stream: str, group: str) -> None:
         try:
-            await self.client.xgroup_create(stream, group, id="0", mkstream=True)
+            await self.client.xgroup_create(stream, group, id=self.settings.group_start_id, mkstream=True)
         except ResponseError as exc:
             if "BUSYGROUP" not in str(exc):
                 raise

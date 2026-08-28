@@ -25,6 +25,7 @@ class Settings:
     trade_stream: str
     book_group: str
     trade_group: str
+    group_start_id: str
     consumer_name: str
     price_tick: str
     book_depth: int
@@ -43,6 +44,7 @@ class Settings:
             trade_stream=os.getenv("TRADE_STREAM", "stream:ticks"),
             book_group=os.getenv("BOOK_CONSUMER_GROUP", "market_aggregator_books"),
             trade_group=os.getenv("TRADE_CONSUMER_GROUP", "market_aggregator_trades"),
+            group_start_id=os.getenv("AGGREGATOR_GROUP_START_ID", "0"),
             consumer_name=os.getenv("CONSUMER_NAME", f"aggregator-{host}"),
             price_tick=os.getenv("AGGREGATION_PRICE_TICK", "0.01"),
             book_depth=_int("AGGREGATION_BOOK_DEPTH", 10),
