@@ -39,7 +39,8 @@ Payload shape:
   "instrument": "BTCUSDT",
   "generated_ts_ms": 0,
   "depth": 10,
-  "price_tick": "0.01",
+  "price_tick": "1.00",
+  "bucket_method": "bid_floor_ask_ceiling",
   "venues": ["binance", "coinbase", "bybit"],
   "stale_venues": [],
   "bids": [
@@ -53,9 +54,13 @@ Payload shape:
 }
 ```
 
-There are at most 10 levels per side. Levels are grouped by the configured
-price tick and sorted with the best bid/ask nearest the spread. Venue quantity
-is preserved so the dashboard can render stacked absolute-volume bars.
+There are at most 10 levels per side. Levels are grouped into fixed price
+buckets using side-aware quantization: bids are rounded down to the bucket
+boundary and asks are rounded up. Any bid bucket at or above the lowest ask
+bucket is removed, guaranteeing a non-crossed ladder despite small venue price
+discrepancies. The configured bucket size is reported in `price_tick` (the
+production default is `$1.00`). Venue quantity is preserved so the dashboard
+can render stacked absolute-volume bars.
 
 ## Synthetic spot price
 

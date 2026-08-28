@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
-from decimal import Decimal, ROUND_DOWN
+from decimal import Decimal, ROUND_CEILING, ROUND_DOWN
 import time
 from typing import Any
 
@@ -28,7 +28,7 @@ class VenueBook:
 class MarketAggregator:
     """Pure state machine for venue books and trade-derived market data."""
 
-    def __init__(self, price_tick: str = "0.01", depth: int = 10, freshness_ms: int = 5000) -> None:
+    def __init__(self, price_tick: str = "1.00", depth: int = 10, freshness_ms: int = 5000) -> None:
         self.tick = _dec(price_tick)
         if self.tick <= 0:
             raise ValueError("price_tick must be positive")
@@ -77,9 +77,15 @@ class MarketAggregator:
     def book_snapshot(self, now_ms: int, instrument: str) -> dict[str, Any]:
         active = {v: b for v, b in self.books.items() if now_ms - b.received_ts_ms <= self.freshness_ms}
         stale = sorted(set(self.books) - set(active))
-        bids = self._aggregate_side(active, "bids", reverse=True)
-        asks = self._aggregate_side(active, "asks", reverse=False)
-        return {"schema_version": 1, "event_type": "aggregated_book", "instrument": instrument, "generated_ts_ms": now_ms, "depth": self.depth, "price_tick": str(self.tick), "venues": sorted(active), "stale_venues": stale, "bids": bids, "asks": asks}
+        bid_buckets = self._aggregate_side(active, "bids", reverse=True, rounding=ROUND_DOWN)
+        ask_buckets = self._aggregate_side(active, "asks", reverse=False, rounding=ROUND_CEILING)
+
+        # A bucket boundary can still overlap after quantization. Drop the
+        # crossing bid buckets so the published ladder is always non-crossed.
+        if bid_buckets and ask_buckets:
+            lowest_ask = Decimal(ask_buckets[0]["price"])
+            bid_buckets = [level for level in bid_buckets if Decimal(level["price"]) < lowest_ask]
+        return {"schema_version": 1, "event_type": "aggregated_book", "instrument": instrument, "generated_ts_ms": now_ms, "depth": self.depth, "price_tick": str(self.tick), "bucket_method": "bid_floor_ask_ceiling", "venues": sorted(active), "stale_venues": stale, "bids": bid_buckets[: self.depth], "asks": ask_buckets[: self.depth]}
 
     def spot_snapshot(self, bucket: int, instrument: str, state: dict[str, Any]) -> dict[str, Any]:
         venues = {venue: {"vwap": self._fmt(v["notional"] / v["volume"]), "volume": self._fmt(v["volume"]), "last_received_ts_ms": self.latest_trades[venue]["received_ts_ms"]} for venue, v in state["venues"].items() if v["volume"] > 0}
@@ -104,12 +110,12 @@ class MarketAggregator:
         levels = [(_dec(level["price"]), _dec(level["quantity"])) for level in raw[:15]]
         return sorted(levels, key=lambda x: x[0], reverse=reverse)
 
-    def _aggregate_side(self, books: dict[str, VenueBook], side: str, reverse: bool) -> list[dict[str, Any]]:
+    def _aggregate_side(self, books: dict[str, VenueBook], side: str, reverse: bool, rounding: str) -> list[dict[str, Any]]:
         grouped: dict[Decimal, dict[str, Decimal]] = defaultdict(lambda: defaultdict(Decimal))
         for venue, book in books.items():
             for price, quantity in getattr(book, side):
-                # Decimal floor creates stable, explicit price buckets.
-                grouped[(price / self.tick).to_integral_value(rounding=ROUND_DOWN) * self.tick][venue] += quantity
+                bucket = (price / self.tick).to_integral_value(rounding=rounding) * self.tick
+                grouped[bucket][venue] += quantity
         result = []
         for price in sorted(grouped, reverse=reverse)[: self.depth]:
             contributions = {venue: self._fmt(qty) for venue, qty in sorted(grouped[price].items())}

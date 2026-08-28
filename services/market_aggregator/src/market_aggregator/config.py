@@ -46,7 +46,9 @@ class Settings:
             trade_group=os.getenv("TRADE_CONSUMER_GROUP", "market_aggregator_trades"),
             group_start_id=os.getenv("AGGREGATOR_GROUP_START_ID", "0"),
             consumer_name=os.getenv("CONSUMER_NAME", f"aggregator-{host}"),
-            price_tick=os.getenv("AGGREGATION_PRICE_TICK", "0.01"),
+            # $1 buckets absorb small cross-venue price discrepancies. Keep
+            # the legacy env name so deployments can tune this safely.
+            price_tick=os.getenv("AGGREGATION_PRICE_TICK", "1.00"),
             book_depth=_int("AGGREGATION_BOOK_DEPTH", 10),
             freshness_ms=_int("AGGREGATION_FRESHNESS_MS", 5000),
             read_count=_int("AGGREGATOR_READ_COUNT", 200),
