@@ -11,6 +11,8 @@ dependencies = [
     "redis>=6.2,<9",
     "websockets>=15,<18",
     "orjson>=3.10,<4",
+    "PyJWT>=2.10,<3",
+    "cryptography>=44,<46",
     "uvloop>=0.22,<1; sys_platform != 'win32' and platform_python_implementation == 'CPython'",
 ]
 

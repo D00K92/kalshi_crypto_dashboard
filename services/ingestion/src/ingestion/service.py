@@ -29,7 +29,7 @@ class IngestionService:
             maxsize=settings.queue_maxsize,
         )
         self._feed = BinanceFeed(settings.binance_ws_url, self._pipeline)
-        self._coinbase = CoinbaseFeed(settings.coinbase_ws_url, settings.coinbase_product_id, self._pipeline)
+        self._coinbase = CoinbaseFeed(settings.coinbase_ws_url, settings.coinbase_product_id, self._pipeline, settings.coinbase_api_key, settings.coinbase_secret)
         self._deribit = DeribitFeed(settings.deribit_ws_url, settings.deribit_instrument, self._pipeline)
         self._bybit = BybitFeed(settings.bybit_ws_url, settings.bybit_symbol, self._pipeline)
 

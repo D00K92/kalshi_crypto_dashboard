@@ -1,4 +1,4 @@
-"""Coinbase Exchange WebSocket adapter for BTC-USD matches."""
+"""Coinbase Advanced Trade WebSocket adapter for BTC-USD trades and L2."""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ from websockets.asyncio.client import connect
 
 from ingestion.models import BookLevel, BookSnapshot, Trade
 from ingestion.pipeline.event_pipeline import EventPipeline
+from ingestion.adapters.coinbase_auth import build_coinbase_ws_jwt
 
 LOGGER = logging.getLogger(__name__)
 VENUE = "coinbase"
@@ -74,6 +75,40 @@ class CoinbaseBook:
             venue=VENUE, instrument=self.product_id, sequence=self.sequence, bids=bids, asks=asks,
             exchange_ts_ms=None, received_ts_ms=received_ts_ms, depth=max(len(bids), len(asks)))
 
+    def apply_advanced(self, event: dict[str, object], received_ts_ms: int) -> BookSnapshot | None:
+        """Apply an Advanced Trade l2_data event (snapshot or update)."""
+        event_type = event.get("type")
+        if event_type == "snapshot":
+            self.bids.clear()
+            self.asks.clear()
+        elif event_type != "update":
+            return None
+        updates = event.get("updates")
+        if not isinstance(updates, list):
+            raise CoinbaseMessageError("l2 event updates must be an array")
+        for update in updates:
+            if not isinstance(update, dict):
+                raise CoinbaseMessageError("l2 update must be an object")
+            side = update.get("side")
+            target = self.bids if side == "bid" else self.asks if side in {"offer", "ask"} else None
+            if target is None:
+                raise CoinbaseMessageError("l2 update side must be bid or offer")
+            price = _text(update.get("price_level"), "price_level")
+            quantity = _text(update.get("new_quantity"), "new_quantity")
+            if quantity == "0":
+                target.pop(price, None)
+            else:
+                target[price] = quantity
+        self.sequence += 1
+        bids = tuple(BookLevel(p, self.bids[p]) for p in sorted(self.bids, key=float, reverse=True)[:MAX_BOOK_LEVELS])
+        asks = tuple(BookLevel(p, self.asks[p]) for p in sorted(self.asks, key=float)[:MAX_BOOK_LEVELS])
+        if not bids or not asks:
+            return None
+        return BookSnapshot(event_id=f"{VENUE}:{self.product_id}:book:{self.sequence}", event_type="book_snapshot",
+            venue=VENUE, instrument=self.product_id, sequence=self.sequence, bids=bids, asks=asks,
+            exchange_ts_ms=_timestamp(event.get("event_time")) if event.get("event_time") else None,
+            received_ts_ms=received_ts_ms, depth=max(len(bids), len(asks)))
+
 
 def _text(value: object, field: str) -> str:
     if not isinstance(value, str) or not value:
@@ -89,6 +124,20 @@ def _timestamp(value: object) -> int:
         raise CoinbaseMessageError("time must be an ISO-8601 timestamp") from exc
 
 
+def _parse_trade_dict(data: dict[str, object], received_ts_ms: int) -> Trade:
+    product = _text(data.get("product_id"), "product_id")
+    raw_trade_id = data.get("trade_id")
+    if isinstance(raw_trade_id, bool) or not isinstance(raw_trade_id, (str, int)):
+        raise CoinbaseMessageError("trade_id must be a string or integer")
+    side = _text(data.get("side"), "side").lower()
+    if side not in {"buy", "sell"}:
+        raise CoinbaseMessageError("side must be buy or sell")
+    return Trade(event_id=f"{VENUE}:{product}:trade:{raw_trade_id}", event_type="trade", venue=VENUE,
+        instrument=product, trade_id=str(raw_trade_id), price=_text(data.get("price"), "price"),
+        quantity=_text(data.get("size"), "size"), taker_side=side,
+        exchange_ts_ms=_timestamp(data.get("time")), received_ts_ms=received_ts_ms)
+
+
 def parse_coinbase_message(raw: str | bytes, *, received_ts_ms: int | None = None) -> Trade | None:
     if received_ts_ms is None:
         received_ts_ms = time.time_ns() // 1_000_000
@@ -96,60 +145,75 @@ def parse_coinbase_message(raw: str | bytes, *, received_ts_ms: int | None = Non
         data = orjson.loads(raw)
     except orjson.JSONDecodeError as exc:
         raise CoinbaseMessageError("frame is not valid JSON") from exc
-    if not isinstance(data, dict) or data.get("type") not in {"match", "last_match"}:
+    if not isinstance(data, dict):
         return None
-    product = _text(data.get("product_id"), "product_id")
-    raw_trade_id = data.get("trade_id")
-    if isinstance(raw_trade_id, bool) or not isinstance(raw_trade_id, (str, int)):
+    if data.get("type") in {"match", "last_match"}:
+        return _parse_trade_dict(data, received_ts_ms)
+    if data.get("channel") != "market_trades":
+        return None
+    events = data.get("events")
+    if not isinstance(events, list) or not events:
+        return None
+    first = events[0]
+    trades = first.get("trades") if isinstance(first, dict) else None
+    if not isinstance(trades, list) or not trades:
+        return None
+    trade = trades[0]
+    if not isinstance(trade, dict):
         raise CoinbaseMessageError("trade_id must be a string or integer")
-    trade_id = str(raw_trade_id)
-    side = _text(data.get("side"), "side").lower()
-    if side not in {"buy", "sell"}:
-        raise CoinbaseMessageError("side must be buy or sell")
-    return Trade(
-        event_id=f"{VENUE}:{product}:trade:{trade_id}", event_type="trade", venue=VENUE,
-        instrument=product, trade_id=trade_id, price=_text(data.get("price"), "price"),
-        quantity=_text(data.get("size"), "size"), taker_side=side,
-        exchange_ts_ms=_timestamp(data.get("time")), received_ts_ms=received_ts_ms,
-    )
+    return _parse_trade_dict({**trade, "time": trade.get("time") or data.get("timestamp")}, received_ts_ms)
 
 
 class CoinbaseFeed:
-    def __init__(self, ws_url: str, product_id: str, pipeline: EventPipeline) -> None:
+    def __init__(self, ws_url: str, product_id: str, pipeline: EventPipeline, api_key: str = "", secret: str = "") -> None:
         self._ws_url, self._product_id, self._pipeline = ws_url, product_id, pipeline
+        self._api_key, self._secret = api_key, secret
         self.health = CoinbaseHealth()
         self._book = CoinbaseBook(product_id)
         self._diagnostic_logged = False
 
     async def run(self) -> None:
+        # Coinbase level2 snapshots can exceed the websockets default 1 MiB
+        # frame limit. We cap the retained book to 15 levels after parsing.
         async for websocket in connect(self._ws_url, open_timeout=10, close_timeout=5, ping_interval=20,
-                                       max_size=1_048_576, max_queue=32, compression=None):
+                                       max_size=None, max_queue=32, compression=None):
             self.health.connected = True
             self.health.last_error = None
             LOGGER.info("venue_connected", extra={"venue": VENUE})
             try:
-                await websocket.send(orjson.dumps({"type": "subscribe", "product_ids": [self._product_id], "channels": ["matches", "level2"]}))
+                token = build_coinbase_ws_jwt(self._api_key, self._secret)
+                for channel in ("market_trades", "level2"):
+                    await websocket.send(orjson.dumps({"type": "subscribe", "channel": channel,
+                        "product_ids": [self._product_id], "jwt": token}))
                 async for raw in websocket:
                     received = time.time_ns() // 1_000_000
                     try:
                         event = parse_coinbase_message(raw, received_ts_ms=received)
+                        book_events: list[BookSnapshot] = []
                         if event is None:
                             decoded = orjson.loads(raw)
                             if isinstance(decoded, dict):
-                                message_type = decoded.get("type")
+                                message_type = decoded.get("type") or decoded.get("channel")
                                 if message_type in {"subscriptions", "error"}:
                                     LOGGER.info("coinbase_control_frame type=%s detail=%s", message_type, decoded.get("message"))
-                                if not self._diagnostic_logged and message_type in {"snapshot", "l2update"}:
-                                    LOGGER.info("coinbase_book_frame_shape type=%s product_id=%s keys=%s", message_type, decoded.get("product_id"), sorted(decoded.keys()))
+                                if not self._diagnostic_logged and decoded.get("channel") == "l2_data":
+                                    LOGGER.info("coinbase_book_frame_shape channel=%s keys=%s", message_type, sorted(decoded.keys()))
                                     self._diagnostic_logged = True
-                                if message_type in {"snapshot", "l2update"} and decoded.get("product_id", self._product_id) == self._product_id:
-                                    event = self._book.apply(decoded, received)
+                                if decoded.get("channel") == "l2_data":
+                                    for book_event in decoded.get("events", []):
+                                        if isinstance(book_event, dict) and book_event.get("product_id", self._product_id) == self._product_id:
+                                            snapshot = self._book.apply_advanced(book_event, received)
+                                            if snapshot is not None:
+                                                book_events.append(snapshot)
                     except CoinbaseMessageError as exc:
                         self.health.last_error = str(exc)
                         LOGGER.warning("venue_message_rejected", extra={"venue": VENUE, "reason": str(exc)})
                         continue
                     if event is not None:
                         await self._pipeline.put(event)
+                        self.health.last_event_received_ts_ms = received
+                    for book_event in book_events:
+                        await self._pipeline.put(book_event)
                         self.health.last_event_received_ts_ms = received
             except asyncio.CancelledError:
                 raise

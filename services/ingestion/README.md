@@ -1,8 +1,8 @@
 # Ingestion service
 
-The ingestion service consumes Binance Spot `BTCUSDT`, Coinbase Exchange
-`BTC-USD`, and Deribit spot `BTC_USDT` trades over WebSocket. Binance also
-provides top-15 order-book snapshots. Normalized events are appended to Redis
+The ingestion service consumes Binance Spot `BTCUSDT`, Coinbase Advanced Trade
+`BTC-USD`, and Deribit spot `BTC_USDT` trades over WebSocket. Binance, Coinbase,
+and Bybit provide top-15 order-book snapshots. Normalized events are appended to Redis
 Streams before a best-effort Redis Pub/Sub broadcast.
 
 Hot-path JSON encoding and decoding uses `orjson`. On supported CPython Unix
@@ -14,7 +14,7 @@ standard asyncio event loop.
 | Event | Redis Stream | Pub/Sub channel |
 |---|---|---|
 | Trade | `stream:ticks` | `pub:btc_ticks` |
-| Top-20 book snapshot | `stream:orderbook_snapshots` | `pub:orderbook` |
+| Top-15 book snapshot | `stream:orderbook_snapshots` | `pub:orderbook` |
 
 Consumers must deduplicate Stream events using the stable `event_id` field.
 
@@ -33,6 +33,17 @@ Run tests with:
 uv run pytest
 ```
 
+To inspect live Coinbase Level 2 data locally, export the CDP credentials and run:
+
+```bash
+export COINBASE_API_KEY='organizations/.../apiKeys/...'
+export COINBASE_SECRET="$(<coinbase_private_key.pem)"
+uv run python scripts/test_coinbase_ws.py --seconds 30
+```
+
+The diagnostic prints connection status and top-15 snapshots only; it never prints
+the API key, private key, or JWT. Use `--seconds 0` to run until interrupted.
+
 ## Configuration
 
 | Variable | Default |
@@ -42,8 +53,10 @@ uv run pytest
 | `REDIS_PORT` | `6379` |
 | `BINANCE_SYMBOL` | `btcusdt` |
 | `BINANCE_WS_URL` | Binance combined trade/depth stream |
-| `COINBASE_WS_URL` | `wss://ws-feed.exchange.coinbase.com` |
+| `COINBASE_WS_URL` | `wss://advanced-trade-ws.coinbase.com` |
 | `COINBASE_PRODUCT_ID` | `BTC-USD` |
+| `COINBASE_API_KEY` | unset; CDP API key name used for JWT authentication |
+| `COINBASE_SECRET` | unset; CDP ES256 private-key PEM (preserve newlines) |
 | `DERIBIT_WS_URL` | `wss://www.deribit.com/ws/api/v2` |
 | `DERIBIT_INSTRUMENT` | `BTC_USDT` |
 | `INGESTION_QUEUE_MAXSIZE` | `10000` |

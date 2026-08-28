@@ -33,6 +33,8 @@ class Settings:
     binance_ws_url: str
     coinbase_ws_url: str
     coinbase_product_id: str
+    coinbase_api_key: str
+    coinbase_secret: str
     deribit_ws_url: str
     deribit_instrument: str
     bybit_ws_url: str
@@ -52,8 +54,10 @@ class Settings:
         return cls(
             redis_url=_redis_url(),
             binance_ws_url=os.getenv("BINANCE_WS_URL", default_ws_url),
-            coinbase_ws_url=os.getenv("COINBASE_WS_URL", "wss://ws-feed.exchange.coinbase.com"),
+            coinbase_ws_url=os.getenv("COINBASE_WS_URL", "wss://advanced-trade-ws.coinbase.com"),
             coinbase_product_id=os.getenv("COINBASE_PRODUCT_ID", "BTC-USD"),
+            coinbase_api_key=os.getenv("COINBASE_API_KEY", ""),
+            coinbase_secret=os.getenv("COINBASE_SECRET", ""),
             deribit_ws_url=os.getenv("DERIBIT_WS_URL", "wss://www.deribit.com/ws/api/v2"),
             deribit_instrument=os.getenv("DERIBIT_INSTRUMENT", "BTC_USDT"),
             bybit_ws_url=os.getenv("BYBIT_WS_URL", "wss://stream.bybit.com/v5/public/spot"),
