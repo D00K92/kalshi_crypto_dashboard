@@ -1,0 +1,59 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: market-aggregator
+  labels:
+    app: market-aggregator
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: market-aggregator
+  template:
+    metadata:
+      labels:
+        app: market-aggregator
+    spec:
+      containers:
+      - name: market-aggregator
+        image: "${MARKET_AGGREGATOR_IMAGE}"
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: REDIS_HOST
+          value: "${REDIS_HOST}"
+        - name: REDIS_PORT
+          value: "${REDIS_PORT}"
+        - name: AGGREGATOR_OUTPUT_PREFIX
+          value: "market"
+        - name: HEALTH_PORT
+          value: "8080"
+        ports:
+        - name: health
+          containerPort: 8080
+        startupProbe:
+          httpGet:
+            path: /healthz
+            port: health
+          failureThreshold: 30
+          periodSeconds: 2
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: health
+          periodSeconds: 5
+          timeoutSeconds: 2
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: health
+          periodSeconds: 15
+          timeoutSeconds: 2
+        resources:
+          requests:
+            cpu: "250m"
+            memory: "256Mi"
+          limits:
+            cpu: "1000m"
+            memory: "512Mi"

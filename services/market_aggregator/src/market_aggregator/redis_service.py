@@ -9,6 +9,7 @@ from redis.exceptions import ResponseError
 
 from market_aggregator.aggregation import MarketAggregator
 from market_aggregator.config import Settings
+from market_aggregator.health import HealthServer
 
 LOGGER = logging.getLogger(__name__)
 
@@ -18,19 +19,26 @@ class AggregatorService:
         self.settings = settings
         self.client = redis.Redis.from_url(settings.redis_url, decode_responses=False, health_check_interval=30)
         self.state = MarketAggregator(settings.price_tick, settings.book_depth, settings.freshness_ms)
+        self.health = HealthServer(settings.health_port)
 
     async def run(self, stop_event: asyncio.Event) -> None:
-        await self.client.ping()
-        await self._ensure_group(self.settings.book_stream, self.settings.book_group)
-        await self._ensure_group(self.settings.trade_stream, self.settings.trade_group)
-        LOGGER.info("market_aggregator_ready")
-        book_task = asyncio.create_task(self._consume(self.settings.book_stream, self.settings.book_group, self._handle_book))
-        trade_task = asyncio.create_task(self._consume(self.settings.trade_stream, self.settings.trade_group, self._handle_trade))
+        await self.health.start()
         try:
+            await self.client.ping()
+            await self._ensure_group(self.settings.book_stream, self.settings.book_group)
+            await self._ensure_group(self.settings.trade_stream, self.settings.trade_group)
+            self.health.ready = True
+            LOGGER.info("market_aggregator_ready")
+            book_task = asyncio.create_task(self._consume(self.settings.book_stream, self.settings.book_group, self._handle_book))
+            trade_task = asyncio.create_task(self._consume(self.settings.trade_stream, self.settings.trade_group, self._handle_trade))
             await stop_event.wait()
         finally:
-            book_task.cancel(); trade_task.cancel()
-            await asyncio.gather(book_task, trade_task, return_exceptions=True)
+            self.health.ready = False
+            for task in (locals().get("book_task"), locals().get("trade_task")):
+                if task:
+                    task.cancel()
+            await asyncio.gather(*(task for task in (locals().get("book_task"), locals().get("trade_task")) if task), return_exceptions=True)
+            await self.health.close()
             await self.client.aclose()
 
     async def _consume(self, stream: str, group: str, handler) -> None:

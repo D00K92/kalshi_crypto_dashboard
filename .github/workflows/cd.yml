@@ -71,6 +71,15 @@ jobs:
         docker build --platform linux/amd64 -t "${IMAGE_URI}:${IMAGE_TAG}" services/ingestion
         docker push "${IMAGE_URI}:${IMAGE_TAG}"
 
+    - name: Build and push market aggregator image
+      env:
+        IMAGE_URI: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/market-aggregator
+        IMAGE_TAG: ${{ github.event.workflow_run.head_sha || github.sha }}
+      run: |
+        set -euo pipefail
+        docker build --platform linux/amd64 -t "${IMAGE_URI}:${IMAGE_TAG}" services/market_aggregator
+        docker push "${IMAGE_URI}:${IMAGE_TAG}"
+
     - name: Get GKE credentials
       uses: google-github-actions/get-gke-credentials@v3
       with:
@@ -96,6 +105,7 @@ jobs:
       env:
         GCS_EXPORTER_IMAGE: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/${{ env.IMAGE_NAME }}:${{ github.event.workflow_run.head_sha || github.sha }}
         INGESTION_IMAGE: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/ingestion:${{ github.event.workflow_run.head_sha || github.sha }}
+        MARKET_AGGREGATOR_IMAGE: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/market-aggregator:${{ github.event.workflow_run.head_sha || github.sha }}
         REDIS_HOST: ${{ steps.redis.outputs.host }}
       run: |
         set -euo pipefail
@@ -105,9 +115,13 @@ jobs:
         envsubst '${INGESTION_IMAGE} ${REDIS_HOST} ${REDIS_PORT}' \
           < k8s/ingestion-deployment.yaml \
           | kubectl apply -f -
+        envsubst '${MARKET_AGGREGATOR_IMAGE} ${REDIS_HOST} ${REDIS_PORT}' \
+          < k8s/market-aggregator-deployment.yaml \
+          | kubectl apply -f -
 
     - name: Verify rollouts
       run: |
         set -euo pipefail
         kubectl rollout status deployment/gcs-exporter --timeout=5m
         kubectl rollout status deployment/ingestion-service --timeout=5m
+        kubectl rollout status deployment/market-aggregator --timeout=5m

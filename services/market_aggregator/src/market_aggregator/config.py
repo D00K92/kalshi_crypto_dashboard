@@ -32,6 +32,7 @@ class Settings:
     read_count: int
     read_block_ms: int
     output_prefix: str
+    health_port: int
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -49,4 +50,5 @@ class Settings:
             read_count=_int("AGGREGATOR_READ_COUNT", 200),
             read_block_ms=_int("AGGREGATOR_READ_BLOCK_MS", 1000),
             output_prefix=os.getenv("AGGREGATOR_OUTPUT_PREFIX", "market"),
+            health_port=_int("HEALTH_PORT", 8080),
         )

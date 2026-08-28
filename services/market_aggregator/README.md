@@ -16,6 +16,9 @@ Configuration is environment-based; see `src/market_aggregator/config.py`.
 Set `AGGREGATOR_OUTPUT_PREFIX` for isolated staging runs; it defaults to
 `market`.
 
+Health endpoints listen on `HEALTH_PORT` (default `8080`): `/healthz` reports
+the process and `/readyz` reports Redis/group readiness.
+
 Inspect the latest state and watch live updates:
 
 ```bash
