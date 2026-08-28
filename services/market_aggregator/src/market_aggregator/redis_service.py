@@ -51,22 +51,23 @@ class AggregatorService:
                         if payload is None:
                             raise ValueError("missing payload")
                         event = orjson.loads(payload)
-                        await handler(event)
+                        published_ts_ms = int(redis_id.split(b"-", 1)[0] if isinstance(redis_id, bytes) else str(redis_id).split("-", 1)[0])
+                        await handler(event, published_ts_ms)
                         await self.client.xack(stream, group, redis_id)
                     except (ValueError, TypeError, orjson.JSONDecodeError) as exc:
                         LOGGER.warning("event_rejected", extra={"stream": stream, "redis_id": redis_id, "error": str(exc)})
                         await self.client.xack(stream, group, redis_id)
 
-    async def _handle_book(self, event: dict) -> None:
+    async def _handle_book(self, event: dict, published_ts_ms: int | None = None) -> None:
         if event.get("event_type") != "book_snapshot":
             return
-        snapshot = self.state.apply_book(event)
+        snapshot = self.state.apply_book(event, published_ts_ms=published_ts_ms)
         encoded = orjson.dumps(snapshot)
         prefix = self.settings.output_prefix
         await self.client.set(f"{prefix}:book:BTCUSDT:latest", encoded)
         await self.client.publish(f"{prefix}:aggregated_orderbook", encoded)
 
-    async def _handle_trade(self, event: dict) -> None:
+    async def _handle_trade(self, event: dict, published_ts_ms: int | None = None) -> None:
         if event.get("event_type") != "trade":
             return
         spot = self.state.apply_trade(event)

@@ -40,10 +40,13 @@ class MarketAggregator:
         self.cvd = Decimal("0")
         self._seen_events: set[str] = set()
 
-    def apply_book(self, event: dict[str, Any]) -> dict[str, Any]:
+    def apply_book(self, event: dict[str, Any], published_ts_ms: int | None = None) -> dict[str, Any]:
         self._remember_event(event)
         venue = str(event["venue"]).lower()
-        received = int(event.get("received_ts_ms") or time.time() * 1000)
+        # Use Redis publication time for freshness. The venue receive time is
+        # captured before the bounded ingestion queue and may be old by the
+        # time this consumer sees the event.
+        received = int(published_ts_ms or event.get("received_ts_ms") or time.time() * 1000)
         self.books[venue] = VenueBook(
             bids=self._levels(event.get("bids", []), reverse=True),
             asks=self._levels(event.get("asks", []), reverse=False),

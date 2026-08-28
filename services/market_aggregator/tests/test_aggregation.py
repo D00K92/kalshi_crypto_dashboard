@@ -53,3 +53,18 @@ def test_price_bucketing_is_side_aware_and_removes_crossing_bids():
     assert [level["price"] for level in snapshot["bids"]] == ["99"]
     assert [level["price"] for level in snapshot["asks"]] == ["100", "101"]
     assert snapshot["bucket_method"] == "bid_floor_ask_ceiling"
+
+
+def test_book_freshness_uses_redis_publication_time():
+    agg = MarketAggregator(freshness_ms=5_000)
+    now = int(time.time() * 1000)
+    snapshot = agg.apply_book({
+        "event_id": "delayed-book",
+        "event_type": "book_snapshot",
+        "venue": "binance",
+        "instrument": "BTCUSDT",
+        "received_ts_ms": now - 60_000,
+        "bids": [{"price": "100", "quantity": "1"}],
+        "asks": [{"price": "101", "quantity": "1"}],
+    }, published_ts_ms=now)
+    assert snapshot["venues"] == ["binance"]
