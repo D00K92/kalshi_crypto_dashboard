@@ -20,6 +20,7 @@ from ingestion.pipeline.event_pipeline import EventPipeline
 
 LOGGER = logging.getLogger(__name__)
 CHANNELS = ("ticker", "trade", "orderbook_delta")
+ChannelSids = dict[str, int]
 
 
 class KalshiFeed:
@@ -36,8 +37,8 @@ class KalshiFeed:
     def _subscribe(self, market_tickers: tuple[str, ...], message_id: int) -> bytes:
         return orjson.dumps({"id": message_id, "cmd": "subscribe", "params": {"channels": list(CHANNELS), "market_tickers": list(market_tickers)}})
 
-    def _update(self, sid: int, action: str, market_tickers: tuple[str, ...], message_id: int) -> bytes:
-        return orjson.dumps({"id": message_id, "cmd": "update_subscription", "params": {"sids": [sid], "market_tickers": list(market_tickers), "action": action}})
+    def _update(self, sids: tuple[int, ...], action: str, market_tickers: tuple[str, ...], message_id: int) -> bytes:
+        return orjson.dumps({"id": message_id, "cmd": "update_subscription", "params": {"sids": list(sids), "market_tickers": list(market_tickers), "action": action}})
 
     async def run(self, stop_event: asyncio.Event) -> None:
         if not self._settings.kalshi_api_key or not self._settings.kalshi_private_key:
@@ -66,7 +67,7 @@ class KalshiFeed:
         if active is None:
             return
         message_id = 1
-        sid: int | None = None
+        channel_sids: ChannelSids = {}
         market_context: dict[str, KalshiEventSet] = {ticker: active for ticker in active.market_tickers}
         next_discovery = time.monotonic()
         headers = build_auth_headers(self._settings.kalshi_api_key, self._private_key, path=WS_PATH)
@@ -76,8 +77,7 @@ class KalshiFeed:
             LOGGER.info("venue_connected", extra={"venue": "kalshi", "event_ticker": active.event_ticker, "markets": len(active.market_tickers)})
             while not stop_event.is_set():
                 if time.monotonic() >= next_discovery:
-                    await self._check_rollover(websocket, sid, message_context=market_context, message_id=message_id)
-                    message_id += 1
+                    message_id = await self._check_rollover(websocket, channel_sids, message_context=market_context, message_id=message_id)
                     next_discovery = time.monotonic() + 15.0
                 try:
                     raw = await asyncio.wait_for(websocket.recv(), timeout=2.0)
@@ -87,9 +87,11 @@ class KalshiFeed:
                 if not isinstance(frame, dict):
                     continue
                 if frame.get("type") == "subscribed":
-                    candidate_sid = frame.get("msg", {}).get("sid")
-                    if candidate_sid is not None:
-                        sid = int(candidate_sid)
+                    message = frame.get("msg", {})
+                    candidate_sid = message.get("sid")
+                    channel = message.get("channel")
+                    if candidate_sid is not None and channel in CHANNELS:
+                        channel_sids[str(channel)] = int(candidate_sid)
                     continue
                 market = frame.get("msg", {}).get("market_ticker")
                 event_set = market_context.get(market)
@@ -101,9 +103,10 @@ class KalshiFeed:
                         continue
                     if self._state.pending and event_set.event_ticker == self._state.pending.event_ticker:
                         old_markets = self._state.confirm(event_set.event_ticker)
-                        if sid is not None and old_markets:
-                            await websocket.send(self._update(sid, "delete_markets", tuple(old_markets), message_id))
-                            message_id += 1
+                        if old_markets:
+                            message_id = await self._update_all_channels(
+                                websocket, channel_sids, "delete_markets", tuple(old_markets), message_id
+                            )
                         for old_market in old_markets:
                             self._books.pop(old_market, None)
                         LOGGER.info("event_rollover_complete", extra={"venue": "kalshi", "event_ticker": event_set.event_ticker, "generation": self._state.generation})
@@ -120,19 +123,33 @@ class KalshiFeed:
                     self.last_error = str(exc)
                     LOGGER.warning("venue_message_rejected", extra={"venue": "kalshi", "reason": str(exc)})
 
-    async def _check_rollover(self, websocket: Any, sid: int | None, *, message_context: dict[str, KalshiEventSet], message_id: int) -> None:
-        if sid is None:
-            # Do not stage a candidate until the subscription SID is known;
-            # update_subscription cannot be issued safely without it.
-            return
+    async def _check_rollover(self, websocket: Any, channel_sids: ChannelSids, *, message_context: dict[str, KalshiEventSet], message_id: int) -> int:
+        if not all(channel in channel_sids for channel in CHANNELS):
+            # Do not stage a candidate until every channel SID is known;
+            # update_subscription must cover ticker, trade, and orderbook streams.
+            return message_id
         try:
             candidate = await self._discovery.discover(self._settings.kalshi_series_ticker)
         except Exception as exc:
             self.last_error = str(exc)
             LOGGER.warning("kalshi_discovery_failed", extra={"reason": str(exc)})
-            return
+            return message_id
         if not self._state.stage(candidate):
-            return
+            return message_id
         for ticker in candidate.market_tickers:
             message_context[ticker] = candidate
-        await websocket.send(self._update(sid, "add_markets", candidate.market_tickers, message_id))
+        return await self._update_all_channels(
+            websocket, channel_sids, "add_markets", candidate.market_tickers, message_id
+        )
+
+    async def _update_all_channels(
+        self,
+        websocket: Any,
+        channel_sids: ChannelSids,
+        action: str,
+        market_tickers: tuple[str, ...],
+        message_id: int,
+    ) -> int:
+        sids = tuple(channel_sids[channel] for channel in CHANNELS)
+        await websocket.send(self._update(sids, action, market_tickers, message_id))
+        return message_id + 1
