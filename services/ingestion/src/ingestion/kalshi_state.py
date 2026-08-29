@@ -43,9 +43,9 @@ class KalshiBookState:
             raise KalshiStateError(f"unsupported event type {event.event_type}")
         if self.last_sequence == 0:
             raise KalshiStateError("cannot apply delta before a snapshot")
-        if event.sequence != self.last_sequence + 1:
+        if event.sequence <= self.last_sequence:
             raise KalshiStateError(
-                f"orderbook sequence gap: expected {self.last_sequence + 1}, got {event.sequence}"
+                f"stale orderbook sequence: last {self.last_sequence}, got {event.sequence}"
             )
         if event.delta_price_dollars is None or event.delta_fp is None or event.delta_side is None:
             raise KalshiStateError("orderbook delta is missing price, quantity, or side")

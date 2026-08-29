@@ -24,11 +24,22 @@ def test_book_snapshot_then_delta_updates_and_removes_levels() -> None:
     assert book.levels() == ((), (("0.58", "3"),))
 
 
-def test_book_rejects_sequence_gap() -> None:
+def test_book_accepts_subscription_wide_sequence_gap() -> None:
     book = KalshiBookState()
-    book.apply(_event("kalshi_orderbook_snapshot", 4))
-    with pytest.raises(KalshiStateError, match="sequence gap"):
-        book.apply(_event("kalshi_orderbook_delta", 6, price="0.42", delta="1", side="yes"))
+    book.apply(_event("kalshi_orderbook_snapshot", 78))
+    book.apply(_event("kalshi_orderbook_delta", 189, price="0.42", delta="1", side="yes"))
+    assert book.last_sequence == 189
+    assert book.levels() == ((("0.42", "1"),), ())
+
+
+def test_book_rejects_stale_or_duplicate_delta_sequence() -> None:
+    book = KalshiBookState()
+    book.apply(_event("kalshi_orderbook_snapshot", 78))
+    book.apply(_event("kalshi_orderbook_delta", 189, price="0.42", delta="1", side="yes"))
+    with pytest.raises(KalshiStateError, match="stale orderbook sequence"):
+        book.apply(_event("kalshi_orderbook_delta", 189, price="0.42", delta="1", side="yes"))
+    with pytest.raises(KalshiStateError, match="stale orderbook sequence"):
+        book.apply(_event("kalshi_orderbook_delta", 188, price="0.42", delta="1", side="yes"))
 
 
 def test_rollover_keeps_old_markets_until_confirmation() -> None:
