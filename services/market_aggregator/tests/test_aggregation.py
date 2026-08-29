@@ -2,6 +2,7 @@ from decimal import Decimal
 import time
 
 from market_aggregator.aggregation import MarketAggregator
+from market_aggregator.config import Settings
 
 
 def trade(venue, price, quantity, side="buy", ts=10_000):
@@ -86,3 +87,8 @@ def test_adaptive_tick_uses_finest_common_price_precision():
     assert snapshot["price_tick"] == "0.01"
     assert snapshot["bids"][0]["price"] == "100.01"
     assert snapshot["asks"][0]["price"] == "100.03"
+
+
+def test_auto_price_tick_config_enables_inference(monkeypatch):
+    monkeypatch.setenv("AGGREGATION_PRICE_TICK", "auto")
+    assert Settings.from_env().price_tick is None

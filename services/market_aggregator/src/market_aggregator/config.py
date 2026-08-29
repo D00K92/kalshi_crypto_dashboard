@@ -38,6 +38,8 @@ class Settings:
     @classmethod
     def from_env(cls) -> "Settings":
         host = os.getenv("HOSTNAME", "local")
+        configured_tick = os.getenv("AGGREGATION_PRICE_TICK")
+        price_tick = None if not configured_tick or configured_tick.lower() == "auto" else configured_tick
         return cls(
             redis_url=_redis_url(),
             book_stream=os.getenv("BOOK_STREAM", "stream:orderbook_snapshots"),
@@ -47,7 +49,7 @@ class Settings:
             group_start_id=os.getenv("AGGREGATOR_GROUP_START_ID", "0"),
             consumer_name=os.getenv("CONSUMER_NAME", f"aggregator-{host}"),
             # Infer the finest common price precision unless explicitly set.
-            price_tick=os.getenv("AGGREGATION_PRICE_TICK") or None,
+            price_tick=price_tick,
             book_depth=_int("AGGREGATION_BOOK_DEPTH", 10),
             freshness_ms=_int("AGGREGATION_FRESHNESS_MS", 5000),
             read_count=_int("AGGREGATOR_READ_COUNT", 200),
