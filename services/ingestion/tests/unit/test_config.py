@@ -21,3 +21,15 @@ def test_explicit_redis_url_takes_precedence(monkeypatch) -> None:
     settings = Settings.from_env()
 
     assert settings.redis_url == "rediss://redis.example:6380/2"
+
+
+def test_kalshi_rsa_path_loads_private_key_without_exposing_contents(monkeypatch, tmp_path) -> None:
+    key_file = tmp_path / "kalshi.pem"
+    key_file.write_text("test-private-key", encoding="utf-8")
+    monkeypatch.setenv("KALSHI_API_KEY", "key-id")
+    monkeypatch.setenv("KALSHI_RSA_PATH", str(key_file))
+    monkeypatch.delenv("KALSHI_PRIVATE_KEY", raising=False)
+
+    settings = Settings.from_env()
+
+    assert settings.kalshi_private_key == "test-private-key"

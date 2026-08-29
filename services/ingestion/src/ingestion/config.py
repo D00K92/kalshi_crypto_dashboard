@@ -4,6 +4,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import os
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+
+_LOCAL_ENV = Path(__file__).resolve().parents[2] / ".env"
 
 
 def _positive_int(name: str, default: int) -> int:
@@ -41,6 +47,11 @@ class Settings:
     bybit_symbol: str
     kraken_ws_url: str
     kraken_symbol: str
+    kalshi_ws_url: str
+    kalshi_rest_url: str
+    kalshi_api_key: str
+    kalshi_private_key: str
+    kalshi_series_ticker: str
     queue_maxsize: int
     stream_maxlen: int
     shutdown_grace_seconds: int
@@ -48,11 +59,23 @@ class Settings:
 
     @classmethod
     def from_env(cls) -> "Settings":
+        # Local development convenience; Kubernetes injects environment variables
+        # directly and therefore does not depend on this file.
+        load_dotenv(_LOCAL_ENV, override=False)
         symbol = os.getenv("BINANCE_SYMBOL", "btcusdt").lower()
         default_streams = f"{symbol}@trade/{symbol}@depth20@100ms"
         default_ws_url = (
             "wss://stream.binance.com:9443/stream?streams=" + default_streams
         )
+        rsa_path = os.getenv("KALSHI_RSA_PATH", "").strip()
+        private_key = os.getenv("KALSHI_PRIVATE_KEY", "")
+        if rsa_path:
+            key_file = Path(rsa_path).expanduser()
+            try:
+                private_key = key_file.read_text(encoding="utf-8")
+            except OSError as exc:
+                raise ValueError(f"KALSHI_RSA_PATH is not readable: {key_file}") from exc
+
         return cls(
             redis_url=_redis_url(),
             binance_ws_url=os.getenv("BINANCE_WS_URL", default_ws_url),
@@ -66,6 +89,15 @@ class Settings:
             bybit_symbol=os.getenv("BYBIT_SYMBOL", "BTCUSDT"),
             kraken_ws_url=os.getenv("KRAKEN_WS_URL", "wss://ws.kraken.com/v2"),
             kraken_symbol=os.getenv("KRAKEN_SYMBOL", "BTC/USD"),
+            kalshi_ws_url=os.getenv(
+                "KALSHI_WS_URL", "wss://external-api-ws.kalshi.com/trade-api/ws/v2"
+            ),
+            kalshi_rest_url=os.getenv(
+                "KALSHI_REST_URL", "https://external-api.kalshi.com"
+            ),
+            kalshi_api_key=os.getenv("KALSHI_API_KEY", ""),
+            kalshi_private_key=private_key,
+            kalshi_series_ticker=os.getenv("KALSHI_SERIES_TICKER", "KXBTCD"),
             queue_maxsize=_positive_int("INGESTION_QUEUE_MAXSIZE", 10_000),
             stream_maxlen=_positive_int("INGESTION_STREAM_MAXLEN", 1_000_000),
             shutdown_grace_seconds=_positive_int(

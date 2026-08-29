@@ -105,3 +105,78 @@ class BookSnapshot:
 
     def to_json(self) -> bytes:
         return orjson.dumps(self)
+
+
+@dataclass(frozen=True, slots=True)
+class KalshiTicker:
+    stream_name: ClassVar[str] = "stream:kalshi_tickers"
+    pubsub_channel: ClassVar[str] = "pub:kalshi_tickers"
+
+    event_id: str
+    event_type: Literal["kalshi_ticker"]
+    venue: Literal["kalshi"]
+    instrument: str
+    series_ticker: str
+    event_ticker: str
+    market_ticker: str
+    yes_bid_dollars: str | None
+    yes_ask_dollars: str | None
+    last_price_dollars: str | None
+    volume: str | None
+    open_interest: str | None
+    exchange_ts_ms: int
+    received_ts_ms: int
+    schema_version: int = SCHEMA_VERSION
+
+    def to_json(self) -> bytes:
+        return orjson.dumps(self)
+
+
+@dataclass(frozen=True, slots=True)
+class KalshiTrade:
+    stream_name: ClassVar[str] = "stream:kalshi_trades"
+    pubsub_channel: ClassVar[str] = "pub:kalshi_trades"
+
+    event_id: str
+    event_type: Literal["kalshi_trade"]
+    venue: Literal["kalshi"]
+    instrument: str
+    series_ticker: str
+    event_ticker: str
+    market_ticker: str
+    trade_id: str
+    yes_price_dollars: str
+    count: str
+    taker_side: Literal["yes", "no"]
+    exchange_ts_ms: int
+    received_ts_ms: int
+    schema_version: int = SCHEMA_VERSION
+
+    def to_json(self) -> bytes:
+        return orjson.dumps(self)
+
+
+@dataclass(frozen=True, slots=True)
+class KalshiOrderBookSnapshot:
+    stream_name: ClassVar[str] = "stream:kalshi_orderbook"
+    pubsub_channel: ClassVar[str] = "pub:kalshi_orderbook"
+
+    event_id: str
+    event_type: Literal["kalshi_orderbook_snapshot", "kalshi_orderbook_delta"]
+    venue: Literal["kalshi"]
+    instrument: str
+    series_ticker: str
+    event_ticker: str
+    market_ticker: str
+    sequence: int
+    yes_bids: tuple[BookLevel, ...]
+    no_bids: tuple[BookLevel, ...]
+    exchange_ts_ms: int | None
+    received_ts_ms: int
+    delta_price_dollars: str | None = None
+    delta_fp: str | None = None
+    delta_side: Literal["yes", "no"] | None = None
+    schema_version: int = SCHEMA_VERSION
+
+    def to_json(self) -> bytes:
+        return orjson.dumps(self)

@@ -14,6 +14,7 @@ dependencies = [
     "PyJWT>=2.10,<3",
     "cryptography>=44,<46",
     "uvloop>=0.22,<1; sys_platform != 'win32' and platform_python_implementation == 'CPython'",
+    "python-dotenv>=1.1,<2",
 ]
 
 [project.scripts]

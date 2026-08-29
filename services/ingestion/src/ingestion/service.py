@@ -10,6 +10,7 @@ from ingestion.adapters.coinbase import CoinbaseFeed
 from ingestion.adapters.deribit import DeribitFeed
 from ingestion.adapters.bybit import BybitFeed
 from ingestion.adapters.kraken import KrakenFeed
+from ingestion.kalshi_feed import KalshiFeed
 from ingestion.config import Settings
 from ingestion.pipeline.event_pipeline import EventPipeline
 from ingestion.pipeline.redis_publisher import RedisPublisher
@@ -34,6 +35,11 @@ class IngestionService:
         self._deribit = DeribitFeed(settings.deribit_ws_url, settings.deribit_instrument, self._pipeline)
         self._bybit = BybitFeed(settings.bybit_ws_url, settings.bybit_symbol, self._pipeline)
         self._kraken = KrakenFeed(settings.kraken_ws_url, settings.kraken_symbol, self._pipeline)
+        self._kalshi = (
+            KalshiFeed(settings, self._pipeline)
+            if settings.kalshi_api_key and settings.kalshi_private_key
+            else None
+        )
 
     async def run(self, stop_event: asyncio.Event) -> None:
         await self._publisher.ready()
@@ -47,10 +53,14 @@ class IngestionService:
         deribit_task = asyncio.create_task(self._deribit.run(), name="deribit-feed")
         bybit_task = asyncio.create_task(self._bybit.run(), name="bybit-feed")
         kraken_task = asyncio.create_task(self._kraken.run(), name="kraken-feed")
+        kalshi_task = asyncio.create_task(self._kalshi.run(stop_event), name="kalshi-feed") if self._kalshi else None
         stop_task = asyncio.create_task(stop_event.wait(), name="shutdown-signal")
+        feed_tasks = {feed_task, coinbase_task, deribit_task, bybit_task, kraken_task}
+        if kalshi_task:
+            feed_tasks.add(kalshi_task)
         try:
             done, _ = await asyncio.wait(
-                {pipeline_task, feed_task, coinbase_task, deribit_task, bybit_task, kraken_task, stop_task},
+                {pipeline_task, *feed_tasks, stop_task},
                 return_when=asyncio.FIRST_COMPLETED,
             )
             if stop_task not in done:
@@ -68,7 +78,9 @@ class IngestionService:
             deribit_task.cancel()
             bybit_task.cancel()
             kraken_task.cancel()
-            await asyncio.gather(stop_task, feed_task, coinbase_task, deribit_task, bybit_task, kraken_task, return_exceptions=True)
+            if kalshi_task:
+                kalshi_task.cancel()
+            await asyncio.gather(stop_task, *feed_tasks, return_exceptions=True)
 
             try:
                 async with asyncio.timeout(self._settings.shutdown_grace_seconds):
