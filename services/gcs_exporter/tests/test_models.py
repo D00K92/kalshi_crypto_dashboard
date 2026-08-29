@@ -5,7 +5,14 @@ from datetime import datetime, timezone
 import orjson
 import pytest
 
-from gcs_exporter.models import OrderBookRow, RawStreamEntry, TradeRow
+from gcs_exporter.models import (
+    KalshiOrderBookRow,
+    KalshiTickerRow,
+    KalshiTradeRow,
+    OrderBookRow,
+    RawStreamEntry,
+    TradeRow,
+)
 
 
 def make_entry(
@@ -74,3 +81,74 @@ def test_order_book_row_truncates_more_than_15_levels() -> None:
     row = OrderBookRow.from_entry(RawStreamEntry("1-0", {b"payload": orjson.dumps(payload)}))
     assert len(row.bids) == 15
     assert row.depth == 15
+
+
+def kalshi_ticker_entry(redis_id: str = "1724677200000-0") -> RawStreamEntry:
+    payload = {
+        "event_id": "kalshi:KXBTCD-TEST-1:ticker:abc",
+        "event_type": "kalshi_ticker",
+        "venue": "kalshi",
+        "instrument": "BTCUSD",
+        "series_ticker": "KXBTCD",
+        "event_ticker": "KXBTCD-TEST",
+        "market_ticker": "KXBTCD-TEST-1",
+        "yes_bid_dollars": "0.42",
+        "yes_ask_dollars": "0.43",
+        "last_price_dollars": None,
+        "volume": "123.00",
+        "open_interest": "456.00",
+        "exchange_ts_ms": 1_724_677_200_000,
+        "received_ts_ms": 1_724_677_200_001,
+        "schema_version": 1,
+    }
+    return RawStreamEntry(redis_id, {b"payload": orjson.dumps(payload)})
+
+
+def kalshi_trade_entry(redis_id: str = "1724677200001-0") -> RawStreamEntry:
+    payload = {
+        "event_id": "kalshi:KXBTCD-TEST-1:trade:trade-7",
+        "event_type": "kalshi_trade",
+        "venue": "kalshi",
+        "instrument": "BTCUSD",
+        "series_ticker": "KXBTCD",
+        "event_ticker": "KXBTCD-TEST",
+        "market_ticker": "KXBTCD-TEST-1",
+        "trade_id": "trade-7",
+        "yes_price_dollars": "0.51",
+        "count": "3.00",
+        "taker_side": "no",
+        "exchange_ts_ms": 1_724_677_200_000,
+        "received_ts_ms": 1_724_677_200_001,
+        "schema_version": 1,
+    }
+    return RawStreamEntry(redis_id, {b"payload": orjson.dumps(payload)})
+
+
+def kalshi_orderbook_entry(redis_id: str = "1724677200002-0") -> RawStreamEntry:
+    payload = {
+        "event_id": "kalshi:KXBTCD-TEST-1:book:8",
+        "event_type": "kalshi_orderbook_snapshot",
+        "venue": "kalshi",
+        "instrument": "BTCUSD",
+        "series_ticker": "KXBTCD",
+        "event_ticker": "KXBTCD-TEST",
+        "market_ticker": "KXBTCD-TEST-1",
+        "sequence": 8,
+        "yes_bids": [{"price": "0.42", "quantity": "10.00"}],
+        "no_bids": [{"price": "0.58", "quantity": "4.00"}],
+        "exchange_ts_ms": None,
+        "received_ts_ms": 1_724_677_200_001,
+        "schema_version": 1,
+    }
+    return RawStreamEntry(redis_id, {b"payload": orjson.dumps(payload)})
+
+
+def test_kalshi_rows_decode_stream_payloads() -> None:
+    ticker = KalshiTickerRow.from_entry(kalshi_ticker_entry())
+    trade = KalshiTradeRow.from_entry(kalshi_trade_entry())
+    book = KalshiOrderBookRow.from_entry(kalshi_orderbook_entry())
+
+    assert ticker.partition == ("KXBTCD", "KXBTCD-TEST", "KXBTCD-TEST-1", "BTCUSD", "2024-08-26", "13")
+    assert trade.taker_side == "no"
+    assert book.yes_bids == (("0.42", "10.00"),)
+    assert book.partition == ("KXBTCD", "KXBTCD-TEST", "KXBTCD-TEST-1", "BTCUSD", "2024-08-26", "13")

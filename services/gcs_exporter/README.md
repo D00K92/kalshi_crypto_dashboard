@@ -1,16 +1,16 @@
 # GCS Exporter
 
-Consumes normalized trades from the Redis Stream `stream:ticks` and archives
+Consumes normalized crypto and Kalshi market-data Redis Streams and archives
 them as in-memory, Snappy-compressed Parquet objects in GCS.
 
 ## Delivery contract
 
-- Redis consumer group: `gcs_archiver_group`, created at ID `0`
+- Redis consumer groups are created at ID `0`
 - Flush: 10,000 rows or 60 seconds after the oldest buffered row
 - ACK: only after a create-only, CRC32C-checked GCS upload
 - Recovery: stale pending entries are reclaimed with `XAUTOCLAIM`
 - Malformed data: written to `dead-letter/stream=ticks/` before ACK
-- Object partitions: venue, instrument, UTC date, and UTC hour
+- Object partitions: venue/instrument/date/hour for crypto; series/event/market/instrument/date/hour for Kalshi
 
 The pipeline is at-least-once. Backtests should use `event_id` or `redis_id` to
 deduplicate records if a process dies between a successful upload and its ACK.
@@ -95,6 +95,16 @@ kubectl logs deployment/gcs-exporter --tail=100
 | `RECLAIM_MIN_IDLE_MS` | `120000` |
 | `RECLAIM_INTERVAL_SEC` | `30` |
 | `HEALTH_PORT` | `8080` |
+
+The default entry point runs five consumers in one process:
+
+| Dataset | Stream | Consumer group |
+|---|---|---|
+| Crypto trades | `stream:ticks` | `gcs_archiver_group` |
+| Crypto order books | `stream:orderbook_snapshots` | `gcs_orderbook_archiver_group` |
+| Kalshi tickers | `stream:kalshi_tickers` | `gcs_kalshi_ticker_archiver_group` |
+| Kalshi trades | `stream:kalshi_trades` | `gcs_kalshi_trade_archiver_group` |
+| Kalshi order books | `stream:kalshi_orderbook` | `gcs_kalshi_orderbook_archiver_group` |
 
 `GET /healthz` is the liveness endpoint. `GET /readyz` succeeds after Redis is
 reachable and the consumer group is available.

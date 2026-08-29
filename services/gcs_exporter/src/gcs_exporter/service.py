@@ -188,7 +188,11 @@ class GCSExporterService:
             },
             option=orjson.OPT_SORT_KEYS,
         )
-        object_name = dead_letter_object_name(entry.redis_id, payload)
+        object_name = dead_letter_object_name(
+            entry.redis_id,
+            payload,
+            self._settings.stream_name,
+        )
         await self._uploader.upload(object_name, document, "application/json")
         await self._consumer.ack([entry.redis_id])
         LOGGER.warning(
