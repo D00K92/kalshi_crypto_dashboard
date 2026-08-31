@@ -60,6 +60,8 @@ def parse_crypto_com_message(raw: str | bytes, *, received_ts_ms: int | None = N
         message = _mapping(orjson.loads(raw), "frame")
     except orjson.JSONDecodeError as exc:
         raise CryptoComMessageError("frame is not valid JSON") from exc
+    if message.get("method") == "public/heartbeat" or "result" not in message:
+        return []
     result = _mapping(message.get("result"), "result")
     channel = _text(result.get("channel"), "result.channel")
     instrument = _text(result.get("instrument_name"), "result.instrument_name").upper().replace("_", "")
@@ -110,6 +112,10 @@ class CryptoComFeed:
                 async for raw in websocket:
                     received = time.time_ns() // 1_000_000
                     try:
+                        frame = orjson.loads(raw)
+                        if isinstance(frame, dict) and frame.get("method") == "public/heartbeat":
+                            await websocket.send(orjson.dumps({"id": frame.get("id"), "method": "public/respond-heartbeat"}))
+                            continue
                         events = parse_crypto_com_message(raw, received_ts_ms=received)
                     except CryptoComMessageError as exc:
                         self.health.last_error = str(exc)
