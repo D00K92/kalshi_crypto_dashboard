@@ -95,8 +95,6 @@ def parse_bitstamp_message(raw: str | bytes, *, received_ts_ms: int | None = Non
             raise BitstampMessageError("order book must contain both sides")
         if Decimal(bids[0].price) >= Decimal(asks[0].price):
             best_bid = Decimal(bids[0].price)
-            best_ask = Decimal(asks[0].price)
-            bids = tuple(level for level in bids if Decimal(level.price) < best_ask)
             asks = tuple(level for level in asks if Decimal(level.price) > best_bid)
             if not bids or not asks:
                 raise BitstampMessageError("order book snapshot is crossed")

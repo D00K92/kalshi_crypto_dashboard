@@ -21,3 +21,14 @@ def test_parse_book_snapshot() -> None:
 
 def test_heartbeat_is_ignored() -> None:
     assert parse_crypto_com_message(json.dumps({"id": 42, "method": "public/heartbeat", "code": 0}), received_ts_ms=2) == []
+
+
+def test_crossed_book_is_coherently_pruned() -> None:
+    events = parse_crypto_com_message(json.dumps({
+        "result": {"channel": "book.BTC_USD.50", "instrument_name": "BTC_USD", "u": 160,
+                   "data": [{"bids": [["100.00", "1"], ["99.00", "2"]],
+                             "asks": [["99.00", "3"], ["101.00", "4"]]}]},
+    }), received_ts_ms=2)
+    assert isinstance(events[0], BookSnapshot)
+    assert events[0].bids[0].price == "100.00"
+    assert events[0].asks[0].price == "101.00"

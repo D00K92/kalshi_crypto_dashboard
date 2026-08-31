@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from decimal import Decimal
 import logging
 import time
 from typing import Any
@@ -85,6 +86,11 @@ def parse_crypto_com_message(raw: str | bytes, *, received_ts_ms: int | None = N
     asks = _levels(book.get("asks"), "book.asks")[:MAX_BOOK_LEVELS]
     if not bids or not asks:
         raise CryptoComMessageError("book snapshot must contain both sides")
+    if Decimal(bids[0].price) >= Decimal(asks[0].price):
+        best_bid = Decimal(bids[0].price)
+        asks = tuple(level for level in asks if Decimal(level.price) > best_bid)
+        if not bids or not asks:
+            raise CryptoComMessageError("book snapshot is crossed")
     sequence = _integer(result.get("u") or message.get("id") or received_ts_ms, "book.sequence")
     return [BookSnapshot(event_id=f"{VENUE}:{instrument}:book:{sequence}", event_type="book_snapshot", venue=VENUE, instrument=instrument, sequence=sequence, bids=bids, asks=asks, exchange_ts_ms=_integer(result.get("tt"), "book.tt") if result.get("tt") else None, received_ts_ms=received_ts_ms, depth=max(len(bids), len(asks)))]
 
@@ -117,7 +123,7 @@ class CryptoComFeed:
                             await websocket.send(orjson.dumps({"id": frame.get("id"), "method": "public/respond-heartbeat"}))
                             continue
                         events = parse_crypto_com_message(raw, received_ts_ms=received)
-                    except CryptoComMessageError as exc:
+                    except (CryptoComMessageError, ValueError) as exc:
                         self.health.last_error = str(exc)
                         LOGGER.warning("venue_message_rejected", extra={"venue": VENUE, "reason": str(exc)})
                         continue
