@@ -150,6 +150,10 @@ class KalshiFeed:
         market_tickers: tuple[str, ...],
         message_id: int,
     ) -> int:
-        sids = tuple(channel_sids[channel] for channel in CHANNELS)
-        await websocket.send(self._update(sids, action, market_tickers, message_id))
-        return message_id + 1
+        # Kalshi accepts exactly one subscription SID per
+        # update_subscription request. Send one update for each channel so a
+        # rollover changes ticker, trade, and orderbook subscriptions alike.
+        for channel in CHANNELS:
+            await websocket.send(self._update((channel_sids[channel],), action, market_tickers, message_id))
+            message_id += 1
+        return message_id

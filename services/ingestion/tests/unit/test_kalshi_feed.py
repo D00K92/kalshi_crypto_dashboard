@@ -71,18 +71,36 @@ async def test_rollover_adds_markets_to_every_channel_sid() -> None:
         message_id=7,
     )
 
-    assert next_id == 8
+    assert next_id == 10
     assert message_context == {"new-1": candidate, "new-2": candidate}
     assert websocket.sent == [
         {
             "id": 7,
             "cmd": "update_subscription",
             "params": {
-                "sids": [11, 12, 13],
+                "sids": [11],
                 "market_tickers": ["new-1", "new-2"],
                 "action": "add_markets",
             },
-        }
+        },
+        {
+            "id": 8,
+            "cmd": "update_subscription",
+            "params": {
+                "sids": [12],
+                "market_tickers": ["new-1", "new-2"],
+                "action": "add_markets",
+            },
+        },
+        {
+            "id": 9,
+            "cmd": "update_subscription",
+            "params": {
+                "sids": [13],
+                "market_tickers": ["new-1", "new-2"],
+                "action": "add_markets",
+            },
+        },
     ]
 
 
@@ -100,9 +118,21 @@ async def test_delete_markets_uses_every_channel_sid() -> None:
         9,
     )
 
-    assert next_id == 10
-    assert websocket.sent[0]["params"] == {
-        "sids": [11, 12, 13],
+    assert next_id == 12
+    assert [message["params"] for message in websocket.sent] == [
+        {
+        "sids": [11],
         "market_tickers": ["old-1", "old-2"],
         "action": "delete_markets",
-    }
+        },
+        {
+        "sids": [12],
+        "market_tickers": ["old-1", "old-2"],
+        "action": "delete_markets",
+        },
+        {
+        "sids": [13],
+        "market_tickers": ["old-1", "old-2"],
+        "action": "delete_markets",
+        },
+    ]
