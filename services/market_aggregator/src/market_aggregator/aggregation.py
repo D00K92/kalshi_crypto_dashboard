@@ -16,6 +16,13 @@ def _dec(value: Any) -> Decimal:
     return parsed
 
 
+def _signed_dec(value: Any) -> Decimal:
+    parsed = Decimal(str(value))
+    if not parsed.is_finite():
+        raise ValueError("numeric value must be finite")
+    return parsed
+
+
 def _bucket(ts_ms: int) -> int:
     return (int(ts_ms) // CANDLE_INTERVAL_MS) * CANDLE_INTERVAL_MS
 
@@ -107,6 +114,74 @@ class MarketAggregator:
 
     def candle_snapshot(self, instrument: str) -> list[dict[str, Any]]:
         return [{"instrument": instrument, "bucket_start_ts_ms": start, "open": self._fmt(s["open"]), "high": self._fmt(s["high"]), "low": self._fmt(s["low"]), "close": self._fmt(s["close"]), "volume": self._fmt(s["volume"]), "vwap": self._fmt(s["notional"] / s["volume"])} for start, s in sorted(self.trade_buckets.items()) if s["volume"] > 0]
+
+    def export_candle_state(self) -> dict[str, Any]:
+        """Return the complete candle state in JSON-safe Decimal form."""
+        buckets = []
+        for start, state in sorted(self.trade_buckets.items()):
+            buckets.append({
+                "start": start,
+                "notional": self._fmt(state["notional"]),
+                "volume": self._fmt(state["volume"]),
+                "price_sum": self._fmt(state["price_sum"]),
+                "trade_count": state["trade_count"],
+                "open": self._fmt(state["open"]),
+                "high": self._fmt(state["high"]),
+                "low": self._fmt(state["low"]),
+                "close": self._fmt(state["close"]),
+                "delta": self._fmt(state["delta"]),
+                "venues": {
+                    venue: {
+                        "notional": self._fmt(values["notional"]),
+                        "volume": self._fmt(values["volume"]),
+                        "price_sum": self._fmt(values["price_sum"]),
+                        "trade_count": values["trade_count"],
+                    }
+                    for venue, values in sorted(state["venues"].items())
+                },
+            })
+        return {"schema_version": 1, "interval_ms": CANDLE_INTERVAL_MS, "buckets": buckets}
+
+    def restore_candle_state(self, payload: dict[str, Any]) -> int:
+        """Restore persisted buckets and return the number loaded."""
+        if payload.get("schema_version") != 1 or payload.get("interval_ms") != CANDLE_INTERVAL_MS:
+            raise ValueError("unsupported candle state")
+        restored: dict[int, dict[str, Any]] = {}
+        for raw in payload.get("buckets", []):
+            start = int(raw["start"])
+            state = {
+                "notional": _dec(raw["notional"]), "volume": _dec(raw["volume"]),
+                "price_sum": _dec(raw["price_sum"]), "trade_count": int(raw["trade_count"]),
+                "open": _dec(raw["open"]) if raw.get("open") is not None else None,
+                "high": _dec(raw["high"]) if raw.get("high") is not None else None,
+                "low": _dec(raw["low"]) if raw.get("low") is not None else None,
+                "close": _dec(raw["close"]) if raw.get("close") is not None else None,
+                "delta": _signed_dec(raw["delta"]) if raw.get("delta") is not None else Decimal("0"),
+                "venues": defaultdict(lambda: {"notional": Decimal("0"), "volume": Decimal("0"), "price_sum": Decimal("0"), "trade_count": 0}),
+            }
+            for venue, values in raw.get("venues", {}).items():
+                state["venues"][venue] = {
+                    "notional": _dec(values["notional"]), "volume": _dec(values["volume"]),
+                    "price_sum": _dec(values["price_sum"]), "trade_count": int(values["trade_count"]),
+                }
+            restored[start] = state
+        self.trade_buckets = restored
+        self.cvd = sum((state["delta"] for state in restored.values()), Decimal("0"))
+        return len(restored)
+
+    def restore_candle_snapshot(self, rows: list[dict[str, Any]]) -> int:
+        """Migrate the public candle format when no full state key exists."""
+        payload = {"schema_version": 1, "interval_ms": CANDLE_INTERVAL_MS, "buckets": []}
+        for row in rows:
+            volume = _dec(row["volume"])
+            vwap = _dec(row["vwap"])
+            payload["buckets"].append({
+                "start": int(row["bucket_start_ts_ms"]), "notional": self._fmt(vwap * volume),
+                "volume": self._fmt(volume), "price_sum": self._fmt(vwap), "trade_count": 1,
+                "open": row["open"], "high": row["high"], "low": row["low"], "close": row["close"],
+                "delta": "0", "venues": {},
+            })
+        return self.restore_candle_state(payload)
 
     def cvd_snapshot(self, instrument: str) -> list[dict[str, Any]]:
         cumulative = Decimal("0")

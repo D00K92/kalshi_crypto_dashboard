@@ -25,6 +25,7 @@ class AggregatorService:
         await self.health.start()
         try:
             await self.client.ping()
+            await self._restore_candles()
             await self._ensure_group(self.settings.book_stream, self.settings.book_group)
             await self._ensure_group(self.settings.trade_stream, self.settings.trade_group)
             self.health.ready = True
@@ -81,6 +82,7 @@ class AggregatorService:
         await self.client.publish(f"{prefix}:aggregated_spot", encoded)
         candles = orjson.dumps(self.state.candle_snapshot("BTCUSDT"))
         cvd = orjson.dumps(self.state.cvd_snapshot("BTCUSDT"))
+        await self.client.set(f"{prefix}:candle_state:BTCUSDT:10s", orjson.dumps(self.state.export_candle_state()))
         await self.client.set(f"{prefix}:candles:BTCUSDT:10s", candles)
         await self.client.set(f"{prefix}:cvd:BTCUSDT:10s", cvd)
         await self.client.publish(f"{prefix}:aggregated_candles", candles)
@@ -92,3 +94,20 @@ class AggregatorService:
         except ResponseError as exc:
             if "BUSYGROUP" not in str(exc):
                 raise
+
+    async def _restore_candles(self) -> None:
+        prefix = self.settings.output_prefix
+        state_key = f"{prefix}:candle_state:BTCUSDT:10s"
+        raw_state = await self.client.get(state_key)
+        try:
+            if raw_state:
+                loaded = self.state.restore_candle_state(orjson.loads(raw_state))
+            else:
+                raw_candles = await self.client.get(f"{prefix}:candles:BTCUSDT:10s")
+                loaded = self.state.restore_candle_snapshot(orjson.loads(raw_candles)) if raw_candles else 0
+                if loaded:
+                    await self.client.set(state_key, orjson.dumps(self.state.export_candle_state()))
+            if loaded:
+                LOGGER.info("candles_restored", extra={"buckets": loaded})
+        except (ValueError, TypeError, KeyError, orjson.JSONDecodeError) as exc:
+            LOGGER.warning("candle_state_restore_failed", extra={"error": str(exc)})

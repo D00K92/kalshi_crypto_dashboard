@@ -24,6 +24,24 @@ def test_trade_vwap_and_cvd():
     assert agg.cvd == Decimal("-2")
 
 
+def test_candle_state_round_trips_across_restart():
+    original = MarketAggregator()
+    first = trade("coinbase", 100, 2, "sell", ts=10_000)
+    first["event_id"] = "persisted-one"
+    original.apply_trade(first)
+    persisted = original.export_candle_state()
+
+    restored = MarketAggregator()
+    assert restored.restore_candle_state(persisted) == 1
+    assert restored.candle_snapshot("BTCUSDT") == original.candle_snapshot("BTCUSDT")
+    assert restored.cvd_snapshot("BTCUSDT") == original.cvd_snapshot("BTCUSDT")
+
+    next_trade = trade("coinbase", 110, 1, "buy", ts=10_001)
+    next_trade["event_id"] = "persisted-two"
+    restored.apply_trade(next_trade)
+    assert restored.candle_snapshot("BTCUSDT")[0]["close"] == "110"
+
+
 def test_book_preserves_venue_contributions_and_depth():
     agg = MarketAggregator(price_tick="1", depth=1)
     now = int(time.time() * 1000)
