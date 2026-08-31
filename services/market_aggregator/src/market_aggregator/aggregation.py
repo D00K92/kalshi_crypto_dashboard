@@ -88,11 +88,11 @@ class MarketAggregator:
         bid_buckets = self._aggregate_side(active, "bids", tick, reverse=True, rounding=ROUND_DOWN)
         ask_buckets = self._aggregate_side(active, "asks", tick, reverse=False, rounding=ROUND_CEILING)
 
-        # A bucket boundary can still overlap after quantization. Drop the
-        # crossing bid buckets so the published ladder is always non-crossed.
-        if bid_buckets and ask_buckets:
-            lowest_ask = Decimal(ask_buckets[0]["price"])
-            bid_buckets = [level for level in bid_buckets if Decimal(level["price"]) < lowest_ask]
+        # Do not remove crossed levels here. This is a consolidated book, so
+        # different venues may legitimately cross while their quotes converge
+        # or expose an arbitrage opportunity. Filtering against the cheapest
+        # ask across all venues can therefore remove every bid, which makes
+        # the published book look empty even when each venue has valid bids.
         return {"schema_version": 1, "event_type": "aggregated_book", "instrument": instrument, "generated_ts_ms": now_ms, "depth": self.depth, "price_tick": str(tick), "bucket_method": "bid_floor_ask_ceiling", "venues": sorted(active), "stale_venues": stale, "bids": bid_buckets[: self.depth], "asks": ask_buckets[: self.depth]}
 
     def spot_snapshot(self, bucket: int, instrument: str, state: dict[str, Any]) -> dict[str, Any]:

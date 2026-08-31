@@ -33,7 +33,7 @@ def test_book_preserves_venue_contributions_and_depth():
     assert snapshot["asks"][0]["price"] == "102"
 
 
-def test_price_bucketing_is_side_aware_and_removes_crossing_bids():
+def test_price_bucketing_is_side_aware():
     agg = MarketAggregator(price_tick="1", depth=10)
     now = int(time.time() * 1000)
     snapshot = agg.apply_book({
@@ -51,10 +51,39 @@ def test_price_bucketing_is_side_aware_and_removes_crossing_bids():
         ],
     })
     # Bid 100.99 floors to 100, while the exact 100 ask remains at 100 and
-    # the 100.01 ask ceils to 101. The overlapping 100 bid is removed.
-    assert [level["price"] for level in snapshot["bids"]] == ["99"]
+    # the 100.01 ask ceils to 101. Bucket overlap is retained here; the
+    # aggregator does not infer that a whole side is invalid from it.
+    assert [level["price"] for level in snapshot["bids"]] == ["100", "99"]
     assert [level["price"] for level in snapshot["asks"]] == ["100", "101"]
     assert snapshot["bucket_method"] == "bid_floor_ask_ceiling"
+
+
+def test_cross_venue_price_difference_does_not_empty_bid_side():
+    agg = MarketAggregator(price_tick="1", depth=10)
+    now = int(time.time() * 1000)
+    agg.apply_book({
+        "event_id": "venue-a-book",
+        "event_type": "book_snapshot",
+        "venue": "venue-a",
+        "instrument": "BTCUSDT",
+        "received_ts_ms": now,
+        "bids": [{"price": "110", "quantity": "1"}],
+        "asks": [{"price": "111", "quantity": "1"}],
+    })
+    snapshot = agg.apply_book({
+        "event_id": "venue-b-book",
+        "event_type": "book_snapshot",
+        "venue": "venue-b",
+        "instrument": "BTCUSDT",
+        "received_ts_ms": now,
+        "bids": [{"price": "100", "quantity": "2"}],
+        "asks": [{"price": "101", "quantity": "2"}],
+    })
+
+    assert snapshot["bids"]
+    assert snapshot["asks"]
+    assert snapshot["bids"][0]["price"] == "110"
+    assert snapshot["asks"][0]["price"] == "101"
 
 
 def test_book_freshness_uses_redis_publication_time():
