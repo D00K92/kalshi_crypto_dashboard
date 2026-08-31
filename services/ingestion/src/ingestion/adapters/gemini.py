@@ -68,7 +68,7 @@ def parse_gemini_message(raw: str | bytes, *, received_ts_ms: int | None = None)
     data = _mapping(decoded, "frame")
     if "status" in data:
         return None
-    instrument = _text(data.get("symbol"), "symbol").upper()
+    instrument = _text(data.get("symbol") or data.get("s"), "symbol/s").upper()
     if "p" in data and "q" in data and "t" in data:
         event_ts = data.get("E")
         return Trade(

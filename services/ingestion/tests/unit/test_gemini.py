@@ -7,7 +7,7 @@ from ingestion.models import BookSnapshot, Trade
 
 
 def test_parse_trade() -> None:
-    event = parse_gemini_message(json.dumps({"E": 1_700_000_000_000_000_000, "symbol": "btcusd", "t": 123, "p": "100000.10", "q": "0.001", "m": False}), received_ts_ms=2)
+    event = parse_gemini_message(json.dumps({"E": 1_700_000_000_000_000_000, "s": "btcusd", "t": 123, "p": "100000.10", "q": "0.001", "m": False}), received_ts_ms=2)
     assert isinstance(event, Trade)
     assert event.instrument == "BTCUSD"
     assert event.exchange_ts_ms == 1_700_000_000_000
