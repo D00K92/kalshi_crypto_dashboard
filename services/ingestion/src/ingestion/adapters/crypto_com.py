@@ -91,8 +91,8 @@ def parse_crypto_com_message(raw: str | bytes, *, received_ts_ms: int | None = N
         asks = tuple(level for level in asks if Decimal(level.price) > best_bid)
         if not bids or not asks:
             raise CryptoComMessageError("book snapshot is crossed")
-    sequence = _integer(result.get("u") or message.get("id") or received_ts_ms, "book.sequence")
-    return [BookSnapshot(event_id=f"{VENUE}:{instrument}:book:{sequence}", event_type="book_snapshot", venue=VENUE, instrument=instrument, sequence=sequence, bids=bids, asks=asks, exchange_ts_ms=_integer(result.get("tt"), "book.tt") if result.get("tt") else None, received_ts_ms=received_ts_ms, depth=max(len(bids), len(asks)))]
+    sequence = _integer(book.get("u") or message.get("id") or received_ts_ms, "book.sequence")
+    return [BookSnapshot(event_id=f"{VENUE}:{instrument}:book:{sequence}", event_type="book_snapshot", venue=VENUE, instrument=instrument, sequence=sequence, bids=bids, asks=asks, exchange_ts_ms=_integer(book.get("tt"), "book.tt") if book.get("tt") else None, received_ts_ms=received_ts_ms, depth=max(len(bids), len(asks)))]
 
 
 @dataclass(slots=True)
@@ -114,6 +114,8 @@ class CryptoComFeed:
             self.health.last_error = None
             LOGGER.info("venue_connected", extra={"venue": VENUE})
             try:
+                # Crypto.com recommends a one-second delay after connect before subscribing.
+                await asyncio.sleep(1)
                 await websocket.send(orjson.dumps({"id": 1, "method": "subscribe", "params": {"channels": [f"trade.{self._symbol}", f"book.{self._symbol}.50"]}}))
                 async for raw in websocket:
                     received = time.time_ns() // 1_000_000
@@ -132,6 +134,7 @@ class CryptoComFeed:
                         self.health.last_event_received_ts_ms = received
                         if event.event_type == "book_snapshot":
                             self.health.synchronized = True
+                LOGGER.warning("venue_stream_ended", extra={"venue": VENUE})
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
