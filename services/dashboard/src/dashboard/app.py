@@ -22,8 +22,8 @@ CARD = {"background": "#111827", "border": "1px solid #243244", "borderRadius": 
 def layout() -> html.Div:
     return html.Div([
         html.Div([html.Div("KALSHI QUANT TERMINAL", className="title"), html.Div(id="status", className="status")], className="header"),
-        dcc.Interval(id="market-refresh", interval=500, n_intervals=0),
-        dcc.Interval(id="candle-refresh", interval=1000, n_intervals=0),
+        dcc.Interval(id="market-refresh", interval=250, n_intervals=0),
+        dcc.Interval(id="candle-refresh", interval=500, n_intervals=0),
         dcc.Interval(id="kalshi-refresh", interval=1000, n_intervals=0),
         dcc.Store(id="book-data"),
         dcc.Store(id="spot-data"),
