@@ -50,11 +50,10 @@ def test_price_bucketing_is_side_aware():
             {"price": "100.01", "quantity": "4"},
         ],
     })
-    # Bid 100.99 floors to 100, while the exact 100 ask remains at 100 and
-    # the 100.01 ask ceils to 101. Bucket overlap is retained here; the
-    # aggregator does not infer that a whole side is invalid from it.
+    # Bid 100.99 floors to 100. The exact 100 ask overlaps the displayed bid
+    # and is removed, while the 100.01 ask ceils to 101.
     assert [level["price"] for level in snapshot["bids"]] == ["100", "99"]
-    assert [level["price"] for level in snapshot["asks"]] == ["100", "101"]
+    assert [level["price"] for level in snapshot["asks"]] == ["101"]
     assert snapshot["bucket_method"] == "bid_floor_ask_ceiling"
 
 
@@ -83,7 +82,24 @@ def test_cross_venue_price_difference_does_not_empty_bid_side():
     assert snapshot["bids"]
     assert snapshot["asks"]
     assert snapshot["bids"][0]["price"] == "110"
-    assert snapshot["asks"][0]["price"] == "101"
+    assert snapshot["asks"][0]["price"] == "111"
+
+
+def test_crossed_asks_are_removed_from_displayed_book():
+    agg = MarketAggregator(price_tick="1", depth=10)
+    now = int(time.time() * 1000)
+    snapshot = agg.apply_book({
+        "event_id": "crossed-book",
+        "event_type": "book_snapshot",
+        "venue": "venue-a",
+        "instrument": "BTCUSDT",
+        "received_ts_ms": now,
+        "bids": [{"price": "110", "quantity": "1"}],
+        "asks": [{"price": "101", "quantity": "2"}, {"price": "111", "quantity": "3"}],
+    })
+
+    assert [level["price"] for level in snapshot["bids"]] == ["110"]
+    assert [level["price"] for level in snapshot["asks"]] == ["111"]
 
 
 def test_book_freshness_uses_redis_publication_time():

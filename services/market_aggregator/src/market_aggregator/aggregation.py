@@ -90,11 +90,12 @@ class MarketAggregator:
         bid_buckets = self._aggregate_side(active, "bids", tick, reverse=True, rounding=ROUND_DOWN)
         ask_buckets = self._aggregate_side(active, "asks", tick, reverse=False, rounding=ROUND_CEILING)
 
-        # Do not remove crossed levels here. This is a consolidated book, so
-        # different venues may legitimately cross while their quotes converge
-        # or expose an arbitrage opportunity. Filtering against the cheapest
-        # ask across all venues can therefore remove every bid, which makes
-        # the published book look empty even when each venue has valid bids.
+        # A consolidated cross-venue book can contain crossed quotes when venue
+        # mid-prices differ. Keep the bid side intact and remove ask buckets
+        # that would put the displayed level-1 ask below level-1 bid.
+        if bid_buckets:
+            highest_bid = Decimal(bid_buckets[0]["price"])
+            ask_buckets = [level for level in ask_buckets if Decimal(level["price"]) > highest_bid]
         return {"schema_version": 1, "event_type": "aggregated_book", "instrument": instrument, "generated_ts_ms": now_ms, "depth": self.depth, "price_tick": str(tick), "bucket_method": "bid_floor_ask_ceiling", "venues": sorted(active), "stale_venues": stale, "bids": bid_buckets[: self.depth], "asks": ask_buckets[: self.depth]}
 
     def spot_snapshot(self, bucket: int, instrument: str, state: dict[str, Any]) -> dict[str, Any]:
