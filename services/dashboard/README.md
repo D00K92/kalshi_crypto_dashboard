@@ -11,7 +11,7 @@ REDIS_URL=redis://localhost:6379/0 uv run python -m dashboard
 
 Open <http://localhost:8050>. The app reads these keys on each one-second
 refresh: `market:book:BTCUSDT:latest`, `market:spot:BTCUSDT:latest`,
-`market:candles:BTCUSDT:5s`, `market:cvd:BTCUSDT:5s`,
+`market:candles:BTCUSDT:10s`, `market:cvd:BTCUSDT:10s`,
 `stream:kalshi_tickers`, and `stream:kalshi_trades`.
 
 The dashboard uses latest-state polling for recovery. Kalshi rows are limited

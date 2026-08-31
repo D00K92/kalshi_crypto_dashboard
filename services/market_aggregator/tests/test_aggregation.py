@@ -18,7 +18,7 @@ def test_trade_vwap_and_cvd():
     agg.apply_trade(first)
     spot = agg.apply_trade(second)
     assert spot["price"] == "105"
-    assert spot["method"] == "five_second_trade_average"
+    assert spot["method"] == "ten_second_trade_average"
     assert spot["total_volume"] == "4"
     assert spot["used_venues"] == ["binance", "coinbase"]
     assert agg.cvd == Decimal("-2")

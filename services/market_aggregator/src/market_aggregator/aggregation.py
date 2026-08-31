@@ -6,6 +6,8 @@ from decimal import Decimal, ROUND_CEILING, ROUND_DOWN
 import time
 from typing import Any
 
+CANDLE_INTERVAL_MS = 10_000
+
 
 def _dec(value: Any) -> Decimal:
     parsed = Decimal(str(value))
@@ -15,7 +17,7 @@ def _dec(value: Any) -> Decimal:
 
 
 def _bucket(ts_ms: int) -> int:
-    return (int(ts_ms) // 5000) * 5000
+    return (int(ts_ms) // CANDLE_INTERVAL_MS) * CANDLE_INTERVAL_MS
 
 
 @dataclass(slots=True)
@@ -99,7 +101,7 @@ class MarketAggregator:
         venues = {venue: {"average_price": self._fmt(v["price_sum"] / v["trade_count"]), "volume": self._fmt(v["volume"]), "last_received_ts_ms": self.latest_trades[venue]["received_ts_ms"]} for venue, v in state["venues"].items() if v["trade_count"] > 0}
         total = state["volume"]
         price = self._fmt(state["price_sum"] / state["trade_count"]) if state["trade_count"] else None
-        return {"schema_version": 1, "event_type": "aggregated_spot", "instrument": instrument, "price": price, "method": "five_second_trade_average", "generated_ts_ms": int(time.time() * 1000), "bucket_start_ts_ms": bucket, "bucket_end_ts_ms": bucket + 5000, "total_volume": self._fmt(total), "venues": venues, "used_venues": sorted(venues), "stale_venues": []}
+        return {"schema_version": 1, "event_type": "aggregated_spot", "instrument": instrument, "price": price, "method": "ten_second_trade_average", "generated_ts_ms": int(time.time() * 1000), "bucket_start_ts_ms": bucket, "bucket_end_ts_ms": bucket + CANDLE_INTERVAL_MS, "total_volume": self._fmt(total), "venues": venues, "used_venues": sorted(venues), "stale_venues": []}
 
     def candle_snapshot(self, instrument: str) -> list[dict[str, Any]]:
         return [{"instrument": instrument, "bucket_start_ts_ms": start, "open": self._fmt(s["open"]), "high": self._fmt(s["high"]), "low": self._fmt(s["low"]), "close": self._fmt(s["close"]), "volume": self._fmt(s["volume"]), "vwap": self._fmt(s["notional"] / s["volume"])} for start, s in sorted(self.trade_buckets.items()) if s["volume"] > 0]

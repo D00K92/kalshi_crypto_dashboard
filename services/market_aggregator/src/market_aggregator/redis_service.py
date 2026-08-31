@@ -77,8 +77,8 @@ class AggregatorService:
         await self.client.publish(f"{prefix}:aggregated_spot", encoded)
         candles = orjson.dumps(self.state.candle_snapshot("BTCUSDT"))
         cvd = orjson.dumps(self.state.cvd_snapshot("BTCUSDT"))
-        await self.client.set(f"{prefix}:candles:BTCUSDT:5s", candles)
-        await self.client.set(f"{prefix}:cvd:BTCUSDT:5s", cvd)
+        await self.client.set(f"{prefix}:candles:BTCUSDT:10s", candles)
+        await self.client.set(f"{prefix}:cvd:BTCUSDT:10s", cvd)
         await self.client.publish(f"{prefix}:aggregated_candles", candles)
         await self.client.publish(f"{prefix}:aggregated_cvd", cvd)
 

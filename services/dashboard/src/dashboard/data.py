@@ -47,8 +47,8 @@ class RedisReader:
             values = self.client.mget(
                 f"{self.prefix}:book:{self.instrument}:latest",
                 f"{self.prefix}:spot:{self.instrument}:latest",
-                f"{self.prefix}:candles:{self.instrument}:5s",
-                f"{self.prefix}:cvd:{self.instrument}:5s",
+                f"{self.prefix}:candles:{self.instrument}:10s",
+                f"{self.prefix}:cvd:{self.instrument}:10s",
             )
             kalshi_contracts = self._read_kalshi_contracts()
         except redis.RedisError as exc:

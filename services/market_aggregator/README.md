@@ -2,7 +2,7 @@
 
 Consumes normalized trade and top-15 order-book events from Redis Streams and
 publishes dashboard-ready state. The service maintains per-venue books, an
-aggregated 10-level book, a five-second cross-venue simple trade average, five-second
+aggregated 10-level book, a ten-second cross-venue simple trade average, ten-second
 OHLCV candles, and CVD.
 
 Run locally with Redis available:

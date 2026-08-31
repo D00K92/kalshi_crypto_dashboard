@@ -18,7 +18,7 @@ def _figure(**kwargs: Any) -> go.Figure:
 
 
 def candle_figure(rows: list[dict[str, Any]]) -> go.Figure:
-    # The aggregator retains an hour; the dashboard shows the latest five minutes.
+    # The aggregator retains an hour; the dashboard shows the latest 60 candles.
     rows = rows[-60:]
     x = [datetime.fromtimestamp(int(row["bucket_start_ts_ms"]) / 1000, tz=timezone.utc) for row in rows]
     fig = _figure()
