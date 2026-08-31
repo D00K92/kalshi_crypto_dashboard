@@ -116,13 +116,13 @@ class CryptoComFeed:
             try:
                 # Crypto.com recommends a one-second delay after connect before subscribing.
                 await asyncio.sleep(1)
-                await websocket.send(orjson.dumps({"id": 1, "method": "subscribe", "params": {"channels": [f"trade.{self._symbol}", f"book.{self._symbol}.50"]}}))
+                await websocket.send(orjson.dumps({"id": 1, "method": "subscribe", "params": {"channels": [f"trade.{self._symbol}", f"book.{self._symbol}.50"]}}).decode())
                 async for raw in websocket:
                     received = time.time_ns() // 1_000_000
                     try:
                         frame = orjson.loads(raw)
                         if isinstance(frame, dict) and frame.get("method") == "public/heartbeat":
-                            await websocket.send(orjson.dumps({"id": frame.get("id"), "method": "public/respond-heartbeat"}))
+                            await websocket.send(orjson.dumps({"id": frame.get("id"), "method": "public/respond-heartbeat"}).decode())
                             continue
                         events = parse_crypto_com_message(raw, received_ts_ms=received)
                     except (CryptoComMessageError, ValueError) as exc:
