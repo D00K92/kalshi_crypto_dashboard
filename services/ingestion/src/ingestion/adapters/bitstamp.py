@@ -76,7 +76,10 @@ def parse_bitstamp_message(raw: str | bytes, *, received_ts_ms: int | None = Non
     data = _mapping(frame.get("data"), "data")
     instrument = "BTCUSD"
     if channel == "live_trades_btcusd" and frame.get("event") == "trade":
-        trade_id = _text(data.get("id"), "data.id")
+        raw_trade_id = data.get("id")
+        if raw_trade_id is None or (isinstance(raw_trade_id, str) and not raw_trade_id):
+            raise BitstampMessageError("data.id must be a non-empty identifier")
+        trade_id = str(raw_trade_id)
         trade_type = _integer(data.get("type"), "data.type")
         if trade_type not in {0, 1}:
             raise BitstampMessageError("data.type must be 0 or 1")

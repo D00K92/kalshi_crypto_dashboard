@@ -9,7 +9,7 @@ from ingestion.models import BookSnapshot, Trade
 def test_parse_trade() -> None:
     event = parse_bitstamp_message(json.dumps({
         "event": "trade", "channel": "live_trades_btcusd",
-        "data": {"id": "123", "amount_str": "0.001", "price_str": "100000.10",
+        "data": {"id": 123, "amount_str": "0.001", "price_str": "100000.10",
                  "type": 0, "timestamp": "1700000000", "microtimestamp": "1700000000123456"},
     }), received_ts_ms=2)
     assert isinstance(event, Trade)
