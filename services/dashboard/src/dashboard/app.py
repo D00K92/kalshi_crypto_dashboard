@@ -22,7 +22,8 @@ CARD = {"background": "#111827", "border": "1px solid #243244", "borderRadius": 
 def layout() -> html.Div:
     return html.Div([
         html.Div([html.Div("KALSHI QUANT TERMINAL", className="title"), html.Div(id="status", className="status")], className="header"),
-        dcc.Interval(id="market-refresh", interval=1000, n_intervals=0),
+        dcc.Interval(id="market-refresh", interval=500, n_intervals=0),
+        dcc.Interval(id="candle-refresh", interval=1000, n_intervals=0),
         dcc.Interval(id="kalshi-refresh", interval=1000, n_intervals=0),
         dcc.Store(id="book-data"),
         dcc.Store(id="spot-data"),
@@ -60,13 +61,17 @@ def readyz():
 @app.callback(
     Output("book-data", "data"),
     Output("spot-data", "data"),
-    Output("candle-data", "data"),
     Output("status-data", "data"),
     Input("market-refresh", "n_intervals"),
 )
 def refresh_market_data(_: int):
-    data = reader.read_market_data()
-    return data["book"], data["spot"], data["candles"], {"redis_ok": data["redis_ok"], "redis_error": data["redis_error"]}
+    data = reader.read_fast_market_data()
+    return data["book"], data["spot"], {"redis_ok": data["redis_ok"], "redis_error": data["redis_error"]}
+
+
+@app.callback(Output("candle-data", "data"), Input("candle-refresh", "n_intervals"))
+def refresh_candle_data(_: int):
+    return reader.read_candle_data()["candles"]
 
 
 @app.callback(Output("kalshi-data", "data"), Input("kalshi-refresh", "n_intervals"), State("spot-data", "data"))
