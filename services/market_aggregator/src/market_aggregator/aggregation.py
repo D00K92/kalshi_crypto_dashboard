@@ -91,9 +91,24 @@ class MarketAggregator:
         ask_buckets = self._aggregate_side(active, "asks", tick, reverse=False, rounding=ROUND_CEILING)
 
         # A consolidated cross-venue book can contain crossed quotes when venue
-        # mid-prices differ. Keep the bid side intact and remove ask buckets
-        # that would put the displayed level-1 ask below level-1 bid.
-        if bid_buckets:
+        # mid-prices differ. Use the tightest internally valid venue as the
+        # reference and retain only aggregate levels on its valid sides. This
+        # keeps both sides populated instead of dropping every ask or bid.
+        reference = min(
+            (
+                book
+                for book in active.values()
+                if book.bids and book.asks and book.asks[0][0] > book.bids[0][0]
+            ),
+            key=lambda book: book.asks[0][0] - book.bids[0][0],
+            default=None,
+        )
+        if reference:
+            reference_bid = (reference.bids[0][0] / tick).to_integral_value(rounding=ROUND_DOWN) * tick
+            reference_ask = (reference.asks[0][0] / tick).to_integral_value(rounding=ROUND_CEILING) * tick
+            bid_buckets = [level for level in bid_buckets if Decimal(level["price"]) <= reference_bid]
+            ask_buckets = [level for level in ask_buckets if Decimal(level["price"]) >= reference_ask]
+        elif bid_buckets:
             highest_bid = Decimal(bid_buckets[0]["price"])
             ask_buckets = [level for level in ask_buckets if Decimal(level["price"]) > highest_bid]
         return {"schema_version": 1, "event_type": "aggregated_book", "instrument": instrument, "generated_ts_ms": now_ms, "depth": self.depth, "price_tick": str(tick), "bucket_method": "bid_floor_ask_ceiling", "venues": sorted(active), "stale_venues": stale, "bids": bid_buckets[: self.depth], "asks": ask_buckets[: self.depth]}

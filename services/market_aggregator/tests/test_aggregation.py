@@ -102,6 +102,33 @@ def test_crossed_asks_are_removed_from_displayed_book():
     assert [level["price"] for level in snapshot["asks"]] == ["111"]
 
 
+def test_cross_venue_book_keeps_a_coherent_reference_pair():
+    agg = MarketAggregator(price_tick="1", depth=10)
+    now = int(time.time() * 1000)
+    agg.apply_book({
+        "event_id": "low-venue-book",
+        "event_type": "book_snapshot",
+        "venue": "venue-a",
+        "instrument": "BTCUSDT",
+        "received_ts_ms": now,
+        "bids": [{"price": "100", "quantity": "1"}],
+        "asks": [{"price": "101", "quantity": "1"}],
+    })
+    snapshot = agg.apply_book({
+        "event_id": "high-venue-book",
+        "event_type": "book_snapshot",
+        "venue": "venue-b",
+        "instrument": "BTCUSDT",
+        "received_ts_ms": now,
+        "bids": [{"price": "110", "quantity": "1"}],
+        "asks": [{"price": "111", "quantity": "1"}],
+    })
+
+    assert snapshot["bids"][0]["price"] == "100"
+    assert snapshot["asks"][0]["price"] == "101"
+    assert Decimal(snapshot["asks"][0]["price"]) > Decimal(snapshot["bids"][0]["price"])
+
+
 def test_book_freshness_uses_redis_publication_time():
     agg = MarketAggregator(freshness_ms=5_000)
     now = int(time.time() * 1000)
