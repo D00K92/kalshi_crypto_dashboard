@@ -35,6 +35,8 @@ spec:
           value: "$"
         - name: AGGREGATION_PRICE_TICK
           value: "0.01"
+        - name: AGGREGATION_TAKER_FEES
+          value: "binance=0,bitstamp=0,crypto.com=0,gemini=0,coinbase=0,kraken=0"
         - name: HEALTH_PORT
           value: "8080"
         ports:
