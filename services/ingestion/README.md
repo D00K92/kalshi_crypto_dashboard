@@ -63,7 +63,7 @@ the API key, private key, or JWT. Use `--seconds 0` to run until interrupted.
 | `KRAKEN_WS_URL` | `wss://ws.kraken.com/v2` |
 | `KRAKEN_SYMBOL` | `BTC/USD` |
 | `INGESTION_QUEUE_MAXSIZE` | `10000` |
-| `INGESTION_STREAM_MAXLEN` | `1000000` |
+| `INGESTION_STREAM_MAXLEN` | `1000000` locally; production deployment uses `250000` |
 | `INGESTION_SHUTDOWN_GRACE_SECONDS` | `10` |
 | `INGESTION_LOG_LEVEL` | `INFO` |
 

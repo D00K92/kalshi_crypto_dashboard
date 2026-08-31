@@ -23,6 +23,8 @@ spec:
           value: "${REDIS_HOST}"  # Insert Redis Private IP here
         - name: REDIS_PORT
           value: "${REDIS_PORT}"
+        - name: INGESTION_STREAM_MAXLEN
+          value: "250000"
         - name: KRAKEN_WS_URL
           value: "wss://ws.kraken.com/v2"
         - name: KRAKEN_SYMBOL
