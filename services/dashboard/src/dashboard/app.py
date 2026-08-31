@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import os
-from dataclasses import asdict
 from datetime import datetime, timezone
 
 import redis
-from dash import Dash, Input, Output, dcc, html
+from dash import Dash, Input, Output, State, dcc, html
 
 from dashboard.data import RedisReader, redis_client_from_env
-from dashboard.kalshi_contracts import contract_table, select_contract_window
+from dashboard.kalshi_contracts import contract_table
 from dashboard.kalshi_monitor import kalshi_monitor
 from dashboard.orderbook import orderbook_ladder
 from dashboard.plots import candle_figure, volume_figure
@@ -23,8 +22,13 @@ CARD = {"background": "#111827", "border": "1px solid #243244", "borderRadius": 
 def layout() -> html.Div:
     return html.Div([
         html.Div([html.Div("KALSHI QUANT TERMINAL", className="title"), html.Div(id="status", className="status")], className="header"),
-        dcc.Interval(id="refresh", interval=1000, n_intervals=0),
-        dcc.Store(id="market-data"),
+        dcc.Interval(id="market-refresh", interval=1000, n_intervals=0),
+        dcc.Interval(id="kalshi-refresh", interval=1000, n_intervals=0),
+        dcc.Store(id="book-data"),
+        dcc.Store(id="spot-data"),
+        dcc.Store(id="candle-data"),
+        dcc.Store(id="status-data"),
+        dcc.Store(id="kalshi-data"),
         html.Div([
             html.Div([html.H3("BTCUSDT", className="panel-title"), dcc.Graph(id="candles", config={"displayModeBar": False}), dcc.Graph(id="volume", config={"displayModeBar": False})], style=CARD),
             html.Div([html.Div(id="orderbook")], style={"minWidth": 0}),
@@ -53,56 +57,56 @@ def readyz():
     return {"status": "ready"}, 200
 
 
-@app.callback(Output("market-data", "data"), Input("refresh", "n_intervals"))
-def refresh_data(_: int):
-    return asdict(reader.read())
+@app.callback(
+    Output("book-data", "data"),
+    Output("spot-data", "data"),
+    Output("candle-data", "data"),
+    Output("status-data", "data"),
+    Input("market-refresh", "n_intervals"),
+)
+def refresh_market_data(_: int):
+    data = reader.read_market_data()
+    return data["book"], data["spot"], data["candles"], {"redis_ok": data["redis_ok"], "redis_error": data["redis_error"]}
 
 
-def _snapshot(payload: dict | None) -> dict:
-    return payload or {"book": {"bids": [], "asks": [], "venues": [], "stale_venues": []}, "spot": {"price": None}, "candles": [], "kalshi_contracts": [], "redis_ok": False, "redis_error": "no data"}
+@app.callback(Output("kalshi-data", "data"), Input("kalshi-refresh", "n_intervals"), State("spot-data", "data"))
+def refresh_kalshi_data(_: int, spot_payload: dict | None):
+    return reader.read_kalshi_data((spot_payload or {}).get("price"))
 
 
-@app.callback(Output("candles", "figure"), Input("market-data", "data"))
-def refresh_candles(payload: dict | None):
-    data = _snapshot(payload)
-    return candle_figure(data["candles"], data["spot"].get("price"))
+def _kalshi_snapshot(payload: dict | None) -> dict:
+    return payload or {"contracts": [], "spot": None, "redis_ok": False, "redis_error": "no data"}
 
 
-@app.callback(Output("volume", "figure"), Input("market-data", "data"))
-def refresh_volume(payload: dict | None):
-    return volume_figure(_snapshot(payload)["candles"])
+@app.callback(Output("candles", "figure"), Input("candle-data", "data"), Input("spot-data", "data"))
+def refresh_candles(candles: list[dict] | None, spot: dict | None):
+    return candle_figure(candles or [], (spot or {}).get("price"))
 
 
-@app.callback(Output("orderbook", "children"), Input("market-data", "data"))
-def refresh_orderbook(payload: dict | None):
-    return orderbook_ladder(_snapshot(payload)["book"])
+@app.callback(Output("volume", "figure"), Input("candle-data", "data"))
+def refresh_volume(candles: list[dict] | None):
+    return volume_figure(candles or [])
 
 
-def _kalshi_rows(payload: dict | None) -> tuple[list[dict], dict]:
-    data = _snapshot(payload)
-    price = data["spot"].get("price")
-    try:
-        spot_price = float(price) if price is not None else None
-    except (TypeError, ValueError):
-        spot_price = None
-    return select_contract_window(data["kalshi_contracts"], spot_price), data["spot"]
+@app.callback(Output("orderbook", "children"), Input("book-data", "data"))
+def refresh_orderbook(book: dict | None):
+    return orderbook_ladder(book or {"bids": [], "asks": [], "venues": [], "stale_venues": []})
 
 
-@app.callback(Output("kalshi-chain", "children"), Input("market-data", "data"))
+@app.callback(Output("kalshi-chain", "children"), Input("kalshi-data", "data"))
 def refresh_kalshi_monitor(payload: dict | None):
-    rows, spot = _kalshi_rows(payload)
-    return kalshi_monitor(rows, spot)
+    data = _kalshi_snapshot(payload)
+    return kalshi_monitor(data["contracts"], {"price": data["spot"]})
 
 
-@app.callback(Output("kalshi-contracts", "children"), Input("market-data", "data"))
+@app.callback(Output("kalshi-contracts", "children"), Input("kalshi-data", "data"))
 def refresh_kalshi_contracts(payload: dict | None):
-    rows, _ = _kalshi_rows(payload)
-    return contract_table(rows)
+    return contract_table(_kalshi_snapshot(payload)["contracts"])
 
 
-@app.callback(Output("status", "children"), Input("market-data", "data"))
-def refresh_status(payload: dict | None):
-    data = _snapshot(payload)
+@app.callback(Output("status", "children"), Input("status-data", "data"))
+def refresh_status(data: dict | None):
+    data = data or {"redis_ok": False, "redis_error": "no data"}
     updated = datetime.now(timezone.utc).strftime("%H:%M:%S UTC")
     return f"Redis live · refreshed {updated}" if data["redis_ok"] else f"Redis unavailable · {data['redis_error']}"
 

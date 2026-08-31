@@ -31,6 +31,26 @@ def test_reader_reads_aggregator_keys():
     assert data.candles == []
 
 
+def test_market_reader_fetches_only_market_panel_keys():
+    class SpyRedis(FakeRedis):
+        def __init__(self):
+            self.keys = None
+
+        def mget(self, *keys):
+            self.keys = keys
+            return super().mget(*keys)
+
+    client = SpyRedis()
+    data = RedisReader(client).read_market_data()
+
+    assert data["redis_ok"] is True
+    assert client.keys == (
+        "market:book:BTCUSDT:latest",
+        "market:spot:BTCUSDT:latest",
+        "market:candles:BTCUSDT:10s",
+    )
+
+
 def test_reader_reads_kalshi_contract_streams():
     received_ts_ms = int(time.time() * 1000)
 

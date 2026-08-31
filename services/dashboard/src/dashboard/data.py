@@ -69,6 +69,47 @@ class RedisReader:
             kalshi_contracts=kalshi_contracts,
         )
 
+    def read_market_data(self) -> dict[str, Any]:
+        """Read only the latest-state keys used by market panels."""
+        try:
+            values = self.client.mget(
+                f"{self.prefix}:book:{self.instrument}:latest",
+                f"{self.prefix}:spot:{self.instrument}:latest",
+                f"{self.prefix}:candles:{self.instrument}:10s",
+            )
+        except redis.RedisError as exc:
+            return {
+                "book": {"bids": [], "asks": [], "venues": [], "stale_venues": []},
+                "spot": {"price": None},
+                "candles": [],
+                "redis_ok": False,
+                "redis_error": type(exc).__name__,
+            }
+        return {
+            "book": decode(values[0], {"bids": [], "asks": [], "venues": [], "stale_venues": []}),
+            "spot": decode(values[1], {"price": None}),
+            "candles": decode(values[2], []),
+            "redis_ok": True,
+            "redis_error": None,
+        }
+
+    def read_kalshi_data(self, spot: Any = None) -> dict[str, Any]:
+        """Read and window Kalshi data before sending it to the browser."""
+        try:
+            from dashboard.kalshi_contracts import select_contract_window
+
+            try:
+                spot_price = float(spot) if spot is not None else None
+            except (TypeError, ValueError):
+                spot_price = None
+            rows = contract_rows(
+                self._stream_payloads(self.kalshi_ticker_stream, 600),
+                self._stream_payloads(self.kalshi_trade_stream, 300),
+            )
+            return {"contracts": select_contract_window(rows, spot_price), "spot": spot, "redis_ok": True, "redis_error": None}
+        except redis.RedisError as exc:
+            return {"contracts": [], "spot": spot, "redis_ok": False, "redis_error": type(exc).__name__}
+
     def _read_kalshi_contracts(self) -> list[dict[str, Any]]:
         from dashboard.kalshi_contracts import contract_rows
 
