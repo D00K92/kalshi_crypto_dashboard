@@ -29,7 +29,7 @@ def test_contract_rows_use_latest_active_event_and_recent_trade():
                 "yes_price_dollars": "0.42",
                 "count": "5.46",
                 "taker_side": "yes",
-                "received_ts_ms": 1700000000000,
+                "received_ts_ms": 1700000004000,
             }
         ],
         now_ms=1700000005000,
@@ -58,10 +58,37 @@ def test_contract_rows_use_latest_active_event_and_recent_trade():
             "last_trade": "42¢",
             "last_trade_qty": "5.46",
             "last_trade_side": "YES",
-            "age": "5s",
+            "age": "1s",
             "has_trade": True,
         }
     ]
+
+
+def test_contract_age_uses_latest_trade_activity() -> None:
+    rows = contract_rows(
+        [
+            {
+                "event_ticker": "KXBTCD-NEW",
+                "market_ticker": "KXBTCD-NEW-T70199.99",
+                "yes_bid_dollars": "0.41",
+                "yes_ask_dollars": "0.42",
+                "received_ts_ms": 1700000000000,
+            }
+        ],
+        [
+            {
+                "event_ticker": "KXBTCD-NEW",
+                "market_ticker": "KXBTCD-NEW-T70199.99",
+                "yes_price_dollars": "0.42",
+                "count": "1",
+                "taker_side": "yes",
+                "received_ts_ms": 1700000004000,
+            }
+        ],
+        now_ms=1700000005000,
+    )
+
+    assert rows[0]["age"] == "1s"
 
 
 def test_contract_table_builds_ag_grid():

@@ -120,6 +120,12 @@ def contract_rows(
         strike = _strike(market)
         last = _float(ticker.get("last_price_dollars"))
         last_trade = _float(trade.get("yes_price_dollars"))
+        ticker_received = _float(ticker.get("received_ts_ms"))
+        trade_received = _float(trade.get("received_ts_ms"))
+        last_activity = max(
+            (timestamp for timestamp in (ticker_received, trade_received) if timestamp is not None),
+            default=None,
+        )
         rows.append({
             "event": ticker.get("event_ticker") or event_ticker or "-",
             "contract": _contract_label(market),
@@ -142,7 +148,7 @@ def contract_rows(
             "last_trade": _cents_display(last_trade),
             "last_trade_qty": _quantity(trade.get("count")),
             "last_trade_side": str(trade.get("taker_side") or "-").upper(),
-            "age": _age(ticker.get("received_ts_ms"), now_ms=current_ms),
+            "age": _age(last_activity, now_ms=current_ms),
             "has_trade": bool(trade),
         })
 
@@ -192,7 +198,6 @@ def contract_table(rows: list[dict[str, Any]]) -> dag.AgGrid:
             {"field": "last_trade_qty", "headerName": "QTY", "type": "rightAligned", "width": 96},
             {"field": "last_trade_side", "headerName": "SIDE", "width": 78, "cellStyle": {"function": "kalshiTradeSide(params)"}},
             {"field": "age", "headerName": "AGE", "width": 72},
-            {"field": "market_ticker", "headerName": "TICKER", "minWidth": 220},
         ],
         defaultColDef={"sortable": True, "resizable": True},
         columnSize="responsiveSizeToFit",
