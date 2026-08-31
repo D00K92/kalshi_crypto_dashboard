@@ -39,6 +39,8 @@ class Settings:
     binance_ws_url: str
     gemini_ws_url: str
     gemini_symbol: str
+    crypto_com_ws_url: str
+    crypto_com_symbol: str
     coinbase_ws_url: str
     coinbase_product_id: str
     coinbase_api_key: str
@@ -83,6 +85,8 @@ class Settings:
             binance_ws_url=os.getenv("BINANCE_WS_URL", default_ws_url),
             gemini_ws_url=os.getenv("GEMINI_WS_URL", "wss://ws.gemini.com"),
             gemini_symbol=os.getenv("GEMINI_SYMBOL", "btcusd"),
+            crypto_com_ws_url=os.getenv("CRYPTO_COM_WS_URL", "wss://stream.crypto.com/exchange/v1/market"),
+            crypto_com_symbol=os.getenv("CRYPTO_COM_SYMBOL", "BTC_USD"),
             coinbase_ws_url=os.getenv("COINBASE_WS_URL", "wss://advanced-trade-ws.coinbase.com"),
             coinbase_product_id=os.getenv("COINBASE_PRODUCT_ID", "BTC-USD"),
             coinbase_api_key=os.getenv("COINBASE_API_KEY", ""),
