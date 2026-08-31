@@ -8,6 +8,7 @@ import logging
 from ingestion.adapters.binance import BinanceFeed
 from ingestion.adapters.gemini import GeminiFeed
 from ingestion.adapters.crypto_com import CryptoComFeed
+from ingestion.adapters.bitstamp import BitstampFeed
 from ingestion.adapters.coinbase import CoinbaseFeed
 from ingestion.adapters.deribit import DeribitFeed
 from ingestion.adapters.bybit import BybitFeed
@@ -35,6 +36,7 @@ class IngestionService:
         self._feed = BinanceFeed(settings.binance_ws_url, self._pipeline)
         self._gemini = GeminiFeed(settings.gemini_ws_url, settings.gemini_symbol, self._pipeline)
         self._crypto_com = CryptoComFeed(settings.crypto_com_ws_url, settings.crypto_com_symbol, self._pipeline)
+        self._bitstamp = BitstampFeed(settings.bitstamp_ws_url, settings.bitstamp_symbol, self._pipeline)
         self._coinbase = CoinbaseFeed(settings.coinbase_ws_url, settings.coinbase_product_id, self._pipeline, settings.coinbase_api_key, settings.coinbase_secret)
         self._deribit = DeribitFeed(settings.deribit_ws_url, settings.deribit_instrument, self._pipeline)
         self._bybit = BybitFeed(settings.bybit_ws_url, settings.bybit_symbol, self._pipeline)
@@ -55,13 +57,14 @@ class IngestionService:
         feed_task = asyncio.create_task(self._feed.run(), name="binance-feed")
         gemini_task = asyncio.create_task(self._gemini.run(), name="gemini-feed")
         crypto_com_task = asyncio.create_task(self._crypto_com.run(), name="crypto-com-feed")
+        bitstamp_task = asyncio.create_task(self._bitstamp.run(), name="bitstamp-feed")
         coinbase_task = asyncio.create_task(self._coinbase.run(), name="coinbase-feed")
         deribit_task = asyncio.create_task(self._deribit.run(), name="deribit-feed")
         bybit_task = asyncio.create_task(self._bybit.run(), name="bybit-feed")
         kraken_task = asyncio.create_task(self._kraken.run(), name="kraken-feed")
         kalshi_task = asyncio.create_task(self._kalshi.run(stop_event), name="kalshi-feed") if self._kalshi else None
         stop_task = asyncio.create_task(stop_event.wait(), name="shutdown-signal")
-        feed_tasks = {feed_task, gemini_task, crypto_com_task, coinbase_task, deribit_task, bybit_task, kraken_task}
+        feed_tasks = {feed_task, gemini_task, crypto_com_task, bitstamp_task, coinbase_task, deribit_task, bybit_task, kraken_task}
         if kalshi_task:
             feed_tasks.add(kalshi_task)
         try:
@@ -82,6 +85,7 @@ class IngestionService:
             feed_task.cancel()
             gemini_task.cancel()
             crypto_com_task.cancel()
+            bitstamp_task.cancel()
             coinbase_task.cancel()
             deribit_task.cancel()
             bybit_task.cancel()

@@ -41,6 +41,8 @@ class Settings:
     gemini_symbol: str
     crypto_com_ws_url: str
     crypto_com_symbol: str
+    bitstamp_ws_url: str
+    bitstamp_symbol: str
     coinbase_ws_url: str
     coinbase_product_id: str
     coinbase_api_key: str
@@ -87,6 +89,8 @@ class Settings:
             gemini_symbol=os.getenv("GEMINI_SYMBOL", "btcusd"),
             crypto_com_ws_url=os.getenv("CRYPTO_COM_WS_URL", "wss://stream.crypto.com/exchange/v1/market"),
             crypto_com_symbol=os.getenv("CRYPTO_COM_SYMBOL", "BTC_USD"),
+            bitstamp_ws_url=os.getenv("BITSTAMP_WS_URL", "wss://ws.bitstamp.net"),
+            bitstamp_symbol=os.getenv("BITSTAMP_SYMBOL", "btcusd"),
             coinbase_ws_url=os.getenv("COINBASE_WS_URL", "wss://advanced-trade-ws.coinbase.com"),
             coinbase_product_id=os.getenv("COINBASE_PRODUCT_ID", "BTC-USD"),
             coinbase_api_key=os.getenv("COINBASE_API_KEY", ""),
