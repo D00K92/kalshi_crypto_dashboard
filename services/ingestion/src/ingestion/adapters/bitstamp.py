@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from decimal import Decimal
 import logging
 import time
 from typing import Any
@@ -53,7 +54,7 @@ def _levels(value: object, field: str, *, reverse: bool) -> tuple[BookLevel, ...
             price=_text(raw[0], f"{field}[{index}].price"),
             quantity=_text(raw[1], f"{field}[{index}].quantity"),
         ))
-    return tuple(sorted(parsed, key=lambda level: float(level.price), reverse=reverse))
+    return tuple(sorted(parsed, key=lambda level: Decimal(level.price), reverse=reverse))
 
 
 def _exchange_ts_ms(data: dict[str, Any]) -> int:
@@ -92,6 +93,13 @@ def parse_bitstamp_message(raw: str | bytes, *, received_ts_ms: int | None = Non
         asks = _levels(data.get("asks"), "data.asks", reverse=False)[:MAX_BOOK_LEVELS]
         if not bids or not asks:
             raise BitstampMessageError("order book must contain both sides")
+        if Decimal(bids[0].price) >= Decimal(asks[0].price):
+            best_bid = Decimal(bids[0].price)
+            best_ask = Decimal(asks[0].price)
+            bids = tuple(level for level in bids if Decimal(level.price) < best_ask)
+            asks = tuple(level for level in asks if Decimal(level.price) > best_bid)
+            if not bids or not asks:
+                raise BitstampMessageError("order book snapshot is crossed")
         sequence = _integer(data.get("microtimestamp") or data.get("timestamp"), "data.sequence")
         return BookSnapshot(
             event_id=f"{VENUE}:{instrument}:book:{sequence}", event_type="book_snapshot",
@@ -129,7 +137,7 @@ class BitstampFeed:
                     received = time.time_ns() // 1_000_000
                     try:
                         event = parse_bitstamp_message(raw, received_ts_ms=received)
-                    except BitstampMessageError as exc:
+                    except (BitstampMessageError, ValueError) as exc:
                         self.health.last_error = str(exc)
                         LOGGER.warning("venue_message_rejected", extra={"venue": VENUE, "reason": str(exc)})
                         continue
