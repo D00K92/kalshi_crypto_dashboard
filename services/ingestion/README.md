@@ -1,8 +1,8 @@
 # Ingestion service
 
-The ingestion service consumes Binance Spot `BTCUSDT`, Coinbase Advanced Trade
-`BTC-USD`, Deribit spot `BTC_USDT`, and Kraken Spot `BTC/USD` trades over
-WebSocket. Binance, Coinbase, Bybit, and Kraken provide top-15 order-book
+The ingestion service consumes Binance Spot `BTCUSDT`, Gemini Spot `BTCUSD`,
+Coinbase Advanced Trade `BTC-USD`, Deribit spot `BTC_USDT`, and Kraken Spot
+`BTC/USD` trades over WebSocket. Binance, Gemini, Coinbase, Bybit, and Kraken provide top-15 order-book
 snapshots. Normalized events are appended to Redis
 Streams before a best-effort Redis Pub/Sub broadcast.
 
@@ -54,6 +54,8 @@ the API key, private key, or JWT. Use `--seconds 0` to run until interrupted.
 | `REDIS_PORT` | `6379` |
 | `BINANCE_SYMBOL` | `btcusdt` |
 | `BINANCE_WS_URL` | Binance combined trade/depth stream |
+| `GEMINI_WS_URL` | `wss://ws.gemini.com` |
+| `GEMINI_SYMBOL` | `btcusd` |
 | `COINBASE_WS_URL` | `wss://advanced-trade-ws.coinbase.com` |
 | `COINBASE_PRODUCT_ID` | `BTC-USD` |
 | `COINBASE_API_KEY` | unset; CDP API key name used for JWT authentication |

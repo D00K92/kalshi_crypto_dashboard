@@ -37,6 +37,8 @@ def _redis_url() -> str:
 class Settings:
     redis_url: str
     binance_ws_url: str
+    gemini_ws_url: str
+    gemini_symbol: str
     coinbase_ws_url: str
     coinbase_product_id: str
     coinbase_api_key: str
@@ -79,6 +81,8 @@ class Settings:
         return cls(
             redis_url=_redis_url(),
             binance_ws_url=os.getenv("BINANCE_WS_URL", default_ws_url),
+            gemini_ws_url=os.getenv("GEMINI_WS_URL", "wss://ws.gemini.com"),
+            gemini_symbol=os.getenv("GEMINI_SYMBOL", "btcusd"),
             coinbase_ws_url=os.getenv("COINBASE_WS_URL", "wss://advanced-trade-ws.coinbase.com"),
             coinbase_product_id=os.getenv("COINBASE_PRODUCT_ID", "BTC-USD"),
             coinbase_api_key=os.getenv("COINBASE_API_KEY", ""),
