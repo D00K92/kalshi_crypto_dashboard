@@ -68,7 +68,7 @@ def parse_crypto_com_message(raw: str | bytes, *, received_ts_ms: int | None = N
     data = result.get("data")
     if not isinstance(data, list):
         raise CryptoComMessageError("result.data must be an array")
-    if channel == "trade":
+    if channel.startswith("trade"):
         events: list[MarketEvent] = []
         for index, raw_trade in enumerate(data):
             trade = _mapping(raw_trade, f"result.data[{index}]")
@@ -78,7 +78,7 @@ def parse_crypto_com_message(raw: str | bytes, *, received_ts_ms: int | None = N
             trade_id = _text(trade.get("d"), "trade.d")
             events.append(Trade(event_id=f"{VENUE}:{instrument}:trade:{trade_id}", event_type="trade", venue=VENUE, instrument=instrument, trade_id=trade_id, price=_text(trade.get("p"), "trade.p"), quantity=_text(trade.get("q"), "trade.q"), taker_side=side.lower(), exchange_ts_ms=_integer(trade.get("t"), "trade.t"), received_ts_ms=received_ts_ms))
         return events
-    if channel != "book" or not data:
+    if not channel.startswith("book") or not data:
         return []
     book = _mapping(data[0], "result.data[0]")
     bids = _levels(book.get("bids"), "book.bids")[:MAX_BOOK_LEVELS]
