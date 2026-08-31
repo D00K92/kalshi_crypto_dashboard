@@ -11,11 +11,12 @@ REDIS_URL=redis://localhost:6379/0 uv run python -m dashboard
 
 Open <http://localhost:8050>. The app reads these keys on each one-second
 refresh: `market:book:BTCUSDT:latest`, `market:spot:BTCUSDT:latest`,
-`market:candles:BTCUSDT:5s`, and `market:cvd:BTCUSDT:5s`.
+`market:candles:BTCUSDT:5s`, `market:cvd:BTCUSDT:5s`,
+`stream:kalshi_tickers`, and `stream:kalshi_trades`.
 
-The current slice intentionally uses latest-state polling for recovery and
-keeps Kalshi panels as placeholders. Pub/Sub delivery and Kalshi data are
-subsequent phases.
+The dashboard uses latest-state polling for recovery. Kalshi rows are limited
+to fresh data from the most recent event and the monitor displays the ATM
+window around the current synthetic spot price.
 
 To smoke-test only the connector:
 
@@ -23,5 +24,7 @@ To smoke-test only the connector:
 REDIS_URL=redis://localhost:6379/0 uv run python scripts/test_redis_connector.py
 ```
 
-For GCP Memorystore, use a private-network tunnel or run the smoke test from
-inside GKE; its private IP is not directly reachable from a laptop.
+For GCP Memorystore, run the dashboard inside GKE or use a private-network
+tunnel; its private IP is not directly reachable from a laptop. The Kubernetes
+Service is `ClusterIP` by default, so external access must be provided through
+an approved authenticated access layer.

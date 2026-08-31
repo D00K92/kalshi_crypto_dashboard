@@ -7,6 +7,8 @@ import redis
 from dash import Dash, Input, Output, dcc, html
 
 from dashboard.data import RedisReader, redis_client_from_env
+from dashboard.kalshi_contracts import contract_table, select_contract_window
+from dashboard.kalshi_monitor import kalshi_monitor
 from dashboard.orderbook import orderbook_ladder
 from dashboard.plots import candle_figure
 
@@ -23,18 +25,33 @@ def layout() -> html.Div:
         dcc.Interval(id="refresh", interval=1000, n_intervals=0),
         html.Div([
             html.Div([html.H3("BTCUSDT", className="panel-title"), html.Div(id="spot"), dcc.Graph(id="candles", config={"displayModeBar": False})], style=CARD),
-            html.Div([html.H3("Aggregated order book", className="panel-title"), html.Div(id="book-status"), html.Div(id="orderbook")], style=CARD),
-            html.Div([html.H3("Kalshi contract monitor", className="panel-title"), html.Div("KXBTCD chain", className="muted"), html.Div("Chart placeholder — Kalshi analytics will be connected in the next phase.", className="placeholder"), html.Div(id="kalshi-chain", className="placeholder")], style=CARD),
+            html.Div([html.Div(id="orderbook")], style={"minWidth": 0}),
+            html.Div([html.H3("Kalshi contract monitor", className="panel-title"), html.Div(id="kalshi-chain")], style=CARD),
         ], className="top-grid"),
-        html.Div([html.H3("Active KXBTCD contracts", className="panel-title"), html.Div("Contract table placeholder — data source will be added with the Kalshi adapter.", className="placeholder")], style={**CARD, "marginTop": "14px"}),
+        html.Div([html.H3("Active KXBTCD contracts", className="panel-title"), html.Div(id="kalshi-contracts")], style={**CARD, "marginTop": "14px"}),
     ], className="shell")
 
 
 app = Dash(__name__, title="Kalshi Quant Terminal", update_title=None)
 app.layout = layout
+server = app.server
 
 
-@app.callback(Output("spot", "children"), Output("candles", "figure"), Output("orderbook", "children"), Output("book-status", "children"), Output("status", "children"), Input("refresh", "n_intervals"))
+@server.get("/healthz")
+def healthz():
+    return {"status": "ok"}, 200
+
+
+@server.get("/readyz")
+def readyz():
+    try:
+        reader.client.ping()
+    except redis.RedisError:
+        return {"status": "not_ready"}, 503
+    return {"status": "ready"}, 200
+
+
+@app.callback(Output("spot", "children"), Output("candles", "figure"), Output("orderbook", "children"), Output("kalshi-chain", "children"), Output("kalshi-contracts", "children"), Output("status", "children"), Input("refresh", "n_intervals"))
 def refresh(_: int):
     data = reader.read()
     price = data.spot.get("price")
@@ -42,14 +59,15 @@ def refresh(_: int):
         formatted_price = f"{float(price):.3f}" if price is not None else "—"
     except (TypeError, ValueError):
         formatted_price = "—"
-    spot = f"Synthetic VWAP: {formatted_price} USDT · volume {data.spot.get('total_volume', '0')}"
-    stale = data.book.get("stale_venues", [])
-    book_status = f"venues: {', '.join(data.book.get('venues', [])) or 'none'}" + (f" · stale: {', '.join(stale)}" if stale else "")
+    spot = f"Synthetic average: {formatted_price} USDT · volume {data.spot.get('total_volume', '0')}"
     updated = datetime.now(timezone.utc).strftime("%H:%M:%S UTC")
-    return spot, candle_figure(data.candles), orderbook_ladder(data.book), book_status, f"Redis live · refreshed {updated}"
-
-
-server = app.server
+    try:
+        spot_price = float(price) if price is not None else None
+    except (TypeError, ValueError):
+        spot_price = None
+    kalshi_rows = select_contract_window(data.kalshi_contracts, spot_price)
+    status = f"Redis live · refreshed {updated}" if data.redis_ok else f"Redis unavailable · {data.redis_error}"
+    return spot, candle_figure(data.candles), orderbook_ladder(data.book), kalshi_monitor(kalshi_rows, data.spot), contract_table(kalshi_rows), status
 
 
 if __name__ == "__main__":
