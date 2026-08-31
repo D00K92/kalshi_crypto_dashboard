@@ -53,6 +53,7 @@ class Settings:
     shutdown_grace_seconds: int
     health_port: int
     log_level: str
+    excluded_venues: frozenset[str] = frozenset()
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -76,4 +77,9 @@ class Settings:
             ),
             health_port=_positive_int("HEALTH_PORT", 8080),
             log_level=os.getenv("GCS_EXPORTER_LOG_LEVEL", "INFO").upper(),
+            excluded_venues=frozenset(
+                venue.strip().lower()
+                for venue in os.getenv("GCS_EXCLUDED_VENUES", "bybit").split(",")
+                if venue.strip()
+            ),
         )

@@ -30,21 +30,24 @@ class VenueBook:
 class MarketAggregator:
     """Pure state machine for venue books and trade-derived market data."""
 
-    def __init__(self, price_tick: str | None = None, depth: int = 10, freshness_ms: int = 5000) -> None:
+    def __init__(self, price_tick: str | None = None, depth: int = 10, freshness_ms: int = 5000, venues: tuple[str, ...] | None = None) -> None:
         self.tick = _dec(price_tick) if price_tick else None
         if self.tick is not None and self.tick <= 0:
             raise ValueError("price_tick must be positive")
         self.depth = depth
         self.freshness_ms = freshness_ms
+        self.venues = {venue.lower() for venue in venues} if venues is not None else None
         self.books: dict[str, VenueBook] = {}
         self.trade_buckets: dict[int, dict[str, Any]] = {}
         self.latest_trades: dict[str, dict[str, Any]] = {}
         self.cvd = Decimal("0")
         self._seen_events: set[str] = set()
 
-    def apply_book(self, event: dict[str, Any], published_ts_ms: int | None = None) -> dict[str, Any]:
-        self._remember_event(event)
+    def apply_book(self, event: dict[str, Any], published_ts_ms: int | None = None) -> dict[str, Any] | None:
         venue = str(event["venue"]).lower()
+        if self.venues is not None and venue not in self.venues:
+            return None
+        self._remember_event(event)
         # Use Redis publication time for freshness. The venue receive time is
         # captured before the bounded ingestion queue and may be old by the
         # time this consumer sees the event.
@@ -56,9 +59,11 @@ class MarketAggregator:
         )
         return self.book_snapshot(int(time.time() * 1000), str(event.get("instrument", "BTCUSDT")).upper())
 
-    def apply_trade(self, event: dict[str, Any]) -> dict[str, Any]:
-        self._remember_event(event)
+    def apply_trade(self, event: dict[str, Any]) -> dict[str, Any] | None:
         venue = str(event["venue"]).lower()
+        if self.venues is not None and venue not in self.venues:
+            return None
+        self._remember_event(event)
         price, quantity = _dec(event["price"]), _dec(event["quantity"])
         ts = int(event.get("exchange_ts_ms") or event.get("received_ts_ms") or time.time() * 1000)
         received = int(event.get("received_ts_ms") or time.time() * 1000)

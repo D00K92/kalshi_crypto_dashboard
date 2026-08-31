@@ -34,6 +34,7 @@ class Settings:
     read_block_ms: int
     output_prefix: str
     health_port: int
+    aggregation_venues: tuple[str, ...]
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -56,4 +57,12 @@ class Settings:
             read_block_ms=_int("AGGREGATOR_READ_BLOCK_MS", 1000),
             output_prefix=os.getenv("AGGREGATOR_OUTPUT_PREFIX", "market"),
             health_port=_int("HEALTH_PORT", 8080),
+            aggregation_venues=tuple(
+                venue.strip().lower()
+                for venue in os.getenv(
+                    "AGGREGATION_VENUES",
+                    "bitstamp,crypto.com,gemini,coinbase,kraken",
+                ).split(",")
+                if venue.strip()
+            ),
         )

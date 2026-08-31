@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 import pytest
+import orjson
 
 from gcs_exporter.gcs_uploader import UploadResult
 from gcs_exporter.models import RawStreamEntry
@@ -109,6 +110,22 @@ async def test_malformed_entry_is_dead_lettered_before_ack(settings) -> None:
     assert events == ["upload", "ack"]
     assert uploader.uploads[0][0].startswith("dead-letter/stream=ticks/")
     assert consumer.acked == [["99-0"]]
+    assert service.buffered_rows == 0
+
+
+async def test_excluded_venue_is_acknowledged_without_upload(settings) -> None:
+    settings = replace(settings, excluded_venues=frozenset({"bybit"}))
+    service, consumer, uploader, events = make_service(settings)
+    entry = make_entry()
+    payload = orjson.loads(entry.payload_bytes())
+    payload["venue"] = "bybit"
+    entry = RawStreamEntry(entry.redis_id, {b"payload": orjson.dumps(payload)})
+
+    await service._ingest([entry])
+
+    assert events == ["ack"]
+    assert consumer.acked == [[entry.redis_id]]
+    assert uploader.uploads == []
     assert service.buffered_rows == 0
 
 

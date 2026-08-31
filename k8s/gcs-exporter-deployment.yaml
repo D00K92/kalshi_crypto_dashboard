@@ -37,6 +37,8 @@ spec:
           value: "${GCS_BUCKET_NAME}"
         - name: STREAM_NAME
           value: "stream:ticks"
+        - name: GCS_EXCLUDED_VENUES
+          value: "bybit"
         - name: CONSUMER_GROUP
           value: "gcs_archiver_group"
         - name: FLUSH_SIZE

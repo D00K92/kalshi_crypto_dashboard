@@ -120,6 +120,9 @@ class GCSExporterService:
             except (UnicodeDecodeError, ValueError) as exc:
                 await self._archive_malformed(entry, str(exc))
                 continue
+            if row.venue in self._settings.excluded_venues:
+                await self._consumer.ack([entry.redis_id])
+                continue
             if not self._buffer:
                 self._buffer_started_at = time.monotonic()
             self._buffer.append(row)

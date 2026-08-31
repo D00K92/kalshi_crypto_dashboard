@@ -18,7 +18,7 @@ class AggregatorService:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self.client = redis.Redis.from_url(settings.redis_url, decode_responses=False, health_check_interval=30)
-        self.state = MarketAggregator(settings.price_tick, settings.book_depth, settings.freshness_ms)
+        self.state = MarketAggregator(settings.price_tick, settings.book_depth, settings.freshness_ms, settings.aggregation_venues)
         self.health = HealthServer(settings.health_port)
 
     async def run(self, stop_event: asyncio.Event) -> None:
@@ -62,6 +62,8 @@ class AggregatorService:
         if event.get("event_type") != "book_snapshot":
             return
         snapshot = self.state.apply_book(event, published_ts_ms=published_ts_ms)
+        if snapshot is None:
+            return
         encoded = orjson.dumps(snapshot)
         prefix = self.settings.output_prefix
         await self.client.set(f"{prefix}:book:BTCUSDT:latest", encoded)
@@ -71,6 +73,8 @@ class AggregatorService:
         if event.get("event_type") != "trade":
             return
         spot = self.state.apply_trade(event)
+        if spot is None:
+            return
         encoded = orjson.dumps(spot)
         prefix = self.settings.output_prefix
         await self.client.set(f"{prefix}:spot:BTCUSDT:latest", encoded)

@@ -164,3 +164,15 @@ def test_adaptive_tick_uses_finest_common_price_precision():
 def test_auto_price_tick_config_enables_inference(monkeypatch):
     monkeypatch.setenv("AGGREGATION_PRICE_TICK", "auto")
     assert Settings.from_env().price_tick is None
+
+
+def test_configured_venues_exclude_binance_and_bybit():
+    agg = MarketAggregator(venues=("bitstamp", "crypto.com", "gemini", "coinbase", "kraken"))
+    excluded = trade("binance", 100, 1)
+    excluded["event_id"] = "binance-excluded"
+    assert agg.apply_trade(excluded) is None
+    assert agg.latest_trades == {}
+
+    included = trade("coinbase", 110, 1)
+    included["event_id"] = "coinbase-included"
+    assert agg.apply_trade(included)["used_venues"] == ["coinbase"]
