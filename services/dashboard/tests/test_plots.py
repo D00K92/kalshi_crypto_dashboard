@@ -1,8 +1,9 @@
-from dashboard.plots import candle_figure, cvd_figure, orderbook_figure
+from dashboard.plots import candle_figure, cvd_figure, orderbook_figure, volume_figure
 
 
 def test_market_figures_render_empty_state():
-    assert len(candle_figure([]).data) == 2
+    assert len(candle_figure([]).data) == 1
+    assert len(volume_figure([]).data) == 1
     assert len(cvd_figure([]).data) == 1
     assert len(orderbook_figure({"bids": [], "asks": []}).data) == 3
 
@@ -13,13 +14,18 @@ def test_candle_figure_limits_to_sixty_candles_and_uses_datetime():
     assert len(figure.data[0].x) == 60
     assert figure.layout.yaxis.title.text == "BTC price"
     assert figure.layout.xaxis.type == "date"
-    assert figure.layout.xaxis2.type == "date"
-    assert figure.data[1].name == "Volume"
+    assert figure.layout.xaxis.matches is None
+
+    volume = volume_figure(rows)
+    assert len(volume.data[0].x) == 60
+    assert volume.data[0].name == "Volume"
+    assert volume.layout.xaxis.type == "date"
 
 
 def test_candle_figure_places_synthetic_price_inside_chart():
     figure = candle_figure([{"bucket_start_ts_ms": 0, "open": "1", "high": "2", "low": "0", "close": "1", "volume": "3"}], "1.234")
-    assert figure.layout.annotations[0].text == "Synthetic 1.234 USDT"
+    assert figure.layout.annotations[0].text == "Synthetic 1.23 USD"
+    assert figure.layout.shapes[0].y0 == 1.234
 
 
 def test_orderbook_preserves_venue_stacking():
