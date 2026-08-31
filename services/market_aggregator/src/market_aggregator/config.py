@@ -27,7 +27,7 @@ class Settings:
     trade_group: str
     group_start_id: str
     consumer_name: str
-    price_tick: str
+    price_tick: str | None
     book_depth: int
     freshness_ms: int
     read_count: int
@@ -35,12 +35,17 @@ class Settings:
     output_prefix: str
     health_port: int
     aggregation_venues: tuple[str, ...]
+    taker_fees: tuple[tuple[str, str], ...]
 
     @classmethod
     def from_env(cls) -> "Settings":
         host = os.getenv("HOSTNAME", "local")
         configured_tick = os.getenv("AGGREGATION_PRICE_TICK")
         price_tick = None if not configured_tick or configured_tick.lower() == "auto" else configured_tick
+        fees = os.getenv(
+            "AGGREGATION_TAKER_FEES",
+            "binance=0.001,bitstamp=0.004,crypto.com=0.005,gemini=0.012,coinbase=0.006,kraken=0.004",
+        )
         return cls(
             redis_url=_redis_url(),
             book_stream=os.getenv("BOOK_STREAM", "stream:orderbook_snapshots"),
@@ -52,7 +57,7 @@ class Settings:
             # Infer the finest common price precision unless explicitly set.
             price_tick=price_tick,
             book_depth=_int("AGGREGATION_BOOK_DEPTH", 10),
-            freshness_ms=_int("AGGREGATION_FRESHNESS_MS", 5000),
+            freshness_ms=_int("AGGREGATION_FRESHNESS_MS", 500),
             read_count=_int("AGGREGATOR_READ_COUNT", 200),
             read_block_ms=_int("AGGREGATOR_READ_BLOCK_MS", 1000),
             output_prefix=os.getenv("AGGREGATOR_OUTPUT_PREFIX", "market"),
@@ -64,5 +69,12 @@ class Settings:
                     "bitstamp,crypto.com,gemini,coinbase,kraken",
                 ).split(",")
                 if venue.strip()
+            ),
+            taker_fees=tuple(
+                (venue.strip().lower(), rate.strip())
+                for item in fees.split(",")
+                if "=" in item
+                for venue, rate in [item.split("=", 1)]
+                if venue.strip() and rate.strip()
             ),
         )

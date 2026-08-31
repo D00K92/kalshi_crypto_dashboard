@@ -4,7 +4,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from decimal import Decimal, ROUND_CEILING, ROUND_DOWN
 import time
-from typing import Any
+from typing import Any, Mapping
 
 CANDLE_INTERVAL_MS = 10_000
 
@@ -30,13 +30,14 @@ class VenueBook:
 class MarketAggregator:
     """Pure state machine for venue books and trade-derived market data."""
 
-    def __init__(self, price_tick: str | None = None, depth: int = 10, freshness_ms: int = 5000, venues: tuple[str, ...] | None = None) -> None:
+    def __init__(self, price_tick: str | None = None, depth: int = 10, freshness_ms: int = 500, venues: tuple[str, ...] | None = None, taker_fees: Mapping[str, str | Decimal] | None = None) -> None:
         self.tick = _dec(price_tick) if price_tick else None
         if self.tick is not None and self.tick <= 0:
             raise ValueError("price_tick must be positive")
         self.depth = depth
         self.freshness_ms = freshness_ms
         self.venues = {venue.lower() for venue in venues} if venues is not None else None
+        self.taker_fees = {str(venue).lower(): self._fee(value) for venue, value in (taker_fees or {}).items()}
         self.books: dict[str, VenueBook] = {}
         self.trade_buckets: dict[int, dict[str, Any]] = {}
         self.latest_trades: dict[str, dict[str, Any]] = {}
@@ -95,28 +96,8 @@ class MarketAggregator:
         bid_buckets = self._aggregate_side(active, "bids", tick, reverse=True, rounding=ROUND_DOWN)
         ask_buckets = self._aggregate_side(active, "asks", tick, reverse=False, rounding=ROUND_CEILING)
 
-        # A consolidated cross-venue book can contain crossed quotes when venue
-        # mid-prices differ. Use the tightest internally valid venue as the
-        # reference and retain only aggregate levels on its valid sides. This
-        # keeps both sides populated instead of dropping every ask or bid.
-        reference = min(
-            (
-                book
-                for book in active.values()
-                if book.bids and book.asks and book.asks[0][0] > book.bids[0][0]
-            ),
-            key=lambda book: book.asks[0][0] - book.bids[0][0],
-            default=None,
-        )
-        if reference:
-            reference_bid = (reference.bids[0][0] / tick).to_integral_value(rounding=ROUND_DOWN) * tick
-            reference_ask = (reference.asks[0][0] / tick).to_integral_value(rounding=ROUND_CEILING) * tick
-            bid_buckets = [level for level in bid_buckets if Decimal(level["price"]) <= reference_bid]
-            ask_buckets = [level for level in ask_buckets if Decimal(level["price"]) >= reference_ask]
-        elif bid_buckets:
-            highest_bid = Decimal(bid_buckets[0]["price"])
-            ask_buckets = [level for level in ask_buckets if Decimal(level["price"]) > highest_bid]
-        return {"schema_version": 1, "event_type": "aggregated_book", "instrument": instrument, "generated_ts_ms": now_ms, "depth": self.depth, "price_tick": str(tick), "bucket_method": "bid_floor_ask_ceiling", "venues": sorted(active), "stale_venues": stale, "bids": bid_buckets[: self.depth], "asks": ask_buckets[: self.depth]}
+        bid_buckets, ask_buckets = self._uncross(bid_buckets, ask_buckets)
+        return {"schema_version": 1, "event_type": "aggregated_book", "instrument": instrument, "generated_ts_ms": now_ms, "depth": self.depth, "price_tick": str(tick), "bucket_method": "effective_price_bid_floor_ask_ceiling_uncrossed", "taker_fees": {venue: self._fmt(fee) for venue, fee in sorted(self.taker_fees.items())}, "venues": sorted(active), "stale_venues": stale, "bids": bid_buckets[: self.depth], "asks": ask_buckets[: self.depth]}
 
     def spot_snapshot(self, bucket: int, instrument: str, state: dict[str, Any]) -> dict[str, Any]:
         venues = {venue: {"average_price": self._fmt(v["price_sum"] / v["trade_count"]), "volume": self._fmt(v["volume"]), "last_received_ts_ms": self.latest_trades[venue]["received_ts_ms"]} for venue, v in state["venues"].items() if v["trade_count"] > 0}
@@ -138,8 +119,8 @@ class MarketAggregator:
         return rows
 
     def _levels(self, raw: list[dict[str, Any]], reverse: bool) -> list[tuple[Decimal, Decimal]]:
-        levels = [(_dec(level["price"]), _dec(level["quantity"])) for level in raw[:15]]
-        return sorted(levels, key=lambda x: x[0], reverse=reverse)
+        levels = [(_dec(level["price"]), _dec(level["quantity"])) for level in raw]
+        return sorted(levels, key=lambda x: x[0], reverse=reverse)[:15]
 
     def _resolve_tick(self, books: dict[str, VenueBook]) -> Decimal:
         if self.tick is not None:
@@ -155,13 +136,55 @@ class MarketAggregator:
         grouped: dict[Decimal, dict[str, Decimal]] = defaultdict(lambda: defaultdict(Decimal))
         for venue, book in books.items():
             for price, quantity in getattr(book, side):
-                bucket = (price / tick).to_integral_value(rounding=rounding) * tick
+                effective = self._effective_price(price, venue, side == "asks")
+                bucket = (effective / tick).to_integral_value(rounding=rounding) * tick
                 grouped[bucket][venue] += quantity
         result = []
-        for price in sorted(grouped, reverse=reverse)[: self.depth]:
+        for price in sorted(grouped, reverse=reverse):
             contributions = {venue: self._fmt(qty) for venue, qty in sorted(grouped[price].items())}
             result.append({"price": self._fmt(price), "total_quantity": self._fmt(sum(grouped[price].values(), Decimal("0"))), "venues": contributions})
         return result
+
+    def _uncross(self, bids: list[dict[str, Any]], asks: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """Net crossed composite liquidity until best bid is below best ask."""
+        bid_index = ask_index = 0
+        while bid_index < len(bids) and ask_index < len(asks):
+            bid, ask = bids[bid_index], asks[ask_index]
+            if Decimal(bid["price"]) < Decimal(ask["price"]):
+                break
+            matched = min(Decimal(bid["total_quantity"]), Decimal(ask["total_quantity"]))
+            self._reduce_level(bid, matched)
+            self._reduce_level(ask, matched)
+            if Decimal(bid["total_quantity"]) == 0:
+                bid_index += 1
+            if Decimal(ask["total_quantity"]) == 0:
+                ask_index += 1
+        return ([level for level in bids[bid_index:] if Decimal(level["total_quantity"]) > 0], [level for level in asks[ask_index:] if Decimal(level["total_quantity"]) > 0])
+
+    def _reduce_level(self, level: dict[str, Any], quantity: Decimal) -> None:
+        level["total_quantity"] = self._fmt(Decimal(level["total_quantity"]) - quantity)
+        for venue in list(level["venues"]):
+            available = Decimal(level["venues"][venue])
+            consumed = min(available, quantity)
+            quantity -= consumed
+            available -= consumed
+            if available == 0:
+                del level["venues"][venue]
+            else:
+                level["venues"][venue] = self._fmt(available)
+            if quantity == 0:
+                break
+
+    @staticmethod
+    def _fee(value: str | Decimal) -> Decimal:
+        fee = _dec(value)
+        if fee >= 1:
+            raise ValueError("taker fee must be less than 1")
+        return fee
+
+    def _effective_price(self, price: Decimal, venue: str, is_ask: bool) -> Decimal:
+        fee = self.taker_fees.get(venue, Decimal("0"))
+        return price * (Decimal("1") + fee if is_ask else Decimal("1") - fee)
 
     def _trim_buckets(self, current: int) -> None:
         for start in list(self.trade_buckets):

@@ -50,11 +50,11 @@ def test_price_bucketing_is_side_aware():
             {"price": "100.01", "quantity": "4"},
         ],
     })
-    # Bid 100.99 floors to 100. The exact 100 ask overlaps the displayed bid
-    # and is removed, while the 100.01 ask ceils to 101.
-    assert [level["price"] for level in snapshot["bids"]] == ["100", "99"]
-    assert [level["price"] for level in snapshot["asks"]] == ["101"]
-    assert snapshot["bucket_method"] == "bid_floor_ask_ceiling"
+    # The 100 bid and ask are crossed after bucketing and are volume-netted.
+    assert [level["price"] for level in snapshot["bids"]] == ["99"]
+    assert [level["price"] for level in snapshot["asks"]] == ["100", "101"]
+    assert snapshot["asks"][0]["total_quantity"] == "2"
+    assert snapshot["bucket_method"] == "effective_price_bid_floor_ask_ceiling_uncrossed"
 
 
 def test_cross_venue_price_difference_does_not_empty_bid_side():
@@ -81,11 +81,11 @@ def test_cross_venue_price_difference_does_not_empty_bid_side():
 
     assert snapshot["bids"]
     assert snapshot["asks"]
-    assert snapshot["bids"][0]["price"] == "110"
-    assert snapshot["asks"][0]["price"] == "111"
+    assert snapshot["bids"][0]["price"] == "100"
+    assert snapshot["asks"][0]["price"] == "101"
 
 
-def test_crossed_asks_are_removed_from_displayed_book():
+def test_crossed_levels_are_volume_netted():
     agg = MarketAggregator(price_tick="1", depth=10)
     now = int(time.time() * 1000)
     snapshot = agg.apply_book({
@@ -98,8 +98,9 @@ def test_crossed_asks_are_removed_from_displayed_book():
         "asks": [{"price": "101", "quantity": "2"}, {"price": "111", "quantity": "3"}],
     })
 
-    assert [level["price"] for level in snapshot["bids"]] == ["110"]
-    assert [level["price"] for level in snapshot["asks"]] == ["111"]
+    assert [level["price"] for level in snapshot["bids"]] == []
+    assert [level["price"] for level in snapshot["asks"]] == ["101", "111"]
+    assert snapshot["asks"][0]["total_quantity"] == "1"
 
 
 def test_cross_venue_book_keeps_a_coherent_reference_pair():
@@ -125,7 +126,7 @@ def test_cross_venue_book_keeps_a_coherent_reference_pair():
     })
 
     assert snapshot["bids"][0]["price"] == "100"
-    assert snapshot["asks"][0]["price"] == "101"
+    assert snapshot["asks"][0]["price"] == "111"
     assert Decimal(snapshot["asks"][0]["price"]) > Decimal(snapshot["bids"][0]["price"])
 
 
@@ -164,6 +165,24 @@ def test_adaptive_tick_uses_finest_common_price_precision():
 def test_auto_price_tick_config_enables_inference(monkeypatch):
     monkeypatch.setenv("AGGREGATION_PRICE_TICK", "auto")
     assert Settings.from_env().price_tick is None
+    assert dict(Settings.from_env().taker_fees)["coinbase"] == "0.006"
+
+
+def test_taker_fees_are_applied_before_bucketing():
+    agg = MarketAggregator(price_tick="1", taker_fees={"venue-a": "0.01"})
+    now = int(time.time() * 1000)
+    snapshot = agg.apply_book({
+        "event_id": "fee-adjusted-book",
+        "event_type": "book_snapshot",
+        "venue": "venue-a",
+        "instrument": "BTCUSDT",
+        "received_ts_ms": now,
+        "bids": [{"price": "100", "quantity": "2"}],
+        "asks": [{"price": "100", "quantity": "3"}],
+    })
+    assert snapshot["bids"][0]["price"] == "99"
+    assert snapshot["asks"][0]["price"] == "101"
+    assert snapshot["taker_fees"] == {"venue-a": "0.01"}
 
 
 def test_configured_venues_exclude_binance_and_bybit():

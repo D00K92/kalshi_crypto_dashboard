@@ -18,7 +18,7 @@ class AggregatorService:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self.client = redis.Redis.from_url(settings.redis_url, decode_responses=False, health_check_interval=30)
-        self.state = MarketAggregator(settings.price_tick, settings.book_depth, settings.freshness_ms, settings.aggregation_venues)
+        self.state = MarketAggregator(settings.price_tick, settings.book_depth, settings.freshness_ms, settings.aggregation_venues, dict(settings.taker_fees))
         self.health = HealthServer(settings.health_port)
 
     async def run(self, stop_event: asyncio.Event) -> None:
