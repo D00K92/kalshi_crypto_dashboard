@@ -24,7 +24,7 @@ def layout() -> html.Div:
         html.Div([html.Div("KALSHI QUANT TERMINAL", className="title"), html.Div(id="status", className="status")], className="header"),
         dcc.Interval(id="refresh", interval=1000, n_intervals=0),
         html.Div([
-            html.Div([html.H3("BTCUSDT", className="panel-title"), html.Div(id="spot"), dcc.Graph(id="candles", config={"displayModeBar": False})], style=CARD),
+            html.Div([html.H3("BTCUSDT", className="panel-title"), dcc.Graph(id="candles", config={"displayModeBar": False})], style=CARD),
             html.Div([html.Div(id="orderbook")], style={"minWidth": 0}),
             html.Div([html.H3("Kalshi contract monitor", className="panel-title"), html.Div(id="kalshi-chain")], style=CARD),
         ], className="top-grid"),
@@ -51,15 +51,10 @@ def readyz():
     return {"status": "ready"}, 200
 
 
-@app.callback(Output("spot", "children"), Output("candles", "figure"), Output("orderbook", "children"), Output("kalshi-chain", "children"), Output("kalshi-contracts", "children"), Output("status", "children"), Input("refresh", "n_intervals"))
+@app.callback(Output("candles", "figure"), Output("orderbook", "children"), Output("kalshi-chain", "children"), Output("kalshi-contracts", "children"), Output("status", "children"), Input("refresh", "n_intervals"))
 def refresh(_: int):
     data = reader.read()
     price = data.spot.get("price")
-    try:
-        formatted_price = f"{float(price):.3f}" if price is not None else "—"
-    except (TypeError, ValueError):
-        formatted_price = "—"
-    spot = f"Synthetic average: {formatted_price} USDT · volume {data.spot.get('total_volume', '0')}"
     updated = datetime.now(timezone.utc).strftime("%H:%M:%S UTC")
     try:
         spot_price = float(price) if price is not None else None
@@ -67,7 +62,7 @@ def refresh(_: int):
         spot_price = None
     kalshi_rows = select_contract_window(data.kalshi_contracts, spot_price)
     status = f"Redis live · refreshed {updated}" if data.redis_ok else f"Redis unavailable · {data.redis_error}"
-    return spot, candle_figure(data.candles), orderbook_ladder(data.book), kalshi_monitor(kalshi_rows, data.spot), contract_table(kalshi_rows), status
+    return candle_figure(data.candles, price), orderbook_ladder(data.book), kalshi_monitor(kalshi_rows, data.spot), contract_table(kalshi_rows), status
 
 
 if __name__ == "__main__":

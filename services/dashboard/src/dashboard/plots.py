@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 VENUE_COLORS = {"binance": "#f0b90b", "coinbase": "#1652f0", "bybit": "#f5a623"}
 PAPER = "#111827"
@@ -17,13 +18,32 @@ def _figure(**kwargs: Any) -> go.Figure:
     return fig
 
 
-def candle_figure(rows: list[dict[str, Any]]) -> go.Figure:
+def candle_figure(rows: list[dict[str, Any]], synthetic_price: Any = None) -> go.Figure:
     # The aggregator retains an hour; the dashboard shows the latest 60 candles.
     rows = rows[-60:]
     x = [datetime.fromtimestamp(int(row["bucket_start_ts_ms"]) / 1000, tz=timezone.utc) for row in rows]
-    fig = _figure()
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.03, row_heights=[0.78, 0.22])
+    base = _figure()
+    fig.update_layout(base.layout)
     fig.add_trace(go.Candlestick(x=x, open=[row["open"] for row in rows], high=[row["high"] for row in rows], low=[row["low"] for row in rows], close=[row["close"] for row in rows], name="BTCUSDT", increasing_line_color="#19c37d", decreasing_line_color="#ef5350"))
-    fig.update_layout(xaxis_rangeslider_visible=False, xaxis=dict(type="date", tickformat="%H:%M:%S"), yaxis_title="BTC price", height=330, showlegend=False)
+    volumes = [float(row.get("volume") or 0) for row in rows]
+    colors = ["#19c37d" if float(row["close"]) >= float(row["open"]) else "#ef5350" for row in rows]
+    fig.add_trace(go.Bar(x=x, y=volumes, name="Volume", marker_color=colors, hovertemplate="%{x|%H:%M:%S} · %{y:.6f} BTC<extra></extra>"), row=2, col=1)
+    fig.update_layout(
+        xaxis_rangeslider_visible=False,
+        xaxis=dict(type="date", tickformat="%H:%M:%S"),
+        xaxis2=dict(type="date", tickformat="%H:%M:%S"),
+        yaxis_title="BTC price",
+        yaxis2_title="BTC volume",
+        height=390,
+        showlegend=False,
+    )
+    if synthetic_price is not None:
+        try:
+            displayed_price = f"Synthetic {float(synthetic_price):,.3f} USDT"
+            fig.add_annotation(x=0.99, y=0.98, xref="paper", yref="y domain", text=displayed_price, showarrow=False, xanchor="right", yanchor="top", font=dict(color="#f8fafc", size=12), bgcolor="rgba(17,24,39,.8)", bordercolor=GRID, borderpad=4)
+        except (TypeError, ValueError):
+            pass
     return fig
 
 
