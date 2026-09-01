@@ -20,6 +20,8 @@ def test_write_books_schema_and_round_trip() -> None:
     data = write_books([_row()])
     table = pq.read_table(io.BytesIO(data))
     assert table.schema == BOOK_SCHEMA
+    assert "venue" not in table.column_names
+    assert "instrument" not in table.column_names
     record = table.to_pylist()[0]
     assert json.loads(record["bids"])[0]["price"] == "100.00000001"
     assert json.loads(record["asks"])[0]["quantity"] == "2.5"

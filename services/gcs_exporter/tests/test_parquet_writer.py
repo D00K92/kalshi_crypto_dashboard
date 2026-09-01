@@ -16,6 +16,8 @@ def test_parquet_round_trip_has_fixed_schema_and_snappy_compression() -> None:
     metadata = pq.ParquetFile(pa.BufferReader(data)).metadata
 
     assert table.schema == TRADE_SCHEMA
+    assert "venue" not in table.column_names
+    assert "instrument" not in table.column_names
     assert table.column("redis_id").to_pylist() == [row.redis_id]
     assert table.column("quantity").type == pa.float32()
     assert metadata.row_group(0).column(0).compression == "SNAPPY"

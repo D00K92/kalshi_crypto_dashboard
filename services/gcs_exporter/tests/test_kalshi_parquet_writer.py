@@ -20,6 +20,7 @@ def test_write_kalshi_tickers_schema_and_nullable_prices() -> None:
     table = pq.read_table(io.BytesIO(data))
 
     assert table.schema == KALSHI_TICKER_SCHEMA
+    assert not {"venue", "instrument", "series_ticker", "event_ticker", "market_ticker"} & set(table.column_names)
     assert table.schema.metadata[b"dataset"] == b"kalshi_tickers"
     assert table.to_pylist()[0]["last_price_dollars"] is None
 
@@ -29,6 +30,7 @@ def test_write_kalshi_trades_schema_and_decimal_strings() -> None:
     table = pq.read_table(io.BytesIO(data))
 
     assert table.schema == KALSHI_TRADE_SCHEMA
+    assert not {"venue", "instrument", "series_ticker", "event_ticker", "market_ticker"} & set(table.column_names)
     assert table.to_pylist()[0]["yes_price_dollars"] == "0.51"
 
 
@@ -38,5 +40,6 @@ def test_write_kalshi_orderbooks_schema_and_levels_json() -> None:
     record = table.to_pylist()[0]
 
     assert table.schema == KALSHI_ORDERBOOK_SCHEMA
+    assert not {"venue", "instrument", "series_ticker", "event_ticker", "market_ticker"} & set(table.column_names)
     assert record["exchange_ts_ms"] is None
     assert json.loads(record["yes_bids"])[0]["quantity"] == "10.00"

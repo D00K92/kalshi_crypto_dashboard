@@ -19,8 +19,6 @@ TRADE_SCHEMA = pa.schema(
     [
         pa.field("redis_id", pa.string(), nullable=False),
         pa.field("event_id", pa.string(), nullable=False),
-        pa.field("venue", pa.string(), nullable=False),
-        pa.field("instrument", pa.string(), nullable=False),
         pa.field("trade_id", pa.string(), nullable=False),
         pa.field("price", pa.float64(), nullable=False),
         pa.field("quantity", pa.float32(), nullable=False),
@@ -42,8 +40,6 @@ def write_trades(rows: list[TradeRow]) -> bytes:
             {
                 "redis_id": row.redis_id,
                 "event_id": row.event_id,
-                "venue": row.venue,
-                "instrument": row.instrument,
                 "trade_id": row.trade_id,
                 "price": row.price,
                 "quantity": row.quantity,
@@ -61,7 +57,7 @@ def write_trades(rows: list[TradeRow]) -> bytes:
         table,
         output,
         compression="snappy",
-        use_dictionary=["venue", "instrument", "taker_side"],
+        use_dictionary=["taker_side"],
         write_statistics=True,
     )
     return output.getvalue().to_pybytes()
@@ -71,8 +67,6 @@ BOOK_SCHEMA = pa.schema(
     [
         pa.field("redis_id", pa.string(), nullable=False),
         pa.field("event_id", pa.string(), nullable=False),
-        pa.field("venue", pa.string(), nullable=False),
-        pa.field("instrument", pa.string(), nullable=False),
         pa.field("sequence", pa.int64(), nullable=False),
         pa.field("bids", pa.string(), nullable=False),
         pa.field("asks", pa.string(), nullable=False),
@@ -93,8 +87,6 @@ def write_books(rows: list[OrderBookRow]) -> bytes:
             {
                 "redis_id": row.redis_id,
                 "event_id": row.event_id,
-                "venue": row.venue,
-                "instrument": row.instrument,
                 "sequence": row.sequence,
                 "bids": orjson.dumps([{"price": p, "quantity": q} for p, q in row.bids]).decode(),
                 "asks": orjson.dumps([{"price": p, "quantity": q} for p, q in row.asks]).decode(),
@@ -112,7 +104,7 @@ def write_books(rows: list[OrderBookRow]) -> bytes:
         table,
         output,
         compression="snappy",
-        use_dictionary=["venue", "instrument"],
+        use_dictionary=False,
         write_statistics=True,
     )
     return output.getvalue().to_pybytes()
@@ -122,11 +114,6 @@ KALSHI_TICKER_SCHEMA = pa.schema(
     [
         pa.field("redis_id", pa.string(), nullable=False),
         pa.field("event_id", pa.string(), nullable=False),
-        pa.field("venue", pa.string(), nullable=False),
-        pa.field("instrument", pa.string(), nullable=False),
-        pa.field("series_ticker", pa.string(), nullable=False),
-        pa.field("event_ticker", pa.string(), nullable=False),
-        pa.field("market_ticker", pa.string(), nullable=False),
         pa.field("yes_bid_dollars", pa.string()),
         pa.field("yes_ask_dollars", pa.string()),
         pa.field("last_price_dollars", pa.string()),
@@ -144,11 +131,6 @@ KALSHI_TRADE_SCHEMA = pa.schema(
     [
         pa.field("redis_id", pa.string(), nullable=False),
         pa.field("event_id", pa.string(), nullable=False),
-        pa.field("venue", pa.string(), nullable=False),
-        pa.field("instrument", pa.string(), nullable=False),
-        pa.field("series_ticker", pa.string(), nullable=False),
-        pa.field("event_ticker", pa.string(), nullable=False),
-        pa.field("market_ticker", pa.string(), nullable=False),
         pa.field("trade_id", pa.string(), nullable=False),
         pa.field("yes_price_dollars", pa.string(), nullable=False),
         pa.field("count", pa.string(), nullable=False),
@@ -166,11 +148,6 @@ KALSHI_ORDERBOOK_SCHEMA = pa.schema(
         pa.field("redis_id", pa.string(), nullable=False),
         pa.field("event_id", pa.string(), nullable=False),
         pa.field("event_type", pa.string(), nullable=False),
-        pa.field("venue", pa.string(), nullable=False),
-        pa.field("instrument", pa.string(), nullable=False),
-        pa.field("series_ticker", pa.string(), nullable=False),
-        pa.field("event_ticker", pa.string(), nullable=False),
-        pa.field("market_ticker", pa.string(), nullable=False),
         pa.field("sequence", pa.int64(), nullable=False),
         pa.field("yes_bids", pa.string(), nullable=False),
         pa.field("no_bids", pa.string(), nullable=False),
@@ -193,11 +170,6 @@ def write_kalshi_tickers(rows: list[KalshiTickerRow]) -> bytes:
             {
                 "redis_id": row.redis_id,
                 "event_id": row.event_id,
-                "venue": row.venue,
-                "instrument": row.instrument,
-                "series_ticker": row.series_ticker,
-                "event_ticker": row.event_ticker,
-                "market_ticker": row.market_ticker,
                 "yes_bid_dollars": row.yes_bid_dollars,
                 "yes_ask_dollars": row.yes_ask_dollars,
                 "last_price_dollars": row.last_price_dollars,
@@ -221,11 +193,6 @@ def write_kalshi_trades(rows: list[KalshiTradeRow]) -> bytes:
             {
                 "redis_id": row.redis_id,
                 "event_id": row.event_id,
-                "venue": row.venue,
-                "instrument": row.instrument,
-                "series_ticker": row.series_ticker,
-                "event_ticker": row.event_ticker,
-                "market_ticker": row.market_ticker,
                 "trade_id": row.trade_id,
                 "yes_price_dollars": row.yes_price_dollars,
                 "count": row.count,
@@ -249,11 +216,6 @@ def write_kalshi_orderbooks(rows: list[KalshiOrderBookRow]) -> bytes:
                 "redis_id": row.redis_id,
                 "event_id": row.event_id,
                 "event_type": row.event_type,
-                "venue": row.venue,
-                "instrument": row.instrument,
-                "series_ticker": row.series_ticker,
-                "event_ticker": row.event_ticker,
-                "market_ticker": row.market_ticker,
                 "sequence": row.sequence,
                 "yes_bids": orjson.dumps([{"price": p, "quantity": q} for p, q in row.yes_bids]).decode(),
                 "no_bids": orjson.dumps([{"price": p, "quantity": q} for p, q in row.no_bids]).decode(),
@@ -277,7 +239,7 @@ def _write(records: list[dict[str, object]], schema: pa.Schema) -> bytes:
         table,
         output,
         compression="snappy",
-        use_dictionary=["venue", "instrument", "series_ticker", "event_ticker", "market_ticker"],
+        use_dictionary=False,
         write_statistics=True,
     )
     return output.getvalue().to_pybytes()
