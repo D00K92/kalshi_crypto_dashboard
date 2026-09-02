@@ -13,6 +13,7 @@ import pyarrow.parquet as pq
 from scripts import build_resampled_market_data
 from scripts.build_resampled_market_data import (
     _decode_books,
+    _resample_events,
     _resample_venue,
     _trade_events,
     hour_partition_path,
@@ -146,6 +147,37 @@ def test_resample_venue_uses_long_schema_and_requested_aggregations(monkeypatch)
     assert second["dt_fill_mean_ms"] == 250.0
     assert second["dt_fill_max_ms"] == 250.0
     assert second["dt_fill_min_ms"] == 250.0
+
+
+def test_resample_events_handles_entirely_null_book_levels_across_partitions() -> None:
+    timestamps = pd.to_datetime(
+        ["2026-09-01T00:00:00Z", "2026-09-01T01:00:00Z"]
+    )
+    ticks = pd.DataFrame(
+        {
+            "p_trade": [100.0, 101.0],
+            "v_trade": [1.0, 1.0],
+            "v_buy": [1.0, 0.0],
+            "v_sell": [0.0, 1.0],
+        },
+        index=timestamps,
+    )
+    books = pd.DataFrame(index=timestamps)
+    for level in range(1, 11):
+        books[f"p_bid_{level}"] = [99.0, np.nan] if level == 1 else np.nan
+        books[f"p_ask_{level}"] = [101.0, np.nan] if level == 1 else np.nan
+        books[f"q_bid_{level}"] = [2.0, 0.0] if level == 1 else 0.0
+        books[f"q_ask_{level}"] = [3.0, 0.0] if level == 1 else 0.0
+
+    result = _resample_events(
+        dd.from_pandas(ticks, npartitions=2),
+        dd.from_pandas(books, npartitions=2),
+        "bitstamp",
+        "1h",
+    ).compute()
+
+    assert result["p_bid_1"].tolist() == [99.0, 99.0]
+    assert result["p_bid_10"].isna().all()
 
 
 def test_write_dataset_keeps_hive_keys_out_of_parquet_payload(tmp_path) -> None:

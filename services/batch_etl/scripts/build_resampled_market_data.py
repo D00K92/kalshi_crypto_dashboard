@@ -247,6 +247,10 @@ def _resample_events(
         axis=1,
     )
     result = tick_bars.join(book_bars, how="outer")
+    # Dask cannot forward-fill through a partition that is entirely null for a
+    # column. The resampled frame is small, and a single partition also carries
+    # quote state correctly across source-hour boundaries.
+    result = result.repartition(npartitions=1)
     state_columns = ["p_trade", "p_high", "p_low", *book_price_columns]
     flow_columns = ["v_trade", "v_buy", "v_sell", "cnt_trade", *book_quote_columns]
     result[state_columns] = result[state_columns].ffill()
