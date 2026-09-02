@@ -14,6 +14,6 @@ COPY src ./src
 COPY scripts ./scripts
 
 RUN addgroup --system batch-etl && adduser --system --ingroup batch-etl batch-etl
-USER batch-etl
+USER 100:101
 
 ENTRYPOINT ["python", "scripts/run_hourly_resampling.py"]
