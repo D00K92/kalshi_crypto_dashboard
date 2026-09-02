@@ -16,7 +16,8 @@ if __package__:
         DEFAULT_OUTPUT_DATASET,
         FREQUENCIES,
         VENUES,
-        _resample_venue,
+        _load_venue_events,
+        _resample_events,
         write_hour_partition,
     )
 else:
@@ -25,7 +26,8 @@ else:
         DEFAULT_OUTPUT_DATASET,
         FREQUENCIES,
         VENUES,
-        _resample_venue,
+        _load_venue_events,
+        _resample_events,
         write_hour_partition,
     )
 
@@ -79,21 +81,25 @@ def run_hourly(
     )
     target_end = target + timedelta(hours=1)
 
-    for frequency in frequencies:
-        frequency_output = f"gs://{bucket}/{output_dataset.strip('/')}/frequency={frequency}"
-        expected_rows = EXPECTED_ROWS_PER_HOUR[frequency]
-        for venue in venues:
+    for venue in venues:
+        print(f"loading target={target.isoformat()} venue={venue}", flush=True)
+        tick_indexed, book_indexed = _load_venue_events(
+            fs=fs,
+            bucket=bucket,
+            venue=venue,
+            start=target.date(),
+            end=target.date(),
+            hour=target.strftime("%H"),
+            source_partitions=source_partitions,
+        )
+        tick_indexed = tick_indexed.persist()
+        book_indexed = book_indexed.persist()
+
+        for frequency in frequencies:
+            frequency_output = f"gs://{bucket}/{output_dataset.strip('/')}/frequency={frequency}"
+            expected_rows = EXPECTED_ROWS_PER_HOUR[frequency]
             print(f"resampling target={target.isoformat()} venue={venue} frequency={frequency}", flush=True)
-            result = _resample_venue(
-                fs=fs,
-                bucket=bucket,
-                venue=venue,
-                start=target.date(),
-                end=target.date(),
-                freq=FREQUENCIES[frequency],
-                hour=target.strftime("%H"),
-                source_partitions=source_partitions,
-            )
+            result = _resample_events(tick_indexed, book_indexed, venue, FREQUENCIES[frequency])
             target_result = result[
                 (result["timestamp"] >= pd.Timestamp(target))
                 & (result["timestamp"] < pd.Timestamp(target_end))
@@ -113,6 +119,8 @@ def run_hourly(
             )
             print(f"wrote rows={actual_rows} destination={destination}", flush=True)
             del target_result, result
+
+        del tick_indexed, book_indexed
 
 
 def main() -> None:

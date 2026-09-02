@@ -159,16 +159,15 @@ def _set_time_index(frame: dd.DataFrame) -> dd.DataFrame:
     return indexed.compute_current_divisions(set_divisions=True)
 
 
-def _resample_venue(
+def _load_venue_events(
     fs: gcsfs.GCSFileSystem,
     bucket: str,
     venue: str,
     start: date,
     end: date,
-    freq: str,
     hour: str | None,
     source_partitions: Iterable[tuple[date, str]] | None = None,
-) -> dd.DataFrame:
+) -> tuple[dd.DataFrame, dd.DataFrame]:
     partitioning = hive_partitioning()
     explicit_partitions = tuple(source_partitions) if source_partitions is not None else None
     tick_paths = (
@@ -210,7 +209,15 @@ def _resample_venue(
         book_meta[f"q_ask_{level}"] = "f8"
     book_events = books.map_partitions(_decode_books, meta=book_meta)
 
-    tick_indexed = _set_time_index(tick_events)
+    return _set_time_index(tick_events), _set_time_index(book_events)
+
+
+def _resample_events(
+    tick_indexed: dd.DataFrame,
+    book_indexed: dd.DataFrame,
+    venue: str,
+    freq: str,
+) -> dd.DataFrame:
     price_series = tick_indexed["p_trade"]
     positive_trades = tick_indexed[tick_indexed["v_trade"].gt(0)]
     dt_fill_ms = positive_trades.index.to_series().diff().dt.total_seconds() * 1000.0
@@ -230,7 +237,6 @@ def _resample_venue(
     tick_bars["v_sell"] = tick_indexed["v_sell"].resample(freq).sum()
     tick_bars["cnt_trade"] = tick_indexed["v_trade"].gt(0).resample(freq).sum()
 
-    book_indexed = _set_time_index(book_events)
     book_price_columns = [f"p_{side}_{level}" for level in range(1, BOOK_LEVELS + 1) for side in ("bid", "ask")]
     book_quote_columns = [f"q_{side}_{level}" for level in range(1, BOOK_LEVELS + 1) for side in ("bid", "ask")]
     book_bars = dd.concat(
@@ -248,6 +254,28 @@ def _resample_venue(
     result = result.reset_index()
     result["venue"] = venue
     return result
+
+
+def _resample_venue(
+    fs: gcsfs.GCSFileSystem,
+    bucket: str,
+    venue: str,
+    start: date,
+    end: date,
+    freq: str,
+    hour: str | None,
+    source_partitions: Iterable[tuple[date, str]] | None = None,
+) -> dd.DataFrame:
+    tick_indexed, book_indexed = _load_venue_events(
+        fs,
+        bucket,
+        venue,
+        start,
+        end,
+        hour,
+        source_partitions,
+    )
+    return _resample_events(tick_indexed, book_indexed, venue, freq)
 
 
 def build_dataset(fs: gcsfs.GCSFileSystem, args: argparse.Namespace) -> dd.DataFrame:
