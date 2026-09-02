@@ -37,7 +37,7 @@ def test_run_hourly_reads_boundary_context_and_writes_only_target(monkeypatch) -
         source = dd.from_pandas(pd.DataFrame({"value": [1]}), npartitions=1)
         return source, source
 
-    def fake_resample_events(_ticks, _books, venue, frequency):
+    def fake_resample_events(_ticks, _books, venue, frequency, **_kwargs):
         calls["resamples"].append((venue, frequency))
         periods = {"1h": 1, "30min": 2}[frequency]
         return dd.from_pandas(

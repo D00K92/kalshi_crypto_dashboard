@@ -217,6 +217,8 @@ def _resample_events(
     book_indexed: dd.DataFrame,
     venue: str,
     freq: str,
+    start: pd.Timestamp | None = None,
+    end: pd.Timestamp | None = None,
 ) -> dd.DataFrame:
     price_series = tick_indexed["p_trade"]
     positive_trades = tick_indexed[tick_indexed["v_trade"].gt(0)]
@@ -250,14 +252,24 @@ def _resample_events(
     # Dask cannot forward-fill through a partition that is entirely null for a
     # column. The resampled frame is small, and a single partition also carries
     # quote state correctly across source-hour boundaries.
-    result = result.repartition(npartitions=1)
+    result = result.repartition(npartitions=1).compute()
+    if not result.empty:
+        grid_start = (start if start is not None else result.index.min()).floor(freq)
+        grid_end = (
+            end
+            if end is not None
+            else result.index.max() + pd.tseries.frequencies.to_offset(freq)
+        ).ceil(freq)
+        full_index = pd.date_range(grid_start, grid_end, freq=freq, inclusive="left")
+        full_index.name = result.index.name or "timestamp"
+        result = result.reindex(full_index)
     state_columns = ["p_trade", "p_high", "p_low", *book_price_columns]
     flow_columns = ["v_trade", "v_buy", "v_sell", "cnt_trade", *book_quote_columns]
     result[state_columns] = result[state_columns].ffill()
     result[flow_columns] = result[flow_columns].fillna(0.0)
     result = result.reset_index()
     result["venue"] = venue
-    return result
+    return dd.from_pandas(result, npartitions=1)
 
 
 def _resample_venue(

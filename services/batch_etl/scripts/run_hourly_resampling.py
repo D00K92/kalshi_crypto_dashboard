@@ -99,7 +99,14 @@ def run_hourly(
             frequency_output = f"gs://{bucket}/{output_dataset.strip('/')}/frequency={frequency}"
             expected_rows = EXPECTED_ROWS_PER_HOUR[frequency]
             print(f"resampling target={target.isoformat()} venue={venue} frequency={frequency}", flush=True)
-            result = _resample_events(tick_indexed, book_indexed, venue, FREQUENCIES[frequency])
+            result = _resample_events(
+                tick_indexed,
+                book_indexed,
+                venue,
+                FREQUENCIES[frequency],
+                start=pd.Timestamp(previous),
+                end=pd.Timestamp(target_end),
+            )
             target_result = result[
                 (result["timestamp"] >= pd.Timestamp(target))
                 & (result["timestamp"] < pd.Timestamp(target_end))

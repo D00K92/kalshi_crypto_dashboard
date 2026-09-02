@@ -180,6 +180,48 @@ def test_resample_events_handles_entirely_null_book_levels_across_partitions() -
     assert result["p_bid_10"].isna().all()
 
 
+def test_resample_events_materializes_missing_regular_bins() -> None:
+    timestamps = pd.to_datetime(
+        ["2026-09-01T00:00:00Z", "2026-09-01T00:00:02Z"]
+    )
+    ticks = pd.DataFrame(
+        {
+            "p_trade": [100.0, 102.0],
+            "v_trade": [1.0, 2.0],
+            "v_buy": [1.0, 0.0],
+            "v_sell": [0.0, 2.0],
+        },
+        index=timestamps,
+    )
+    book_data = {}
+    for level in range(1, 11):
+        for side in ("bid", "ask"):
+            price_column = f"p_{side}_{level}"
+            quote_column = f"q_{side}_{level}"
+            book_data[price_column] = (
+                [99.0, 98.0] if side == "bid" and level == 1
+                else [101.0, 102.0] if side == "ask" and level == 1
+                else [np.nan, np.nan]
+            )
+            book_data[quote_column] = (
+                [1.0, 2.0] if level == 1 else [0.0, 0.0]
+            )
+    books = pd.DataFrame(book_data, index=timestamps)
+
+    result = _resample_events(
+        dd.from_pandas(ticks, npartitions=1),
+        dd.from_pandas(books, npartitions=1),
+        "binance",
+        "1s",
+        start=pd.Timestamp("2026-09-01T00:00:00Z"),
+        end=pd.Timestamp("2026-09-01T00:00:03Z"),
+    ).compute()
+
+    assert result["timestamp"].tolist() == list(pd.date_range("2026-09-01T00:00:00Z", periods=3, freq="1s"))
+    assert result["p_trade"].tolist() == [100.0, 100.0, 102.0]
+    assert result["v_trade"].tolist() == [1.0, 0.0, 2.0]
+
+
 def test_write_dataset_keeps_hive_keys_out_of_parquet_payload(tmp_path) -> None:
     output = tmp_path / "resampled"
     frame = dd.from_pandas(
