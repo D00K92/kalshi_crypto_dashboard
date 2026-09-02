@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kalshi-crypto-batch-etl"
+version = "0.1.0"
+description = "Dask batch ETL jobs for processed Kalshi crypto market datasets"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "dask[dataframe]>=2025.9,<2027",
+    "gcsfs>=2025.9,<2027",
+    "numpy>=2.0,<3",
+    "pandas>=2.2,<3",
+    "pyarrow>=20,<24",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4,<10",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+pythonpath = ["."]
+testpaths = ["tests"]

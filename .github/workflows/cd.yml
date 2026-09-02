@@ -89,6 +89,15 @@ jobs:
         docker build --platform linux/amd64 -t "${IMAGE_URI}:${IMAGE_TAG}" services/dashboard
         docker push "${IMAGE_URI}:${IMAGE_TAG}"
 
+    - name: Build and push batch ETL image
+      env:
+        IMAGE_URI: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/batch-etl
+        IMAGE_TAG: ${{ github.event.workflow_run.head_sha || github.sha }}
+      run: |
+        set -euo pipefail
+        docker build --platform linux/amd64 -t "${IMAGE_URI}:${IMAGE_TAG}" services/batch_etl
+        docker push "${IMAGE_URI}:${IMAGE_TAG}"
+
     - name: Get GKE credentials
       uses: google-github-actions/get-gke-credentials@v3
       with:
@@ -116,6 +125,7 @@ jobs:
         INGESTION_IMAGE: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/ingestion:${{ github.event.workflow_run.head_sha || github.sha }}
         MARKET_AGGREGATOR_IMAGE: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/market-aggregator:${{ github.event.workflow_run.head_sha || github.sha }}
         DASHBOARD_IMAGE: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/dashboard:${{ github.event.workflow_run.head_sha || github.sha }}
+        BATCH_ETL_IMAGE: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/batch-etl:${{ github.event.workflow_run.head_sha || github.sha }}
         REDIS_HOST: ${{ steps.redis.outputs.host }}
       run: |
         set -euo pipefail
@@ -131,6 +141,9 @@ jobs:
         envsubst '${DASHBOARD_IMAGE} ${REDIS_HOST} ${REDIS_PORT}' \
           < k8s/dashboard-deployment.yaml \
           | kubectl apply -f -
+        envsubst '${BATCH_ETL_IMAGE} ${GCS_BUCKET_NAME}' \
+          < k8s/batch-etl-cronjob.yaml \
+          | kubectl apply -f -
 
     - name: Verify rollouts
       run: |
@@ -139,3 +152,4 @@ jobs:
         kubectl rollout status deployment/ingestion-service --timeout=5m
         kubectl rollout status deployment/market-aggregator --timeout=5m
         kubectl rollout status deployment/dashboard --timeout=5m
+        kubectl get cronjob/batch-etl
