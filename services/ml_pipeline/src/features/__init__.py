@@ -1,2 +1,0 @@
-"""Versioned modeling feature definitions."""
-

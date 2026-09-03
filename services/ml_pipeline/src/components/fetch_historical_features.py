@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import pandas as pd
-from feast import FeatureStore
 
 
 def fetch_historical_features(repo_path: str, entities: pd.DataFrame) -> pd.DataFrame:
@@ -15,6 +14,7 @@ def fetch_historical_features(repo_path: str, entities: pd.DataFrame) -> pd.Data
     missing = required.difference(entities.columns)
     if missing:
         raise ValueError(f"missing entity columns: {sorted(missing)}")
+    from feast import FeatureStore
     store = FeatureStore(repo_path=repo_path)
     return store.get_historical_features(
         entity_df=entities[["asset", "frequency", "event_timestamp"]].sort_values("event_timestamp"),

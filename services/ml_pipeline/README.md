@@ -1,8 +1,8 @@
 # ML Pipeline
 
-`ml_pipeline` owns modeling-facing feature engineering and Kubeflow pipeline
-components. It consumes processed parquet produced by `batch_etl`; it should
-not parse raw tick/book exporter data directly.
+`ml_pipeline` owns model training, evaluation, retraining decisions, and Vertex
+AI lifecycle operations. Feature and target generation, Feast definitions, and
+online-store materialization are owned by `batch_etl`.
 
 ### Current input layout:
 
@@ -32,12 +32,14 @@ an entity dataframe containing `event_timestamp`; join future-volatility targets
 only after Feast returns the point-in-time feature rows.
 
 
-### Planned scope:
+### Scope:
 
 - Kubeflow pipeline definitions
 - KFP components written in Python
-- feature engineering from `batch_etl` parquet datasets
 - model training, validation, and evaluation jobs
+- Vertex AI model registration and deployment
+- point-in-time historical feature retrieval through the Feast contract owned by
+  `batch_etl`
 
 ### Directory Structure
 ```
