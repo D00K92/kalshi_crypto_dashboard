@@ -1,0 +1,65 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: batch-etl-features
+  namespace: default
+spec:
+  schedule: "30 * * * *"
+  timeZone: "Etc/UTC"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 1800
+      ttlSecondsAfterFinished: 86400
+      template:
+        spec:
+          serviceAccountName: batch-etl
+          restartPolicy: Never
+          nodeSelector:
+            cloud.google.com/gke-spot: "true"
+          containers:
+          - name: feature-builder
+            image: "${BATCH_ETL_IMAGE}"
+            command: ["python", "scripts/build_features.py"]
+            env:
+            - name: GCS_BUCKET_NAME
+              value: "${GCS_BUCKET_NAME}"
+            resources:
+              requests: {cpu: "500m", memory: "1Gi"}
+              limits: {cpu: "2000m", memory: "4Gi"}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: batch-etl-targets
+  namespace: default
+spec:
+  schedule: "45 * * * *"
+  timeZone: "Etc/UTC"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 1800
+      ttlSecondsAfterFinished: 86400
+      template:
+        spec:
+          serviceAccountName: batch-etl
+          restartPolicy: Never
+          nodeSelector:
+            cloud.google.com/gke-spot: "true"
+          containers:
+          - name: target-builder
+            image: "${BATCH_ETL_IMAGE}"
+            command: ["python", "scripts/build_future_volatility_targets.py"]
+            env:
+            - name: GCS_BUCKET_NAME
+              value: "${GCS_BUCKET_NAME}"
+            resources:
+              requests: {cpu: "500m", memory: "1Gi"}
+              limits: {cpu: "2000m", memory: "4Gi"}

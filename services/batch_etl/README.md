@@ -149,3 +149,28 @@ Open data structure questions:
 
 - Whether `frequency` should remain a path component or become a Hive partition
   column at the same level as `date` and `hour`.
+
+### Hourly features and Feast sync
+
+After resampling completes, build the single venue-agnostic feature partition:
+
+```bash
+python scripts/build_features.py --target-hour 2026-09-01T08:00:00Z
+```
+
+The job writes `features/v1/date=YYYY-MM-DD/features.parquet`. Feast
+definitions and materialization are owned by this service under `feature_store/`
+and should run in a Feast-compatible image using `feature_store/requirements.txt`.
+
+### Resumable backfill
+
+Backfill any bounded UTC range; `--resume` skips partitions already present:
+
+```bash
+python scripts/backfill_features_targets.py \
+  --start-hour 2026-08-31T08:00:00Z \
+  --end-hour 2026-09-02T23:00:00Z \
+  --resume
+```
+
+Use `--features-only` or `--targets-only` to retry one side independently.

@@ -1,0 +1,6 @@
+project: kalshi_crypto
+registry: gs://kalshi-crypto-tick-data/feature_store/registry.db
+provider: local
+online_store:
+  type: redis
+  connection_string: redis://redis.default.svc.cluster.local:6379/0

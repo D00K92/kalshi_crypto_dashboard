@@ -144,6 +144,9 @@ jobs:
         envsubst '${BATCH_ETL_IMAGE} ${GCS_BUCKET_NAME}' \
           < k8s/batch-etl-cronjob.yaml \
           | kubectl apply -f -
+        envsubst '${BATCH_ETL_IMAGE} ${GCS_BUCKET_NAME}' \
+          < k8s/batch-etl-feature-cronjobs.yaml \
+          | kubectl apply -f -
 
     - name: Verify rollouts
       run: |
@@ -153,3 +156,4 @@ jobs:
         kubectl rollout status deployment/market-aggregator --timeout=5m
         kubectl rollout status deployment/dashboard --timeout=5m
         kubectl get cronjob/batch-etl
+        kubectl get cronjob/batch-etl-features cronjob/batch-etl-targets
