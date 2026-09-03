@@ -11,6 +11,7 @@ VENUES = ("binance", "bitstamp", "coinbase", "crypto.com", "gemini", "kraken")
 FREQUENCIES = {"1s": 1, "5s": 5, "1m": 60, "5m": 300, "10m": 600, "30m": 1800, "1h": 3600}
 HORIZONS = (60, 300, 900, 1800, 3600)
 LABELS = {60: "1m", 300: "5m", 900: "15m", 1800: "30m", 3600: "1h"}
+SECONDS_PER_YEAR = 365 * 24 * 60 * 60  # crypto trades continuously
 
 def _paths(fs, bucket, dataset, venue, frequency, hour):
     pattern = f"{bucket}/{dataset.strip('/')}/frequency={frequency}/date={hour.date()}/hour={hour:%H}/venue={venue}/*.parquet"
@@ -31,7 +32,8 @@ def _build_frequency(frames, frequency, bar_seconds, target):
     result = pd.DataFrame({"timestamp": synthetic.index, "synthetic_price": synthetic})
     for horizon in HORIZONS:
         periods = max(1, int(np.ceil(horizon / bar_seconds)))
-        result[f"target_rv_{LABELS[horizon]}"] = np.sqrt(returns.pow(2).rolling(periods, min_periods=periods).sum().shift(-periods))
+        realized = np.sqrt(returns.pow(2).rolling(periods, min_periods=periods).sum().shift(-periods))
+        result[f"target_rv_{LABELS[horizon]}"] = realized * np.sqrt(SECONDS_PER_YEAR / horizon)
     result["frequency"] = frequency
     return result[(result["timestamp"] >= target) & (result["timestamp"] < end)]
 

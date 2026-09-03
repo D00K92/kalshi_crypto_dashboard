@@ -16,6 +16,7 @@ WINDOWS_SECONDS = (30, 60, 300, 900, 1800, 3600)
 TARGET_HORIZONS_SECONDS = (60, 300, 900, 1800, 3600)
 BOOK_LEVELS = (1, 5, 10)
 FREQUENCY_LABELS = {1: "1s", 5: "5s", 60: "1m", 300: "5m", 600: "10m", 1800: "30m", 3600: "1h"}
+SECONDS_PER_YEAR = 365 * 24 * 60 * 60  # crypto trades continuously
 
 
 def _ratio(numerator: pd.Series, denominator: pd.Series) -> pd.Series:
@@ -101,7 +102,8 @@ def compute_synthetic_targets(frames: Mapping[str, pd.DataFrame], bar_seconds: i
     result = pd.DataFrame({"timestamp": synthetic.index, "synthetic_price": synthetic})
     for horizon in TARGET_HORIZONS_SECONDS:
         n = _periods(horizon, bar_seconds)
-        result[f"target_vol_{horizon}s"] = np.sqrt(returns.pow(2).rolling(n, min_periods=n).sum().shift(-n))
+        realized = np.sqrt(returns.pow(2).rolling(n, min_periods=n).sum().shift(-n))
+        result[f"target_vol_{horizon}s"] = realized * np.sqrt(SECONDS_PER_YEAR / horizon)
     return result.reset_index(drop=True)
 
 
