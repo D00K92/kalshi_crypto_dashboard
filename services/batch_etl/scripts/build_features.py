@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 
 import gcsfs
 
-from kalshi_crypto_batch_etl.features.load_data import COMPLETED_VENUES, FREQUENCIES, load_completed_venues
+from kalshi_crypto_batch_etl.features.load_data import COMPLETED_VENUES, FREQUENCIES, load_venue_frame
 from kalshi_crypto_batch_etl.features.preprocess import prepare_venue_frames
 from kalshi_crypto_batch_etl.features.v1_features import build_v1_dataset_by_frequency
 
@@ -33,8 +33,16 @@ def main() -> None:
     frames = {}
     for frequency in frequencies:
         seconds = int({'1s': 1, '5s': 5, '1m': 60, '5m': 300, '10m': 600, '30m': 1800, '1h': 3600}[frequency])
-        loaded = load_completed_venues(fs, venues=venues, bucket=args.bucket, dataset=args.input_dataset,
-                                       frequency=frequency, start=target.date(), end=target.date(), hour=f"{target:%H}")
+        loaded = {}
+        for venue in venues:
+            try:
+                loaded[venue] = load_venue_frame(fs, bucket=args.bucket, dataset=args.input_dataset,
+                                                 venue=venue, frequency=frequency, start=target.date(),
+                                                 end=target.date(), hour=f"{target:%H}")
+            except FileNotFoundError:
+                print(f"skipping missing {frequency} data for {venue}", flush=True)
+        if not loaded:
+            raise FileNotFoundError(f"no {frequency} data available for {target:%Y-%m-%d} {target:%H}:00")
         frames[seconds] = prepare_venue_frames(loaded)
     result = build_v1_dataset_by_frequency(frames)
     output = f"gs://{args.bucket}/{args.output.rstrip('/')}/date={target.date().isoformat()}/features.parquet"

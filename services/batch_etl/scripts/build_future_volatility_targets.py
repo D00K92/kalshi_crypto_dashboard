@@ -43,12 +43,22 @@ def build_hour(fs, bucket: str, dataset: str, target: datetime, venues: tuple[st
         venue_prices = []
         for venue in venues:
             # One extra hour is required for the 1h forward label.
-            frame = _load(fs, bucket, dataset, venue, frequency, target.date(), f"{target:%H}")
+            try:
+                frame = _load(fs, bucket, dataset, venue, frequency, target.date(), f"{target:%H}")
+            except FileNotFoundError:
+                print(f"skipping missing {frequency} data for {venue}", flush=True)
+                continue
             next_hour = end.strftime("%H")
-            frame = pd.concat([frame, _load(fs, bucket, dataset, venue, frequency,
-                                             end.date(), next_hour)], ignore_index=True)
+            try:
+                next_frame = _load(fs, bucket, dataset, venue, frequency, end.date(), next_hour)
+            except FileNotFoundError:
+                print(f"skipping {venue}: missing look-ahead hour for {frequency}", flush=True)
+                continue
+            frame = pd.concat([frame, next_frame], ignore_index=True)
             frame["timestamp"] = pd.to_datetime(frame["timestamp"], utc=True)
             venue_prices.append(frame.set_index("timestamp")["p_trade_mean"].rename(venue))
+        if not venue_prices:
+            raise FileNotFoundError(f"no {frequency} venue data available for {target.isoformat()}")
         synthetic = pd.concat(venue_prices, axis=1).mean(axis=1, skipna=True).sort_index()
         returns = np.log(synthetic / synthetic.shift(1)).replace([np.inf, -np.inf], np.nan)
         result = pd.DataFrame({"timestamp": synthetic.index, "synthetic_price": synthetic})
