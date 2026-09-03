@@ -54,6 +54,7 @@ def main() -> None:
     table = load_training_table(fs, args.feature_root, args.target_root, args.start_date, args.end_date)
     for horizon in HORIZONS:
         model, metadata = train_horizon(table, horizon)
+        metadata["training_cutoff"] = table.attrs.get("training_cutoff")
         print(json.dumps(metadata["metrics"] | {"horizon": horizon}), flush=True)
         if args.upload:
             print(upload_to_vertex(model, metadata, project=args.project, location=args.location,

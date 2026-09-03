@@ -27,6 +27,10 @@ def load_training_data(
 
     fs = gcsfs.GCSFileSystem()
     start, end = datetime.date.fromisoformat(start_date), datetime.date.fromisoformat(end_date)
+    yesterday = datetime.datetime.now(datetime.timezone.utc).date() - datetime.timedelta(days=1)
+    if end > yesterday:
+        raise ValueError(f"training end date {end} exceeds policy cutoff {yesterday}")
+    cutoff = pd.Timestamp(end, tz="UTC") + pd.Timedelta(days=1) - pd.Timedelta(hours=1)
     features = [pd.read_parquet(f"{feature_root.rstrip('/')}/date={day}/features.parquet", filesystem=fs)
                 for day in days(start, end)
                 if fs.exists(f"{feature_root.rstrip('/')}/date={day}/features.parquet")]
@@ -38,7 +42,10 @@ def load_training_data(
     left, right = pd.concat(features, ignore_index=True), pd.concat(targets, ignore_index=True)
     left["timestamp"] = pd.to_datetime(left["timestamp"], utc=True)
     right["timestamp"] = pd.to_datetime(right["timestamp"], utc=True)
+    left, right = left[left["timestamp"] <= cutoff], right[right["timestamp"] <= cutoff]
     joined = left.merge(right, on=["timestamp", "frequency"], how="inner", suffixes=("", "_target"))
+    if joined.empty:
+        raise RuntimeError(f"no eligible feature/target rows at or before {cutoff.isoformat()}")
     joined.to_parquet(output_dataset.path, index=False, compression="snappy")
 
 
