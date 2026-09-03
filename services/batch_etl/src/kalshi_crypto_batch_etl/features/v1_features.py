@@ -79,14 +79,15 @@ def compute_v1_features(frame: pd.DataFrame, bar_seconds: int, venue: str) -> pd
     log_lo = np.log(pdf["p_low"] / pdf["p_open"]).replace([np.inf, -np.inf], np.nan)
     for window in WINDOWS_SECONDS:
         n = _periods(window, bar_seconds)
+        min_periods = min(n, max(2, n // 5))
         squared = returns.pow(2)
-        rv2 = squared.rolling(n, min_periods=max(2, n // 5)).sum()
-        bv2 = (np.pi / 2 * returns.abs() * returns.abs().shift(1)).rolling(n, min_periods=max(2, n // 5)).sum()
+        rv2 = squared.rolling(n, min_periods=min_periods).sum()
+        bv2 = (np.pi / 2 * returns.abs() * returns.abs().shift(1)).rolling(n, min_periods=min_periods).sum()
         out[f"rv_{window}s"] = np.sqrt(rv2)
         out[f"bv_{window}s"] = np.sqrt(bv2)
         out[f"jump_component_{window}s"] = (rv2 - bv2).clip(lower=0)
         gk = 0.511 * log_hl.pow(2) - 0.019 * (log_co * np.log((pdf["p_high"] * pdf["p_low"]) / pdf["p_open"].pow(2)) - 2 * log_ho * log_lo) - 0.383 * log_co.pow(2)
-        out[f"gk_vol_{window}s"] = np.sqrt(gk.clip(lower=0).rolling(n, min_periods=max(2, n // 5)).mean())
+        out[f"gk_vol_{window}s"] = np.sqrt(gk.clip(lower=0).rolling(n, min_periods=min_periods).mean())
     return out
 
 
