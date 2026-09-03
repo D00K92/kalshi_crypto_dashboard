@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from datetime import date
+from datetime import date, timedelta
 
 import gcsfs
 import pandas as pd
-
-from src.common.data_io import dates
 
 DEFAULT_BUCKET = "kalshi-crypto-tick-data"
 DEFAULT_DATASET = "processed/resampled_market_data"
@@ -16,7 +14,13 @@ COMPLETED_VENUES = ("binance", "bitstamp", "coinbase", "crypto_com", "gemini")
 FREQUENCIES = ("1s", "5s", "1m", "5m", "10m", "30m", "1h")
 
 
-_dates = dates
+def _dates(start: date, end: date) -> Iterable[date]:
+    if end < start:
+        raise ValueError("end date must not precede start date")
+    current = start
+    while current <= end:
+        yield current
+        current += timedelta(days=1)
 
 
 def _paths(dataset: str, venue: str, frequency: str, start: date, end: date,
