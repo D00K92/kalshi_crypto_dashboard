@@ -10,7 +10,7 @@ import pandas as pd
 
 DEFAULT_BUCKET = "kalshi-crypto-tick-data"
 DEFAULT_DATASET = "processed/resampled_market_data"
-COMPLETED_VENUES = ("binance", "bitstamp", "coinbase", "crypto_com", "gemini")
+COMPLETED_VENUES = ("binance", "bitstamp", "coinbase", "crypto.com", "gemini", "kraken")
 FREQUENCIES = ("1s", "5s", "1m", "5m", "10m", "30m", "1h")
 
 

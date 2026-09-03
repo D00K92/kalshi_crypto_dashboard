@@ -14,7 +14,7 @@ import gcsfs
 import numpy as np
 import pandas as pd
 
-VENUES = ("binance", "bitstamp", "coinbase", "crypto_com", "gemini")
+VENUES = ("binance", "bitstamp", "coinbase", "crypto.com", "gemini", "kraken")
 FREQUENCIES = {"1s": 1, "5s": 5, "1m": 60, "5m": 300, "10m": 600, "30m": 1800, "1h": 3600}
 HORIZONS = (60, 300, 900, 1800, 3600)
 HORIZON_LABELS = {60: "1m", 300: "5m", 900: "15m", 1800: "30m", 3600: "1h"}
