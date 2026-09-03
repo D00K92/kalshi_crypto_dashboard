@@ -106,6 +106,14 @@ def source_partition_paths(
     ]
 
 
+def _existing_source_paths(fs: gcsfs.GCSFileSystem | None, paths: Iterable[str]) -> list[str]:
+    """Drop empty globs so Dask does not infer a schema from no files."""
+    candidates = list(paths)
+    if fs is None:
+        return candidates
+    return [path for path in candidates if fs.glob(path)]
+
+
 def _parse_levels(value: object, levels: int = BOOK_LEVELS) -> list[tuple[float, float]]:
     parsed: list[tuple[float, float]] = []
     try:
@@ -180,6 +188,10 @@ def _load_venue_events(
         if explicit_partitions is not None
         else source_paths(bucket, "books", venue, start, end, hour)
     )
+    tick_paths = _existing_source_paths(fs, tick_paths)
+    book_paths = _existing_source_paths(fs, book_paths)
+    if not tick_paths or not book_paths:
+        raise FileNotFoundError(f"no tick/book source files for venue={venue}")
     ticks = dd.read_parquet(
         tick_paths,
         engine="pyarrow",

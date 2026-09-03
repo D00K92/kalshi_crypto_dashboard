@@ -23,6 +23,15 @@ from scripts.build_resampled_market_data import (
 )
 
 
+def test_existing_source_paths_filters_empty_globs() -> None:
+    class FakeFS:
+        def glob(self, path: str) -> list[str]:
+            return [path] if path.endswith("present") else []
+
+    paths = ["gs://bucket/missing", "gs://bucket/present"]
+    assert build_resampled_market_data._existing_source_paths(FakeFS(), paths) == [paths[1]]
+
+
 def test_trade_events_splits_taker_side_volume() -> None:
     raw = pd.DataFrame(
         {
