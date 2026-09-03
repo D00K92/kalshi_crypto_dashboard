@@ -128,7 +128,10 @@ def test_resample_venue_uses_long_schema_and_requested_aggregations(monkeypatch)
     assert "venue" in result.columns
     assert not any(column.startswith("binance_") for column in result.columns)
     assert first["venue"] == "binance"
+    assert first["p_open"] == 100.0
     assert first["p_trade"] == 103.0
+    assert first["p_close"] == 103.0
+    assert first["p_trade_mean"] == (100.0 + 101.0 + 103.0) / 3.0
     assert first["p_high"] == 103.0
     assert first["p_low"] == 100.0
     assert first["v_trade"] == 3.5
@@ -140,8 +143,8 @@ def test_resample_venue_uses_long_schema_and_requested_aggregations(monkeypatch)
     assert first["dt_fill_min_ms"] == 750.0
     assert first["p_bid_1"] == 98.0
     assert first["p_ask_1"] == 102.0
-    assert first["q_bid_1"] == 3.0
-    assert first["q_ask_1"] == 7.0
+    assert first["q_bid_1"] == 2.0
+    assert first["q_ask_1"] == 4.0
 
     second = result.iloc[1]
     assert second["dt_fill_mean_ms"] == 250.0
@@ -220,6 +223,38 @@ def test_resample_events_materializes_missing_regular_bins() -> None:
     assert result["timestamp"].tolist() == list(pd.date_range("2026-09-01T00:00:00Z", periods=3, freq="1s"))
     assert result["p_trade"].tolist() == [100.0, 100.0, 102.0]
     assert result["v_trade"].tolist() == [1.0, 0.0, 2.0]
+
+
+def test_resample_events_handles_subsecond_source_partitions() -> None:
+    timestamps = pd.to_datetime(
+        ["2026-09-01T00:00:00.000Z", "2026-09-01T00:00:00.100Z"]
+    )
+    ticks = pd.DataFrame(
+        {
+            "p_trade": [100.0, 101.0],
+            "v_trade": [1.0, 1.0],
+            "v_buy": [1.0, 0.0],
+            "v_sell": [0.0, 1.0],
+        },
+        index=timestamps,
+    )
+    books = pd.DataFrame(index=timestamps)
+    for level in range(1, 11):
+        for side in ("bid", "ask"):
+            books[f"p_{side}_{level}"] = 100.0
+            books[f"q_{side}_{level}"] = 1.0
+
+    result = _resample_events(
+        dd.from_pandas(ticks, npartitions=2),
+        dd.from_pandas(books, npartitions=2),
+        "kraken",
+        "1s",
+        start=pd.Timestamp("2026-09-01T00:00:00Z"),
+        end=pd.Timestamp("2026-09-01T00:00:01Z"),
+    ).compute()
+
+    assert len(result) == 1
+    assert result.iloc[0]["cnt_trade"] == 2
 
 
 def test_write_dataset_keeps_hive_keys_out_of_parquet_payload(tmp_path) -> None:

@@ -220,12 +220,25 @@ def _resample_events(
     start: pd.Timestamp | None = None,
     end: pd.Timestamp | None = None,
 ) -> dd.DataFrame:
+    # Dask's resample uses an overlap window. Raw exporter files can create
+    # adjacent divisions narrower than that window (notably Kraken), which
+    # makes even a 1-second resample fail before the output is materialized.
+    # The runner loads at most two source hours, so hourly divisions preserve
+    # bounded memory while guaranteeing a safe partition width.
+    if tick_indexed.npartitions > 1:
+        tick_indexed = tick_indexed.repartition(freq="1h")
+    if book_indexed.npartitions > 1:
+        book_indexed = book_indexed.repartition(freq="1h")
+
     price_series = tick_indexed["p_trade"]
     positive_trades = tick_indexed[tick_indexed["v_trade"].gt(0)]
     dt_fill_ms = positive_trades.index.to_series().diff().dt.total_seconds() * 1000.0
     tick_bars = dd.concat(
         [
+            price_series.resample(freq).first().rename("p_open"),
             price_series.resample(freq).last().rename("p_trade"),
+            price_series.resample(freq).last().rename("p_close"),
+            price_series.resample(freq).mean().rename("p_trade_mean"),
             price_series.resample(freq).max().rename("p_high"),
             price_series.resample(freq).min().rename("p_low"),
             dt_fill_ms.resample(freq).mean().rename("dt_fill_mean_ms"),
@@ -244,7 +257,10 @@ def _resample_events(
     book_bars = dd.concat(
         [
             book_indexed[book_price_columns].resample(freq).last(),
-            book_indexed[book_quote_columns].resample(freq).sum(),
+            # Quantities describe the book state, so retain the latest
+            # snapshot. Summing them across updates makes depth-based
+            # features (WAP, OBI, slope, HHI) physically meaningless.
+            book_indexed[book_quote_columns].resample(freq).last(),
         ],
         axis=1,
     )
@@ -263,8 +279,8 @@ def _resample_events(
         full_index = pd.date_range(grid_start, grid_end, freq=freq, inclusive="left")
         full_index.name = result.index.name or "timestamp"
         result = result.reindex(full_index)
-    state_columns = ["p_trade", "p_high", "p_low", *book_price_columns]
-    flow_columns = ["v_trade", "v_buy", "v_sell", "cnt_trade", *book_quote_columns]
+    state_columns = ["p_open", "p_trade", "p_close", "p_high", "p_low", *book_price_columns, *book_quote_columns]
+    flow_columns = ["v_trade", "v_buy", "v_sell", "cnt_trade"]
     result[state_columns] = result[state_columns].ffill()
     result[flow_columns] = result[flow_columns].fillna(0.0)
     result = result.reset_index()

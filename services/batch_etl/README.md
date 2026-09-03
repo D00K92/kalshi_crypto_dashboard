@@ -88,7 +88,10 @@ Physical Parquet columns:
 
 ```text
 timestamp
+p_open
 p_trade
+p_close
+p_trade_mean
 p_high
 p_low
 v_trade
