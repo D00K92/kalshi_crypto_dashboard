@@ -28,11 +28,15 @@ def train_horizon(table: pd.DataFrame, horizon: str, seed: int = 42) -> tuple[XG
     model.fit(X.iloc[:train_end], y.iloc[:train_end],
               eval_set=[(X.iloc[train_end:valid_end], y.iloc[train_end:valid_end])], verbose=False)
     prediction = np.maximum(model.predict(X.iloc[valid_end:]), 0.0)
+    actual = y.iloc[valid_end:].to_numpy()
+    forecast_variance = np.maximum(prediction * prediction, 1e-18)
+    actual_variance = np.maximum(actual * actual, 1e-18)
     metadata = {
         "horizon": horizon, "target": target, "feature_columns": columns,
         "rows": {"total": n, "train": train_end, "validation": valid_end - train_end,
                  "test": n - valid_end}, "prediction_floor": 0.0,
         "metrics": {
+            "qlike": float(np.mean(np.log(forecast_variance) + actual_variance / forecast_variance)),
             "rmse": float(np.sqrt(mean_squared_error(y.iloc[valid_end:], prediction))),
             "mae": float(mean_absolute_error(y.iloc[valid_end:], prediction)),
             "r2": float(r2_score(y.iloc[valid_end:], prediction)),

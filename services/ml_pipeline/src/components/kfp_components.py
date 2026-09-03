@@ -46,6 +46,12 @@ def load_training_data(
     joined = left.merge(right, on=["timestamp", "frequency"], how="inner", suffixes=("", "_target"))
     if joined.empty:
         raise RuntimeError(f"no eligible feature/target rows at or before {cutoff.isoformat()}")
+    required_freqs = {"1s", "5s", "1m", "5m", "10m", "30m", "1h"}
+    required_targets = {"target_rv_1m", "target_rv_5m", "target_rv_15m", "target_rv_30m", "target_rv_1h"}
+    if not required_freqs.issubset(set(joined["frequency"].dropna().unique())):
+        raise RuntimeError("training data is missing one or more required frequencies")
+    if not required_targets.issubset(joined.columns) or joined[list(required_targets)].notna().sum().min() == 0:
+        raise RuntimeError("training data has incomplete target coverage")
     joined.to_parquet(output_dataset.path, index=False, compression="snappy")
 
 
@@ -86,10 +92,14 @@ def train_horizon(
     # Realized volatility cannot be negative; apply the same production
     # output constraint used by the standalone trainer before scoring.
     pred = np.maximum(model_impl.predict(table[columns].iloc[valid_end:]), 0.0)
+    actual = table[target].iloc[valid_end:].to_numpy()
+    qlike = float(np.mean(np.log(np.maximum(pred * pred, 1e-18)) +
+                         np.maximum(actual * actual, 1e-18) / np.maximum(pred * pred, 1e-18)))
     result = {"horizon": horizon, "target": target, "feature_columns": columns,
               "rows": {"total": n, "train": train_end, "validation": valid_end-train_end, "test": n-valid_end},
               "prediction_floor": 0.0,
-              "metrics": {"rmse": float(np.sqrt(mean_squared_error(table[target].iloc[valid_end:], pred))),
+              "metrics": {"qlike": qlike,
+                          "rmse": float(np.sqrt(mean_squared_error(table[target].iloc[valid_end:], pred))),
                           "mae": float(mean_absolute_error(table[target].iloc[valid_end:], pred)),
                           "r2": float(r2_score(table[target].iloc[valid_end:], pred))}}
     Path(model.path).mkdir(parents=True, exist_ok=True)
