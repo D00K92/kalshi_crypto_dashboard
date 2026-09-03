@@ -66,7 +66,7 @@ def test_run_hourly_reads_boundary_context_and_writes_only_target(monkeypatch) -
         (datetime(2026, 8, 31).date(), "23"),
         (datetime(2026, 9, 1).date(), "00"),
     )
-    assert calls["resamples"] == [("binance", "1h"), ("binance", "30min")]
+    assert sorted(calls["resamples"]) == [("binance", "1h"), ("binance", "30min")]
     assert [len(written[0]) for written in calls["writes"]] == [1, 2]
     assert calls["writes"][0][1:] == (
         "gs://bucket/processed/resampled_market_data/frequency=1h",

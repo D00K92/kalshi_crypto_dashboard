@@ -7,6 +7,7 @@ import argparse
 from datetime import datetime, timedelta, timezone
 import os
 
+import dask
 import gcsfs
 import pandas as pd
 
@@ -95,11 +96,10 @@ def run_hourly(
         tick_indexed = tick_indexed.persist()
         book_indexed = book_indexed.persist()
 
-        for frequency in frequencies:
-            frequency_output = f"gs://{bucket}/{output_dataset.strip('/')}/frequency={frequency}"
-            expected_rows = EXPECTED_ROWS_PER_HOUR[frequency]
-            print(f"resampling target={target.isoformat()} venue={venue} frequency={frequency}", flush=True)
-            result = _resample_events(
+        # Build one task graph per venue so all requested cadences can execute
+        # concurrently against the same persisted raw inputs.
+        tasks = [
+            dask.delayed(_resample_events)(
                 tick_indexed,
                 book_indexed,
                 venue,
@@ -107,6 +107,18 @@ def run_hourly(
                 start=pd.Timestamp(previous),
                 end=pd.Timestamp(target_end),
             )
+            for frequency in frequencies
+        ]
+        results = dask.compute(
+            *tasks,
+            scheduler="threads",
+            num_workers=max(1, int(os.getenv("DASK_RESAMPLE_WORKERS", "4"))),
+        )
+
+        for frequency, result in zip(frequencies, results, strict=True):
+            frequency_output = f"gs://{bucket}/{output_dataset.strip('/')}/frequency={frequency}"
+            expected_rows = EXPECTED_ROWS_PER_HOUR[frequency]
+            print(f"writing target={target.isoformat()} venue={venue} frequency={frequency}", flush=True)
             target_result = result[
                 (result["timestamp"] >= pd.Timestamp(target))
                 & (result["timestamp"] < pd.Timestamp(target_end))
