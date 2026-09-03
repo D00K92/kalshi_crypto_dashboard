@@ -98,8 +98,10 @@ def run_hourly(
 
         # Build one task graph per venue so all requested cadences can execute
         # concurrently against the same persisted raw inputs.
-        tasks = [
-            dask.delayed(_resample_events, traverse=False)(
+        def resample_frequency(frequency: str):
+            # Keep persisted Dask collections in the closure. Passing them as
+            # delayed arguments causes Dask to unwrap them into pandas frames.
+            return _resample_events(
                 tick_indexed,
                 book_indexed,
                 venue,
@@ -107,8 +109,8 @@ def run_hourly(
                 start=pd.Timestamp(previous),
                 end=pd.Timestamp(target_end),
             )
-            for frequency in frequencies
-        ]
+
+        tasks = [dask.delayed(resample_frequency)(frequency) for frequency in frequencies]
         results = dask.compute(
             *tasks,
             scheduler="threads",
