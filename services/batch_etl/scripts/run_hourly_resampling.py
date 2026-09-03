@@ -99,7 +99,7 @@ def run_hourly(
         # Build one task graph per venue so all requested cadences can execute
         # concurrently against the same persisted raw inputs.
         tasks = [
-            dask.delayed(_resample_events)(
+            dask.delayed(_resample_events, traverse=False)(
                 tick_indexed,
                 book_indexed,
                 venue,
