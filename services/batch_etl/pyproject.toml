@@ -15,13 +15,6 @@ dependencies = [
     "pyarrow>=20,<24",
 ]
 
-[project.optional-dependencies]
-feast = [
-    "feast[gcp,redis]>=0.66,<0.67",
-    "google-cloud-storage>=1.34,<3",
-    "pyarrow<=17",
-]
-
 [dependency-groups]
 dev = [
     "pytest>=8.4,<10",
