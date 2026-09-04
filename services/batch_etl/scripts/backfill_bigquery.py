@@ -31,6 +31,7 @@ def main() -> None:
     parser.add_argument("--bucket", default=os.getenv("GCS_BUCKET_NAME", "kalshi-crypto-tick-data"))
     parser.add_argument("--venues", default=os.getenv("BATCH_ETL_VENUES"))
     parser.add_argument("--frequencies", default=os.getenv("BATCH_ETL_FREQUENCIES"))
+    parser.add_argument("--parallelism", type=int, default=int(os.getenv("BATCH_ETL_PARALLELISM", "3")))
     phases = parser.add_mutually_exclusive_group()
     phases.add_argument("--resample-only", action="store_true")
     phases.add_argument("--features-only", action="store_true")
@@ -43,7 +44,7 @@ def main() -> None:
     resample = root / "run_bigquery_hourly.py"
     feature = root / "run_bigquery_features.py"
     target = root / "run_bigquery_targets.py"
-    common = ["--project", args.project]
+    common = ["--project", args.project, "--parallelism", str(args.parallelism)]
     if args.bucket:
         common += ["--bucket", args.bucket]
     if args.venues:

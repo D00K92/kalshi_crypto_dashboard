@@ -5,6 +5,7 @@ import argparse
 import subprocess
 import sys
 import os
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -30,23 +31,32 @@ def render_sql(frequency: str) -> str:
     return sql
 
 
-def process_hour(target: datetime, *, venues: tuple[str, ...], frequencies: tuple[str, ...], bucket: str, project: str) -> None:
-    """Land raw data, then execute SQL resampling for all venue/frequency pairs."""
+def process_venue(target: datetime, *, venue: str, frequencies: tuple[str, ...], bucket: str, project: str) -> None:
+    """Land one venue hour once, then resample its requested frequencies."""
     loader = Path(__file__).with_name("load_raw_to_bigquery.py")
-    for venue in venues:
-        instrument = INSTRUMENTS.get(venue, "BTCUSD")
-        subprocess.run([sys.executable, str(loader), "--date", target.strftime("%Y-%m-%d"), "--hour", target.strftime("%H"), "--venue", venue, "--instrument", instrument, "--bucket", bucket], check=True)
-        client = bigquery.Client(project=project, location="asia-northeast3")
-        for frequency in frequencies:
-            config = bigquery.QueryJobConfig(query_parameters=[
-                bigquery.ScalarQueryParameter("source_start", "TIMESTAMP", target - timedelta(hours=1)),
-                bigquery.ScalarQueryParameter("target_start", "TIMESTAMP", target),
-                bigquery.ScalarQueryParameter("target_end", "TIMESTAMP", target + timedelta(hours=1)),
-                bigquery.ScalarQueryParameter("venue", "STRING", venue),
-                bigquery.ScalarQueryParameter("instrument", "STRING", instrument),
-            ])
-            client.query(render_sql(frequency), job_config=config).result()
-            print(f"resampled venue={venue} frequency={frequency} target={target.isoformat()}", flush=True)
+    instrument = INSTRUMENTS.get(venue, "BTCUSD")
+    subprocess.run([sys.executable, str(loader), "--date", target.strftime("%Y-%m-%d"), "--hour", target.strftime("%H"), "--venue", venue, "--instrument", instrument, "--bucket", bucket, "--project", project], check=True)
+    client = bigquery.Client(project=project, location="asia-northeast3")
+    for frequency in frequencies:
+        config = bigquery.QueryJobConfig(query_parameters=[
+            bigquery.ScalarQueryParameter("source_start", "TIMESTAMP", target - timedelta(hours=1)),
+            bigquery.ScalarQueryParameter("target_start", "TIMESTAMP", target),
+            bigquery.ScalarQueryParameter("target_end", "TIMESTAMP", target + timedelta(hours=1)),
+            bigquery.ScalarQueryParameter("venue", "STRING", venue),
+            bigquery.ScalarQueryParameter("instrument", "STRING", instrument),
+        ])
+        client.query(render_sql(frequency), job_config=config).result()
+        print(f"resampled venue={venue} frequency={frequency} target={target.isoformat()}", flush=True)
+
+
+def process_hour(target: datetime, *, venues: tuple[str, ...], frequencies: tuple[str, ...], bucket: str, project: str, parallelism: int = 1) -> None:
+    """Land raw data and resample venues concurrently up to the quota limit."""
+    if parallelism < 1:
+        raise ValueError("parallelism must be positive")
+    with ThreadPoolExecutor(max_workers=parallelism) as pool:
+        futures = [pool.submit(process_venue, target, venue=venue, frequencies=frequencies, bucket=bucket, project=project) for venue in venues]
+        for future in futures:
+            future.result()
 
 
 def main() -> None:
@@ -56,12 +66,13 @@ def main() -> None:
     parser.add_argument("--project", default=os.getenv("GCP_PROJECT_ID", "kalshi-crypto-506614"))
     parser.add_argument("--venues", default=os.getenv("BATCH_ETL_VENUES", ",".join(VENUES)))
     parser.add_argument("--frequencies", default=os.getenv("BATCH_ETL_FREQUENCIES", ",".join(FREQUENCIES)))
+    parser.add_argument("--parallelism", type=int, default=int(os.getenv("BATCH_ETL_PARALLELISM", "1")))
     args = parser.parse_args()
     target = (datetime.fromisoformat(args.target_hour.replace("Z", "+00:00")).astimezone(timezone.utc)
               if args.target_hour else datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0) - timedelta(hours=1))
     if target.minute or target.second or target.microsecond:
         parser.error("target hour must be aligned to an hour")
-    process_hour(target, venues=tuple(args.venues.split(",")), frequencies=tuple(args.frequencies.split(",")), bucket=args.bucket, project=args.project)
+    process_hour(target, venues=tuple(args.venues.split(",")), frequencies=tuple(args.frequencies.split(",")), bucket=args.bucket, project=args.project, parallelism=args.parallelism)
 
 
 if __name__ == "__main__":

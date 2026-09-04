@@ -82,7 +82,9 @@ Run resampling first over a bounded range:
 uv run python scripts/backfill_bigquery.py \
   --start-hour 2026-08-31T08:00:00Z \
   --end-hour 2026-09-03T08:00:00Z \
-  --resample-only
+  --resample-only \
+  --frequencies 1m \
+  --parallelism 3
 ```
 
 After verifying `market_data.bars`, run the same range without
