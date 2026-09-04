@@ -48,3 +48,22 @@ PYTHONPATH=.:src uv run python scripts/run_hourly_resampling.py \
   --target-hour 2026-09-01T08:00:00Z \
   --venues binance --frequencies 1m --bigquery-table bars
 ```
+
+### BigQuery realized-volatility features
+
+Provision the feature table once, then run the hourly job (the feature CronJob
+uses this command):
+
+```bash
+bq query --location=asia-northeast3 --use_legacy_sql=false \
+  < sql/012_create_realized_volatility_table.sql
+uv run python scripts/run_bigquery_features.py \
+  --target-hour 2026-09-03T08:00:00Z
+```
+
+`011_compute_realized_volatility.sql` computes an equal-weight mean of all
+available venue `1m` trade prices, log returns, and annualized realized
+volatility over 1-hour and 3-hour rolling windows. It requires at least 45 and
+135 observations respectively, so sparse input produces `NULL` instead of a
+misleading value. BigQuery performs the aggregation and window functions;
+Dask is not needed for this path.
