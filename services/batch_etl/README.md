@@ -159,8 +159,8 @@ python scripts/build_features.py --target-hour 2026-09-01T08:00:00Z
 ```
 
 The job writes `features/v1/date=YYYY-MM-DD/features.parquet`. Feast
-definitions and materialization are owned by this service under `feature_store/`
-and should run in a Feast-compatible image using `feature_store/requirements.txt`.
+Feature computation remains owned by this service. Feast definitions and
+materialization are owned by the standalone `services/feast_store/` service.
 
 ### Resumable backfill
 

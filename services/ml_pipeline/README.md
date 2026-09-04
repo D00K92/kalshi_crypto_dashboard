@@ -48,7 +48,7 @@ uv run --directory services/ml_pipeline python scripts/run_pipeline.py ...
 
 Historical feature retrieval through Feast remains available via
 `src/components/fetch_historical_features.py`; Feast configuration is owned by
-`services/batch_etl/feature_store`.
+`services/feast_store`.
 
 Container images are published to Artifact Registry under
 `asia-northeast3-docker.pkg.dev/kalshi-crypto-506614/ml-pipeline/` and referenced

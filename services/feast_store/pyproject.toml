@@ -1,0 +1,14 @@
+[project]
+name = "kalshi-crypto-feast"
+version = "0.1.0"
+description = "Feast repository for offline and online market features"
+requires-python = ">=3.12"
+dependencies = [
+  "feast[gcp,redis]>=0.66,<0.67",
+  "google-cloud-storage>=1.34,<3",
+  "pyarrow<=17",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"

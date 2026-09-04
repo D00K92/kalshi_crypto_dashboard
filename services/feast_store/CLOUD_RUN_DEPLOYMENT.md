@@ -1,15 +1,15 @@
 # Feast on Cloud Run
 
 The feature server and materialization job use the same image. Build from the
-repository root so the Dockerfile can copy `feature_store/`:
+repository root:
 
 ```bash
 PROJECT_ID=kalshi-crypto-506614
 REGION=asia-northeast3
-REPO=ml-pipeline
-IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/$REPO/feast-server:v1"
+REPO=quant-repo
+IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/$REPO/feast-store:v1"
 
-gcloud builds submit services/batch_etl/feature_store \
+gcloud builds submit services/feast_store \
   --project "$PROJECT_ID" \
   --tag "$IMAGE"
 ```
@@ -31,7 +31,7 @@ gcloud run deploy feast-server \
 gcloud run jobs create feast-materialize \
   --project "$PROJECT_ID" --region "$REGION" --image "$IMAGE" \
   --service-account "$SERVICE_ACCOUNT" \
-  --command /app/feature_store/materialize.sh \
+  --command /app/feast_store/materialize.sh \
   --tasks 1
 ```
 

@@ -31,6 +31,9 @@ spec:
         spec:
           serviceAccountName: batch-etl
           restartPolicy: Never
+          nodeSelector:
+            cloud.google.com/gke-spot: "true"
+          terminationGracePeriodSeconds: 15
           securityContext:
             runAsNonRoot: true
             runAsUser: 100
@@ -38,6 +41,7 @@ spec:
           containers:
           - name: batch-etl
             image: "${BATCH_ETL_IMAGE}"
+            command: ["python", "scripts/run_bigquery_hourly.py"]
             imagePullPolicy: IfNotPresent
             env:
             - name: GCS_BUCKET_NAME
@@ -48,6 +52,8 @@ spec:
               value: "binance,bitstamp,coinbase,crypto.com,gemini,kraken"
             - name: BATCH_ETL_FREQUENCIES
               value: "1s,5s,1m,5m,10m,30m,1h"
+            - name: BATCH_ETL_BIGQUERY_TABLE
+              value: "bars"
             - name: DASK_TEMPORARY_DIRECTORY
               value: "/tmp/dask"
             resources:

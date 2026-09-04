@@ -11,6 +11,8 @@ import dask
 import gcsfs
 import pandas as pd
 
+from kalshi_crypto_batch_etl.bigquery.io import write_frame as write_bigquery_partition
+
 if __package__:
     from .build_resampled_market_data import (
         DEFAULT_BUCKET,
@@ -34,6 +36,13 @@ else:
 
 
 PRODUCTION_FREQUENCIES = ("1s", "5s", "1m", "5m", "10m", "30m", "1h")
+BIGQUERY_BAR_COLUMNS = (
+    "event_timestamp", "created_timestamp", "venue", "instrument", "frequency",
+    "p_open", "p_high", "p_low", "p_close", "p_trade", "p_trade_mean",
+    "v_trade", "v_buy", "v_sell", "cnt_trade", "dt_fill_mean_ms", "dt_fill_max_ms", "dt_fill_min_ms",
+    *[name for level in range(1, 11) for name in (
+        f"p_bid_{level}", f"p_ask_{level}", f"q_bid_{level}", f"q_ask_{level}")],
+)
 EXPECTED_ROWS_PER_HOUR = {
     "1s": 3600,
     "5s": 720,
@@ -74,6 +83,8 @@ def run_hourly(
     target: datetime,
     venues: tuple[str, ...],
     frequencies: tuple[str, ...],
+    bigquery_table: str | None = None,
+    bigquery_project: str = "kalshi-crypto-506614",
 ) -> None:
     previous = target - timedelta(hours=1)
     source_partitions = (
@@ -139,6 +150,29 @@ def run_hourly(
                 venue,
             )
             print(f"wrote rows={actual_rows} destination={destination}", flush=True)
+            if bigquery_table:
+                bq_frame = target_result.compute()
+                bq_frame = bq_frame.rename_axis("event_timestamp").reset_index()
+                bq_frame["created_timestamp"] = pd.Timestamp.now(tz="UTC")
+                bq_frame["venue"] = venue
+                bq_frame["instrument"] = "BTCUSDT" if venue == "binance" else "BTCUSD"
+                bq_frame["frequency"] = frequency
+                missing = sorted(set(BIGQUERY_BAR_COLUMNS) - set(bq_frame.columns))
+                if missing:
+                    raise RuntimeError(f"BigQuery bar output missing columns: {missing}")
+                bq_frame["cnt_trade"] = pd.to_numeric(bq_frame["cnt_trade"], errors="raise").fillna(0).astype("int64")
+                bq_frame = bq_frame[list(BIGQUERY_BAR_COLUMNS)]
+                parts = bigquery_table.split(".")
+                table = bigquery_table if len(parts) == 3 else f"{bigquery_project}.market_data.{parts[-1]}"
+                written = write_bigquery_partition(
+                    bq_frame,
+                    table=table,
+                    partition_date=target.date(),
+                    time_start=target,
+                    time_end=target_end,
+                    filters={"venue": venue, "instrument": bq_frame["instrument"].iloc[0], "frequency": frequency},
+                )
+                print(f"wrote rows={written} destination=bigquery:{table}", flush=True)
             del target_result, result
 
         del tick_indexed, book_indexed
@@ -151,6 +185,12 @@ def main() -> None:
         "--output-dataset",
         default=os.getenv("BATCH_ETL_OUTPUT_DATASET", DEFAULT_OUTPUT_DATASET),
     )
+    parser.add_argument(
+        "--bigquery-table",
+        default=os.getenv("BATCH_ETL_BIGQUERY_TABLE", "bars"),
+        help="BigQuery canonical table (bars or project.dataset.table); set empty to disable.",
+    )
+    parser.add_argument("--bigquery-project", default=os.getenv("GCP_PROJECT_ID", "kalshi-crypto-506614"))
     parser.add_argument("--target-hour", default=os.getenv("BATCH_ETL_TARGET_HOUR"))
     parser.add_argument("--venues", default=os.getenv("BATCH_ETL_VENUES", ",".join(VENUES)))
     parser.add_argument(
@@ -173,6 +213,8 @@ def main() -> None:
         target=target,
         venues=venues,
         frequencies=frequencies,
+        bigquery_table=args.bigquery_table,
+        bigquery_project=args.bigquery_project,
     )
 
 
