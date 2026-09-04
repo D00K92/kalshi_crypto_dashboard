@@ -1,8 +1,8 @@
 # Batch ETL
 
 `batch_etl` owns expensive Dask jobs that read raw tick and order-book Parquet
-from GCS, resample them onto regular time grids, and write processed Parquet
-back to GCS. Modeling transformations belong in `ml_pipeline`.
+from GCS, resample them onto regular time grids, compute v1 predictor features
+and future-volatility targets, and write processed Parquet back to GCS.
 
 Raw input layout:
 

@@ -3,7 +3,6 @@ import pandas as pd
 from kalshi_crypto_batch_etl.features.v1_features import (
     build_v1_dataset,
     build_v1_dataset_by_frequency,
-    compute_synthetic_targets,
     compute_v1_features,
 )
 
@@ -30,18 +29,15 @@ def frame() -> pd.DataFrame:
     return pd.DataFrame(data)
 
 
-def test_v1_features_and_synthetic_targets() -> None:
+def test_v1_features_are_predictor_only() -> None:
     source = frame()
     features = compute_v1_features(source, bar_seconds=1, venue="binance")
     assert {"wap_1", "microprice_10", "obi_5", "ofi", "gk_vol_60s"}.issubset(features.columns)
     assert features["asset"].eq("BTC").all()
 
-    targets = compute_synthetic_targets({"binance": source, "gemini": source}, bar_seconds=1)
-    assert targets["synthetic_price"].iloc[0] == 100.0
-    assert {"target_vol_60s", "target_vol_300s", "target_vol_3600s"}.issubset(targets)
-
     dataset = build_v1_dataset({"binance": source, "gemini": source}, bar_seconds=1)
     assert "venue" not in dataset
+    assert not any(column.startswith("target_") for column in dataset.columns)
     assert len(dataset) == len(source)
 
     multi_frequency = build_v1_dataset_by_frequency({1: {"binance": source}, 5: {"binance": source}})

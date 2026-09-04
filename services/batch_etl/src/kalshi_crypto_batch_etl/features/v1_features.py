@@ -13,10 +13,8 @@ import numpy as np
 import pandas as pd
 
 WINDOWS_SECONDS = (30, 60, 300, 900, 1800, 3600)
-TARGET_HORIZONS_SECONDS = (60, 300, 900, 1800, 3600)
 BOOK_LEVELS = (1, 5, 10)
 FREQUENCY_LABELS = {1: "1s", 5: "5s", 60: "1m", 300: "5m", 600: "10m", 1800: "30m", 3600: "1h"}
-SECONDS_PER_YEAR = 365 * 24 * 60 * 60  # crypto trades continuously
 
 
 def _ratio(numerator: pd.Series, denominator: pd.Series) -> pd.Series:
@@ -92,21 +90,6 @@ def compute_v1_features(frame: pd.DataFrame, bar_seconds: int, venue: str) -> pd
     return out
 
 
-def compute_synthetic_targets(frames: Mapping[str, pd.DataFrame], bar_seconds: int) -> pd.DataFrame:
-    """Build future volatility labels from equal-weight venue trade means."""
-    if not frames:
-        raise ValueError("at least one venue frame is required")
-    prices = [df.set_index("timestamp")["p_trade_mean"].rename(venue) for venue, df in frames.items()]
-    synthetic = pd.concat(prices, axis=1).mean(axis=1, skipna=True).sort_index()
-    returns = np.log(synthetic / synthetic.shift(1)).replace([np.inf, -np.inf], np.nan).fillna(0.0)
-    result = pd.DataFrame({"timestamp": synthetic.index, "synthetic_price": synthetic})
-    for horizon in TARGET_HORIZONS_SECONDS:
-        n = _periods(horizon, bar_seconds)
-        realized = np.sqrt(returns.pow(2).rolling(n, min_periods=n).sum().shift(-n))
-        result[f"target_vol_{horizon}s"] = realized * np.sqrt(SECONDS_PER_YEAR / horizon)
-    return result.reset_index(drop=True)
-
-
 def build_v1_dataset(frames: Mapping[str, pd.DataFrame], bar_seconds: int) -> pd.DataFrame:
     """Build one venue-agnostic training table from completed venue frames.
 
@@ -126,8 +109,7 @@ def build_v1_dataset(frames: Mapping[str, pd.DataFrame], bar_seconds: int) -> pd
     features["asset"] = "BTC"
     features["frequency_seconds"] = bar_seconds
     features["frequency"] = FREQUENCY_LABELS.get(bar_seconds, f"{bar_seconds}s")
-    targets = compute_synthetic_targets(frames, bar_seconds)
-    return features.merge(targets, on="timestamp", how="left").sort_values("timestamp").reset_index(drop=True)
+    return features.sort_values("timestamp").reset_index(drop=True)
 
 
 def build_v1_dataset_by_frequency(
