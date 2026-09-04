@@ -21,6 +21,7 @@ samples to `end_date 23:00 UTC` because the longest target horizon is one hour.
 src/common/       Shared loading, EWMA benchmark, QLIKE, and model logic
 src/components/   KFP components and local training/evaluation entrypoints
 src/pipelines/    Kubeflow pipeline definitions
+containers/       Four task images: load, train, evaluate, and register
 scripts/          Compile, submit, and event-trigger training workflows
 ```
 
@@ -48,3 +49,7 @@ uv run --directory services/ml_pipeline python scripts/run_pipeline.py ...
 Historical feature retrieval through Feast remains available via
 `src/components/fetch_historical_features.py`; Feast configuration is owned by
 `services/batch_etl/feature_store`.
+
+Container images are published to Artifact Registry under
+`asia-northeast3-docker.pkg.dev/kalshi-crypto-506614/ml-pipeline/` and referenced
+directly by the Vertex pipeline.

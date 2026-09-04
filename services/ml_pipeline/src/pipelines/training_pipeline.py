@@ -2,7 +2,7 @@
 
 from kfp import dsl
 
-from src.components.kfp_components import evaluate_candidate, load_training_data, register_vertex_model, train_horizon
+from src.components.kfp_components import evaluate_container, load_container, register_container, train_container
 
 HORIZONS = ("1m", "5m", "15m", "30m", "1h")
 
@@ -17,15 +17,14 @@ def volatility_training_pipeline(
     location: str = "asia-northeast3",
     model_version: str = "v1",
     champion_metrics_uri: str = "gs://kalshi-crypto-tick-data/models/v1/champion_metrics.json",
+    bucket: str = "kalshi-crypto-tick-data",
 ) -> None:
-    data = load_training_data(feature_root=feature_root, target_root=target_root,
-                              start_date=start_date, end_date=end_date)
+    data = load_container(feature_root=feature_root, target_root=target_root,
+                          start_date=start_date, end_date=end_date, project=project)
     with dsl.ParallelFor(items=list(HORIZONS), parallelism=5) as horizon:
-        trained = train_horizon(dataset=data.outputs["output_dataset"], horizon=horizon)
-        gate = evaluate_candidate(dataset=data.outputs["output_dataset"], model=trained.outputs["model"],
-                                  horizon=horizon, champion_metrics_uri=champion_metrics_uri)
-        with dsl.If(gate.output == True):
-            register_vertex_model(
-                model=trained.outputs["model"], project=project, location=location,
-                display_name=f"crypto-volatility-{model_version}-{horizon}", model_version=model_version,
-            )
+        trained = train_container(dataset=data.outputs["output_dataset"], horizon=horizon)
+        evaluated = evaluate_container(dataset=data.outputs["output_dataset"], model=trained.outputs["model"],
+                                       horizon=horizon, champion_metrics_uri=champion_metrics_uri)
+        register_container(model=trained.outputs["model"], promote=evaluated.outputs["promote"],
+                           project=project, location=location, bucket=bucket,
+                           model_version=model_version, horizon=horizon)
