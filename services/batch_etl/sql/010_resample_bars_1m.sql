@@ -46,7 +46,9 @@ USING (
       t.p_open,t.p_high,t.p_low,t.p_trade,t.p_trade_mean,t.v_trade,t.v_buy,t.v_sell,t.cnt_trade,
       t.dt_fill_mean_ms,t.dt_fill_max_ms,t.dt_fill_min_ms,
       b.levels
-    FROM buckets k LEFT JOIN t ON t.bucket=k.event_timestamp LEFT JOIN b ON b.bucket=k.event_timestamp
+    FROM buckets k
+    LEFT JOIN t ON t.bucket=k.event_timestamp
+    LEFT JOIN b ON b.bucket=k.event_timestamp AND b.venue=@venue AND b.instrument=@instrument
   )
   SELECT event_timestamp, CURRENT_TIMESTAMP() created_timestamp, venue, instrument, '1m' frequency,
     p_open,p_high,p_low,p_trade p_close,p_trade,p_trade_mean,
