@@ -7,7 +7,7 @@ from google.cloud import aiplatform
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--template", default="volatility_training_pipeline.json")
+    parser.add_argument("--template", default="pipeline.yaml")
     parser.add_argument("--project", required=True)
     parser.add_argument("--location", default="asia-northeast3")
     parser.add_argument("--pipeline-root", required=True)

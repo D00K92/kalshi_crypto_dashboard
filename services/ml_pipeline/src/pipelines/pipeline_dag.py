@@ -1,4 +1,4 @@
-"""Compile-time Kubeflow pipeline for five parallel volatility models."""
+"""Production Vertex AI/Kubeflow training DAG."""
 
 from kfp import dsl
 

@@ -27,7 +27,7 @@ def main() -> None:
     parser.add_argument("--trigger-training", action="store_true")
     parser.add_argument("--project")
     parser.add_argument("--location", default="asia-northeast3")
-    parser.add_argument("--template", default="volatility_training_pipeline.json")
+    parser.add_argument("--template", default="pipeline.yaml")
     parser.add_argument("--pipeline-root")
     parser.add_argument("--start-date")
     parser.add_argument("--end-date")

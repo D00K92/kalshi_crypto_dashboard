@@ -20,7 +20,7 @@ samples to `end_date 23:00 UTC` because the longest target horizon is one hour.
 ```text
 src/common/       Shared loading, EWMA benchmark, QLIKE, and model logic
 src/components/   KFP components and local training/evaluation entrypoints
-src/pipelines/    Kubeflow pipeline definitions
+src/pipelines/    Kubeflow pipeline DAG definition (`pipeline_dag.py`)
 containers/       Four task images: load, train, evaluate, and register
 scripts/          Compile, submit, and event-trigger training workflows
 ```
@@ -42,7 +42,7 @@ Inference prediction records should be written under
 Compile and submit from the unified repository environment:
 
 ```bash
-uv run --directory services/ml_pipeline python scripts/compile_pipline.py
+uv run --directory services/ml_pipeline python scripts/compile_pipeline.py
 uv run --directory services/ml_pipeline python scripts/run_pipeline.py ...
 ```
 
