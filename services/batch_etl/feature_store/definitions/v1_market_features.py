@@ -1,6 +1,6 @@
 """Feast v1 market feature view backed by daily GCS Parquet files."""
 from datetime import timedelta
-from feast import FeatureView, Field, FileSource
+from feast import FeatureService, FeatureView, Field, FileSource
 from feast.types import Float32
 from entities import asset, frequency
 
@@ -26,4 +26,12 @@ v1_market_features = FeatureView(
     schema=[Field(name=name, dtype=Float32) for name in FEATURE_COLUMNS],
     source=source,
     online=True,
+)
+
+# Stable model-facing contract. Models should reference this service rather
+# than individual feature names so v2 can be introduced independently.
+volatility_v1 = FeatureService(
+    name="volatility_v1",
+    features=[v1_market_features],
+    tags={"model_version": "v1", "feature_version": "v1"},
 )
