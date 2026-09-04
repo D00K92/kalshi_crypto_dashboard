@@ -36,10 +36,16 @@ USING (
         AND venue=@venue AND instrument=@instrument
     ) WHERE rn=1
   ),
+  latest_unique AS (
+    SELECT bucket, venue, instrument, side, level,
+      ANY_VALUE(price) AS price, ANY_VALUE(quantity) AS quantity
+    FROM latest
+    GROUP BY bucket, venue, instrument, side, level
+  ),
   b AS (
     SELECT bucket, venue, instrument,
       ARRAY_AGG(STRUCT(side,level,price,quantity) ORDER BY side,level) levels
-    FROM latest GROUP BY 1,2,3
+    FROM latest_unique GROUP BY 1,2,3
   ),
   assembled AS (
     SELECT k.event_timestamp, @venue venue, @instrument instrument,
