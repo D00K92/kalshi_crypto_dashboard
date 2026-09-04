@@ -67,3 +67,9 @@ volatility over 1-hour and 3-hour rolling windows. It requires at least 45 and
 135 observations respectively, so sparse input produces `NULL` instead of a
 misleading value. BigQuery performs the aggregation and window functions;
 Dask is not needed for this path.
+
+The target CronJob follows the same BigQuery-only pattern via
+`scripts/run_bigquery_targets.py`. It computes forward annualized realized
+volatility from the next 5m, 15m, 30m, and 1h windows; `target_rv_1h` is the
+toy model label. The default two-hour delay preserves the existing look-ahead
+buffer for late bars.
