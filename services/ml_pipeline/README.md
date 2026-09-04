@@ -29,7 +29,14 @@ scripts/          Compile, submit, and event-trigger training workflows
 The five horizon models use chronological splits and non-negative predictions.
 Evaluation compares model QLIKE against an annualized EWMA benchmark (`lambda=0.96`).
 `scripts/evaluate_and_trigger.py` records state and can submit the KFP pipeline
-after sustained champion deterioration.
+after sustained champion deterioration. The KFP DAG evaluates each candidate on
+the same 15% holdout used for training and registers it only when it beats EWMA
+by 2% and is no more than 5% worse than the current champion. The champion
+metrics artifact is expected at
+`gs://kalshi-crypto-tick-data/models/v1/champion_metrics.json`.
+
+Inference prediction records should be written under
+`gs://kalshi-crypto-tick-data/inference_predictions/date=YYYY-MM-DD/`.
 
 Compile and submit from the unified repository environment:
 

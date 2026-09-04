@@ -111,6 +111,60 @@ def train_horizon(
 
 @dsl.component(
     base_image="python:3.12-slim",
+    packages_to_install=["pandas>=2.2,<3", "pyarrow>=20,<24", "numpy>=2,<3", "xgboost>=2.1,<3", "joblib>=1.4,<2", "gcsfs>=2025.9,<2027"],
+)
+def evaluate_candidate(
+    dataset: Input[Dataset],
+    model: Input[Model],
+    horizon: str,
+    champion_metrics_uri: str,
+) -> bool:
+    """Return true only when candidate QLIKE beats EWMA and the champion gate."""
+    import json
+    from pathlib import Path
+    import gcsfs
+    import joblib
+    import numpy as np
+    import pandas as pd
+
+    table = pd.read_parquet(dataset.path).dropna(subset=[f"target_rv_{horizon}"]).sort_values("timestamp").reset_index(drop=True)
+    candidate = joblib.load(Path(model.path) / "model.joblib")
+    columns = list(getattr(candidate, "feature_names_in_", []))
+    test_start = int(len(table) * .85)
+    if len(table) <= test_start:
+        raise RuntimeError("insufficient rows for promotion holdout")
+    prediction = np.maximum(candidate.predict(table[columns]), 0.0)[test_start:]
+    actual = np.maximum(table[f"target_rv_{horizon}"].to_numpy()[test_start:] ** 2, 1e-18)
+    forecast = np.maximum(prediction ** 2, 1e-18)
+    candidate_qlike = float(np.mean(np.log(forecast) + actual / forecast))
+    seconds = {"1m": 60, "5m": 300, "15m": 900, "30m": 1800, "1h": 3600}[horizon]
+    returns = pd.to_numeric(table["trade_log_return"], errors="coerce").fillna(0.0)
+    variance = returns.pow(2).ewm(alpha=.04, adjust=False, min_periods=1).mean().shift(1).fillna(returns.pow(2))
+    periods = np.maximum(1.0, seconds / table["frequency_seconds"].astype(float))
+    benchmark = np.sqrt(np.maximum(variance.to_numpy() * periods.to_numpy() * (365 * 24 * 60 * 60 / seconds), 1e-18))
+    benchmark_var = np.maximum(benchmark[test_start:] ** 2, 1e-18)
+    benchmark_qlike = float(np.mean(np.log(benchmark_var) + actual / benchmark_var))
+    beats_benchmark = candidate_qlike <= benchmark_qlike - abs(benchmark_qlike) * .02
+    champion_qlike = None
+    if champion_metrics_uri:
+        fs = gcsfs.GCSFileSystem()
+        try:
+            with fs.open(champion_metrics_uri, "r") as handle:
+                champion = json.load(handle)
+            champion_qlike = champion.get(horizon, champion).get("metrics", {}).get("qlike")
+        except FileNotFoundError:
+            # Bootstrap run: EWMA is the only incumbent until v1 is promoted.
+            champion_qlike = None
+    not_degraded = champion_qlike is None or candidate_qlike <= champion_qlike + abs(champion_qlike) * .05
+    Path(model.path, "promotion.json").write_text(json.dumps({"candidate_qlike": candidate_qlike,
+        "benchmark_qlike": benchmark_qlike, "champion_qlike": champion_qlike,
+        "beats_benchmark": beats_benchmark, "not_degraded": not_degraded,
+        "promoted": beats_benchmark and not_degraded}, indent=2), encoding="utf-8")
+    return bool(beats_benchmark and not_degraded)
+
+
+@dsl.component(
+    base_image="python:3.12-slim",
     packages_to_install=["google-cloud-aiplatform>=1.60,<2"],
 )
 def register_vertex_model(
@@ -122,6 +176,6 @@ def register_vertex_model(
     registered = aiplatform.Model.upload(
         display_name=display_name, artifact_uri=model.uri,
         serving_container_image_uri="us-docker.pkg.dev/vertex-ai/prediction/xgboost-cpu.1-7:latest",
-        labels={"version": model_version},
+        labels={"version": model_version, "stage": "champion"},
     )
     return registered.resource_name
