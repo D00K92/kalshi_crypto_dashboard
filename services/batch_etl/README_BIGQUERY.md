@@ -73,3 +73,18 @@ The target CronJob follows the same BigQuery-only pattern via
 volatility from the next 5m, 15m, 30m, and 1h windows; `target_rv_1h` is the
 toy model label. The default two-hour delay preserves the existing look-ahead
 buffer for late bars.
+
+### BigQuery range backfill
+
+Run resampling first over a bounded range:
+
+```bash
+uv run python scripts/backfill_bigquery.py \
+  --start-hour 2026-08-31T08:00:00Z \
+  --end-hour 2026-09-03T08:00:00Z \
+  --resample-only
+```
+
+After verifying `market_data.bars`, run the same range without
+`--resample-only` to compute features and labels. The wrapper is hourly and
+fails fast on an error so a rerun safely reprocesses the affected hour.
