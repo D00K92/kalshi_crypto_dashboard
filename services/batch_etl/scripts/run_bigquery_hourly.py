@@ -12,6 +12,11 @@ from google.cloud import bigquery
 
 FREQUENCIES = {"1s": (1, "SECOND"), "5s": (5, "SECOND"), "1m": (1, "MINUTE"), "5m": (5, "MINUTE"), "10m": (10, "MINUTE"), "30m": (30, "MINUTE"), "1h": (1, "HOUR")}
 VENUES = ("binance", "bitstamp", "coinbase", "crypto.com", "gemini", "kraken")
+INSTRUMENTS = {
+    "binance": "BTCUSDT",
+    "coinbase": "BTC-USD",
+    "kraken": "BTC_USD",
+}
 
 
 def render_sql(frequency: str) -> str:
@@ -29,7 +34,7 @@ def process_hour(target: datetime, *, venues: tuple[str, ...], frequencies: tupl
     """Land raw data, then execute SQL resampling for all venue/frequency pairs."""
     loader = Path(__file__).with_name("load_raw_to_bigquery.py")
     for venue in venues:
-        instrument = "BTCUSDT" if venue == "binance" else "BTCUSD"
+        instrument = INSTRUMENTS.get(venue, "BTCUSD")
         subprocess.run([sys.executable, str(loader), "--date", target.strftime("%Y-%m-%d"), "--hour", target.strftime("%H"), "--venue", venue, "--instrument", instrument, "--bucket", bucket], check=True)
         client = bigquery.Client(project=project, location="asia-northeast3")
         for frequency in frequencies:
