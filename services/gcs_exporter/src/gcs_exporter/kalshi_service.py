@@ -52,6 +52,7 @@ class KalshiExporterService(GCSExporterService, Generic[RowT]):
         groups = defaultdict(list)
         for row in self._buffer:
             groups[row.partition].append(row)
+        exported_ids: list[str] = []
         for rows in groups.values():
             data = self.writer(rows)
             result = await self._uploader.upload(
@@ -63,8 +64,19 @@ class KalshiExporterService(GCSExporterService, Generic[RowT]):
             await self._consumer.ack(ids)
             committed = set(ids)
             self._buffer = [row for row in self._buffer if row.redis_id not in committed]
+            exported_ids.extend(ids)
             self._last_reclaim_at = time.monotonic()
+        if exported_ids:
+            await self._consumer.trim_exported(
+                max(exported_ids, key=self._redis_id_parts),
+                self._settings.post_export_retention_seconds,
+            )
         self._buffer_started_at = time.monotonic() if self._buffer else None
+
+    @staticmethod
+    def _redis_id_parts(redis_id: str) -> tuple[int, int]:
+        milliseconds, sequence = redis_id.split("-", 1)
+        return int(milliseconds), int(sequence)
 
 
 class KalshiTickerExporterService(KalshiExporterService[KalshiTickerRow]):

@@ -19,6 +19,7 @@ def settings() -> Settings:
         read_block_ms=1_000,
         reclaim_interval_seconds=30.0,
         reclaim_min_idle_ms=120_000,
+        post_export_retention_seconds=900,
         shutdown_grace_seconds=5,
         health_port=18080,
         log_level="INFO",

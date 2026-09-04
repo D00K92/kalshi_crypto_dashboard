@@ -95,7 +95,7 @@ class KalshiFeed:
                     continue
                 market = frame.get("msg", {}).get("market_ticker")
                 event_set = market_context.get(market)
-                if event_set is None:
+                if event_set is None or not self._state.accepts(event_set.event_ticker):
                     continue
                 try:
                     event = parse_kalshi_message(raw, series_ticker=event_set.series_ticker, event_ticker=event_set.event_ticker, received_ts_ms=time.time_ns() // 1_000_000)
@@ -109,6 +109,7 @@ class KalshiFeed:
                             )
                         for old_market in old_markets:
                             self._books.pop(old_market, None)
+                            market_context.pop(old_market, None)
                         LOGGER.info("event_rollover_complete", extra={"venue": "kalshi", "event_ticker": event_set.event_ticker, "generation": self._state.generation})
                     if event.event_type.startswith("kalshi_orderbook"):
                         book = self._books.setdefault(event.market_ticker, KalshiBookState())

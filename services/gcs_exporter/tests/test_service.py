@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import replace
 
 import pytest
 import orjson
+from redis.exceptions import TimeoutError as RedisTimeoutError
 
 from gcs_exporter.gcs_uploader import UploadResult
 from gcs_exporter.models import RawStreamEntry
@@ -15,6 +17,7 @@ class FakeConsumer:
     def __init__(self, events: list[str]) -> None:
         self.events = events
         self.acked: list[list[str]] = []
+        self.trimmed: list[tuple[str, int]] = []
 
     async def ready(self) -> None:
         self.events.append("ready")
@@ -32,6 +35,13 @@ class FakeConsumer:
         self.events.append("ack")
         self.acked.append(redis_ids)
         return len(redis_ids)
+
+    async def trim_exported(
+        self, latest_exported_id: str, retention_seconds: int
+    ) -> int:
+        self.events.append("trim")
+        self.trimmed.append((latest_exported_id, retention_seconds))
+        return 0
 
     async def close(self) -> None:
         self.events.append("close")
@@ -169,3 +179,36 @@ async def test_time_trigger_uses_age_of_oldest_buffered_row(settings) -> None:
     assert service._should_flush(
         service._buffer_started_at + settings.flush_interval_seconds + 1e-6
     )
+
+
+async def test_transient_redis_timeout_does_not_stop_service(
+    settings, monkeypatch
+) -> None:
+    events: list[str] = []
+    stop_event = asyncio.Event()
+
+    class TransientConsumer(FakeConsumer):
+        calls = 0
+
+        async def read_new(self, count: int, block_ms: int) -> list[RawStreamEntry]:
+            self.calls += 1
+            if self.calls == 1:
+                raise RedisTimeoutError("temporary timeout")
+            stop_event.set()
+            return []
+
+    consumer = TransientConsumer(events)
+    service = GCSExporterService(
+        settings,
+        consumer=consumer,
+        uploader=FakeUploader(events),
+        health=FakeHealth(),  # type: ignore[arg-type]
+    )
+
+    async def no_wait(*args) -> None:
+        return None
+
+    monkeypatch.setattr(service, "_wait_for_retry", no_wait)
+    await service.run(stop_event)
+
+    assert consumer.calls == 2

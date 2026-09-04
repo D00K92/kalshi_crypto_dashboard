@@ -8,9 +8,13 @@ them as in-memory, Snappy-compressed Parquet objects in GCS.
 - Redis consumer groups are created at ID `0`
 - Flush: 10,000 rows or 60 seconds after the oldest buffered row
 - ACK: only after a create-only, CRC32C-checked GCS upload
+- Post-export trim: Kalshi streams retain 15 minutes after upload and ACK,
+  without crossing pending or unread exporter entries
 - Recovery: stale pending entries are reclaimed with `XAUTOCLAIM`
 - Malformed data: written to `dead-letter/stream=ticks/` before ACK
-- Object partitions: venue/instrument/date/hour for crypto; series/event/market/instrument/date/hour for Kalshi
+- Object partitions: venue/instrument/date/hour for crypto; series/event/market/instrument/date/hour for Kalshi.
+  These partition keys are encoded in the object path only and are excluded from
+  Parquet columns. The row models retain them for validation and path generation.
 
 The pipeline is at-least-once. Backtests should use `event_id` or `redis_id` to
 deduplicate records if a process dies between a successful upload and its ACK.
@@ -21,6 +25,24 @@ deduplicate records if a process dies between a successful upload and its ACK.
 uv sync --directory services/gcs_exporter
 uv run --directory services/gcs_exporter pytest
 ```
+
+## One-off Binance trade backfill
+
+Binance's public Spot archives can be loaded directly into the existing
+`ticks/venue=binance/instrument=.../date=.../hour=.../` dataset. This is a
+local utility and is not part of the deployed service:
+
+```bash
+uv run --directory services/gcs_exporter python \
+  scripts/backfill_binance_trades.py \
+  --start-date 2026-07-01 --end-date 2026-08-25 --dry-run
+```
+
+Remove `--dry-run` to upload. The uploader is create-only, so rerunning the
+same range does not overwrite existing objects. Archive rows have no local
+receive timestamp; the utility sets `received_ts_ms` equal to the Binance
+exchange timestamp and uses deterministic `archive:...` Redis IDs. Use
+`event_id` for deduplication against live records.
 
 ## Container
 
@@ -94,6 +116,7 @@ kubectl logs deployment/gcs-exporter --tail=100
 | `FLUSH_INTERVAL_SEC` | `60` |
 | `RECLAIM_MIN_IDLE_MS` | `120000` |
 | `RECLAIM_INTERVAL_SEC` | `30` |
+| `POST_EXPORT_RETENTION_SEC` | `900` |
 | `HEALTH_PORT` | `8080` |
 
 The default entry point runs five consumers in one process:
@@ -111,6 +134,7 @@ reachable and the consumer group is available.
 
 ## Operational constraint
 
-The ingestion stream must retain at least 24 hours of peak traffic. The current
-count-based approximate trim cannot guarantee that duration until peak events
-per second are measured. Do not treat Redis as the archive of record.
+GCS is the archive of record. Kalshi streams are trimmed only after successful
+upload and ACK, with a short Redis window for dashboard reads and transient
+restarts. Crypto streams are not post-export trimmed because the market
+aggregator also consumes them.

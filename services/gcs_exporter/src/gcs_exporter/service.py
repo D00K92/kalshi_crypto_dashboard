@@ -9,6 +9,8 @@ import time
 from typing import Protocol
 
 import orjson
+from redis.exceptions import ConnectionError as RedisConnectionError
+from redis.exceptions import TimeoutError as RedisTimeoutError
 
 from gcs_exporter.config import Settings
 from gcs_exporter.gcs_uploader import GCSUploader, UploadResult
@@ -28,6 +30,9 @@ class Consumer(Protocol):
     async def read_new(self, count: int, block_ms: int) -> list[RawStreamEntry]: ...
     async def reclaim(self, min_idle_ms: int, count: int) -> list[RawStreamEntry]: ...
     async def ack(self, redis_ids: list[str]) -> int: ...
+    async def trim_exported(
+        self, latest_exported_id: str, retention_seconds: int
+    ) -> int: ...
     async def close(self) -> None: ...
 
 
@@ -77,24 +82,40 @@ class GCSExporterService:
                     "bucket": self._settings.bucket_name,
                 },
             )
+            retry_seconds = 1.0
             while not stop_event.is_set():
-                now = time.monotonic()
-                if now - self._last_reclaim_at >= self._settings.reclaim_interval_seconds:
-                    reclaimed = await self._consumer.reclaim(
-                        self._settings.reclaim_min_idle_ms,
-                        self._settings.read_count,
-                    )
-                    self._last_reclaim_at = now
-                    await self._ingest(reclaimed)
+                try:
+                    now = time.monotonic()
+                    if now - self._last_reclaim_at >= self._settings.reclaim_interval_seconds:
+                        reclaimed = await self._consumer.reclaim(
+                            self._settings.reclaim_min_idle_ms,
+                            self._settings.read_count,
+                        )
+                        self._last_reclaim_at = now
+                        await self._ingest(reclaimed)
 
-                capacity = max(1, self._settings.flush_size - len(self._buffer))
-                entries = await self._consumer.read_new(
-                    min(self._settings.read_count, capacity),
-                    self._settings.read_block_ms,
-                )
-                await self._ingest(entries)
-                if self._should_flush(time.monotonic()):
-                    await self.flush()
+                    capacity = max(1, self._settings.flush_size - len(self._buffer))
+                    entries = await self._consumer.read_new(
+                        min(self._settings.read_count, capacity),
+                        self._settings.read_block_ms,
+                    )
+                    await self._ingest(entries)
+                    if self._should_flush(time.monotonic()):
+                        await self.flush()
+                    retry_seconds = 1.0
+                    self._health.mark_ready()
+                except (RedisConnectionError, RedisTimeoutError) as exc:
+                    self._health.mark_not_ready()
+                    LOGGER.warning(
+                        "redis_connection_interrupted",
+                        extra={
+                            "stream": self._settings.stream_name,
+                            "retry_seconds": retry_seconds,
+                            "error": str(exc),
+                        },
+                    )
+                    await self._wait_for_retry(stop_event, retry_seconds)
+                    retry_seconds = min(retry_seconds * 2, 30.0)
         finally:
             self._health.mark_not_ready()
             try:
@@ -112,6 +133,15 @@ class GCSExporterService:
                     "gcs_exporter_stopped",
                     extra={"uncommitted_rows": len(self._buffer)},
                 )
+
+    @staticmethod
+    async def _wait_for_retry(
+        stop_event: asyncio.Event, retry_seconds: float
+    ) -> None:
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=retry_seconds)
+        except TimeoutError:
+            pass
 
     async def _ingest(self, entries: list[RawStreamEntry]) -> None:
         for entry in entries:

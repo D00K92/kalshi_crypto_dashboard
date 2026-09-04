@@ -50,6 +50,7 @@ class Settings:
     read_block_ms: int
     reclaim_interval_seconds: float
     reclaim_min_idle_ms: int
+    post_export_retention_seconds: int
     shutdown_grace_seconds: int
     health_port: int
     log_level: str
@@ -72,6 +73,9 @@ class Settings:
                 "RECLAIM_INTERVAL_SEC", 30.0
             ),
             reclaim_min_idle_ms=_positive_int("RECLAIM_MIN_IDLE_MS", 120_000),
+            post_export_retention_seconds=_positive_int(
+                "POST_EXPORT_RETENTION_SEC", 900
+            ),
             shutdown_grace_seconds=_positive_int(
                 "SHUTDOWN_GRACE_SECONDS", 30
             ),

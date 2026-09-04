@@ -17,6 +17,7 @@ def test_gke_environment_builds_settings(monkeypatch) -> None:
     assert settings.bucket_name == "kalshi-crypto-tick-data"
     assert settings.flush_size == 10_000
     assert settings.flush_interval_seconds == 60.0
+    assert settings.post_export_retention_seconds == 900
 
 
 def test_explicit_redis_url_takes_precedence(monkeypatch) -> None:
