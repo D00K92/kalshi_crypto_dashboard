@@ -47,6 +47,10 @@ the same repository and Redis online store. Inference workloads should call
 this service for online feature reads; it is intentionally a `ClusterIP` and
 is not exposed publicly.
 
+Registry changes should be applied with the one-shot high-memory
+`k8s/feast-apply-job.yaml` Job, not from a serving pod. This avoids an apply
+operation competing with online feature serving resources.
+
 To add a feature version, register an immutable `FeatureSpec`, define its
 PushSource/FeatureView and model-facing FeatureService, then apply the Feast
 repository before deploying a producer that emits the new version. Producers
