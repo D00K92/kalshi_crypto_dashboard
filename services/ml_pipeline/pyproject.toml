@@ -3,11 +3,11 @@ name = "kalshi-crypto-ml-pipeline"
 version = "0.2.0"
 description = "Quant ML Training Pipeline and Feast Feature Store"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.12,<3.13"
 dependencies = [
     "kfp>=2.8.0",
     "google-cloud-aiplatform>=1.60.0",
-    "google-cloud-storage>=3.4.0,<4",
+    "google-cloud-storage>=2.10.0,<3",
     "polars>=1.5.0",
     "pandas>=2.2.0",
     "gcsfs>=2024.6.0",

@@ -1,0 +1,357 @@
+# PIPELINE DEFINITION
+# Name: crypto-volatility-training-v1
+# Inputs:
+#    bucket: str [Default: 'kalshi-crypto-tick-data']
+#    champion_metrics_uri: str [Default: 'gs://kalshi-crypto-tick-data/models/v1/champion_metrics.json']
+#    end_date: str [Default: '2026-09-02']
+#    feast_repo: str [Default: '/app/feast_store']
+#    location: str [Default: 'asia-northeast3']
+#    model_version: str [Default: 'v1']
+#    project: str [Default: 'kalshi-crypto-506614']
+#    start_date: str [Default: '2026-08-31']
+#    target_table: str [Default: 'kalshi-crypto-506614.training_labels.future_realized_volatility_v1']
+components:
+  comp-evaluate-container:
+    executorLabel: exec-evaluate-container
+    inputDefinitions:
+      artifacts:
+        dataset:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+        model:
+          artifactType:
+            schemaTitle: system.Model
+            schemaVersion: 0.0.1
+      parameters:
+        champion_metrics_uri:
+          parameterType: STRING
+        horizon:
+          parameterType: STRING
+    outputDefinitions:
+      artifacts:
+        promote:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+        report:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+  comp-for-loop-2:
+    dag:
+      tasks:
+        evaluate-container:
+          cachingOptions:
+            enableCache: true
+          componentRef:
+            name: comp-evaluate-container
+          dependentTasks:
+          - train-container
+          inputs:
+            artifacts:
+              dataset:
+                componentInputArtifact: pipelinechannel--load-container-output_dataset
+              model:
+                taskOutputArtifact:
+                  outputArtifactKey: model
+                  producerTask: train-container
+            parameters:
+              champion_metrics_uri:
+                componentInputParameter: pipelinechannel--champion_metrics_uri
+              horizon:
+                componentInputParameter: pipelinechannel--loop-item-param-1
+          taskInfo:
+            name: evaluate-container
+        register-container:
+          cachingOptions:
+            enableCache: true
+          componentRef:
+            name: comp-register-container
+          dependentTasks:
+          - evaluate-container
+          - train-container
+          inputs:
+            artifacts:
+              model:
+                taskOutputArtifact:
+                  outputArtifactKey: model
+                  producerTask: train-container
+              promote:
+                taskOutputArtifact:
+                  outputArtifactKey: promote
+                  producerTask: evaluate-container
+            parameters:
+              bucket:
+                componentInputParameter: pipelinechannel--bucket
+              horizon:
+                componentInputParameter: pipelinechannel--loop-item-param-1
+              location:
+                componentInputParameter: pipelinechannel--location
+              model_version:
+                componentInputParameter: pipelinechannel--model_version
+              project:
+                componentInputParameter: pipelinechannel--project
+          taskInfo:
+            name: register-container
+        train-container:
+          cachingOptions:
+            enableCache: true
+          componentRef:
+            name: comp-train-container
+          inputs:
+            artifacts:
+              dataset:
+                componentInputArtifact: pipelinechannel--load-container-output_dataset
+            parameters:
+              horizon:
+                componentInputParameter: pipelinechannel--loop-item-param-1
+          taskInfo:
+            name: train-container
+    inputDefinitions:
+      artifacts:
+        pipelinechannel--load-container-output_dataset:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+      parameters:
+        pipelinechannel--bucket:
+          parameterType: STRING
+        pipelinechannel--champion_metrics_uri:
+          parameterType: STRING
+        pipelinechannel--location:
+          parameterType: STRING
+        pipelinechannel--loop-item-param-1:
+          parameterType: STRING
+        pipelinechannel--model_version:
+          parameterType: STRING
+        pipelinechannel--project:
+          parameterType: STRING
+  comp-load-container:
+    executorLabel: exec-load-container
+    inputDefinitions:
+      parameters:
+        end_date:
+          parameterType: STRING
+        feast_repo:
+          parameterType: STRING
+        project:
+          parameterType: STRING
+        start_date:
+          parameterType: STRING
+        target_table:
+          parameterType: STRING
+    outputDefinitions:
+      artifacts:
+        output_dataset:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+  comp-register-container:
+    executorLabel: exec-register-container
+    inputDefinitions:
+      artifacts:
+        model:
+          artifactType:
+            schemaTitle: system.Model
+            schemaVersion: 0.0.1
+        promote:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+      parameters:
+        bucket:
+          parameterType: STRING
+        horizon:
+          parameterType: STRING
+        location:
+          parameterType: STRING
+        model_version:
+          parameterType: STRING
+        project:
+          parameterType: STRING
+  comp-train-container:
+    executorLabel: exec-train-container
+    inputDefinitions:
+      artifacts:
+        dataset:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+      parameters:
+        horizon:
+          parameterType: STRING
+    outputDefinitions:
+      artifacts:
+        model:
+          artifactType:
+            schemaTitle: system.Model
+            schemaVersion: 0.0.1
+deploymentSpec:
+  executors:
+    exec-evaluate-container:
+      container:
+        args:
+        - --dataset
+        - '{{$.inputs.artifacts[''dataset''].path}}'
+        - --model
+        - '{{$.inputs.artifacts[''model''].path}}'
+        - --horizon
+        - '{{$.inputs.parameters[''horizon'']}}'
+        - --champion-metrics
+        - '{{$.inputs.parameters[''champion_metrics_uri'']}}'
+        - --report
+        - '{{$.outputs.artifacts[''report''].path}}'
+        - --promote
+        - '{{$.outputs.artifacts[''promote''].path}}'
+        command:
+        - python
+        - /app/main.py
+        image: asia-northeast3-docker.pkg.dev/kalshi-crypto-506614/ml-pipeline/ml-evaluate:v1
+    exec-load-container:
+      container:
+        args:
+        - --feast-repo
+        - '{{$.inputs.parameters[''feast_repo'']}}'
+        - --target-table
+        - '{{$.inputs.parameters[''target_table'']}}'
+        - --start-date
+        - '{{$.inputs.parameters[''start_date'']}}'
+        - --end-date
+        - '{{$.inputs.parameters[''end_date'']}}'
+        - --project
+        - '{{$.inputs.parameters[''project'']}}'
+        - --output
+        - '{{$.outputs.artifacts[''output_dataset''].path}}'
+        command:
+        - python
+        - /app/main.py
+        image: asia-northeast3-docker.pkg.dev/kalshi-crypto-506614/ml-pipeline/ml-load:v1
+    exec-register-container:
+      container:
+        args:
+        - --artifact-uri
+        - '{{$.inputs.artifacts[''model''].uri}}'
+        - --promote-file
+        - '{{$.inputs.artifacts[''promote''].path}}'
+        - --project
+        - '{{$.inputs.parameters[''project'']}}'
+        - --location
+        - '{{$.inputs.parameters[''location'']}}'
+        - --bucket
+        - '{{$.inputs.parameters[''bucket'']}}'
+        - --model-version
+        - '{{$.inputs.parameters[''model_version'']}}'
+        - --horizon
+        - '{{$.inputs.parameters[''horizon'']}}'
+        command:
+        - python
+        - /app/main.py
+        image: asia-northeast3-docker.pkg.dev/kalshi-crypto-506614/ml-pipeline/ml-register:v1
+    exec-train-container:
+      container:
+        args:
+        - --dataset
+        - '{{$.inputs.artifacts[''dataset''].path}}'
+        - --horizon
+        - '{{$.inputs.parameters[''horizon'']}}'
+        - --output
+        - '{{$.outputs.artifacts[''model''].path}}'
+        command:
+        - python
+        - /app/main.py
+        image: asia-northeast3-docker.pkg.dev/kalshi-crypto-506614/ml-pipeline/ml-train:v1
+pipelineInfo:
+  name: crypto-volatility-training-v1
+root:
+  dag:
+    tasks:
+      for-loop-2:
+        componentRef:
+          name: comp-for-loop-2
+        dependentTasks:
+        - load-container
+        inputs:
+          artifacts:
+            pipelinechannel--load-container-output_dataset:
+              taskOutputArtifact:
+                outputArtifactKey: output_dataset
+                producerTask: load-container
+          parameters:
+            pipelinechannel--bucket:
+              componentInputParameter: bucket
+            pipelinechannel--champion_metrics_uri:
+              componentInputParameter: champion_metrics_uri
+            pipelinechannel--location:
+              componentInputParameter: location
+            pipelinechannel--model_version:
+              componentInputParameter: model_version
+            pipelinechannel--project:
+              componentInputParameter: project
+        iteratorPolicy:
+          parallelismLimit: 5
+        parameterIterator:
+          itemInput: pipelinechannel--loop-item-param-1
+          items:
+            raw: '["1m", "5m", "15m", "30m", "1h"]'
+        taskInfo:
+          name: for-loop-2
+      load-container:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-load-container
+        inputs:
+          parameters:
+            end_date:
+              componentInputParameter: end_date
+            feast_repo:
+              componentInputParameter: feast_repo
+            project:
+              componentInputParameter: project
+            start_date:
+              componentInputParameter: start_date
+            target_table:
+              componentInputParameter: target_table
+        taskInfo:
+          name: load-container
+  inputDefinitions:
+    parameters:
+      bucket:
+        defaultValue: kalshi-crypto-tick-data
+        isOptional: true
+        parameterType: STRING
+      champion_metrics_uri:
+        defaultValue: gs://kalshi-crypto-tick-data/models/v1/champion_metrics.json
+        isOptional: true
+        parameterType: STRING
+      end_date:
+        defaultValue: '2026-09-02'
+        isOptional: true
+        parameterType: STRING
+      feast_repo:
+        defaultValue: /app/feast_store
+        isOptional: true
+        parameterType: STRING
+      location:
+        defaultValue: asia-northeast3
+        isOptional: true
+        parameterType: STRING
+      model_version:
+        defaultValue: v1
+        isOptional: true
+        parameterType: STRING
+      project:
+        defaultValue: kalshi-crypto-506614
+        isOptional: true
+        parameterType: STRING
+      start_date:
+        defaultValue: '2026-08-31'
+        isOptional: true
+        parameterType: STRING
+      target_table:
+        defaultValue: kalshi-crypto-506614.training_labels.future_realized_volatility_v1
+        isOptional: true
+        parameterType: STRING
+schemaVersion: 2.1.0
+sdkVersion: kfp-2.17.0

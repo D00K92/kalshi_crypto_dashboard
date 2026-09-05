@@ -7,10 +7,10 @@ generation, Feast definitions, and online-store materialization belong to
 
 ## Inputs
 
-```text
-gs://kalshi-crypto-tick-data/features/v1/date=YYYY-MM-DD/features.parquet
-gs://kalshi-crypto-tick-data/processed/future_realized_volatility/date=YYYY-MM-DD/hour=HH/targets.parquet
-```
+Training labels are read from BigQuery
+`training_labels.future_realized_volatility_v1`. Point-in-time features are
+retrieved through the Feast repository in `services/feast_store`, whose
+offline source is BigQuery and whose online store is Redis.
 
 Training is point-in-time safe: the loader rejects current-day data and limits
 samples to `end_date 23:00 UTC` because the longest target horizon is one hour.
@@ -46,9 +46,10 @@ uv run --directory services/ml_pipeline python scripts/compile_pipeline.py
 uv run --directory services/ml_pipeline python scripts/run_pipeline.py ...
 ```
 
-Historical feature retrieval through Feast remains available via
-`src/components/fetch_historical_features.py`; Feast configuration is owned by
-`services/feast_store`.
+Historical feature retrieval is centralized in
+`src/common/data_io.py::load_training_table_from_feast`; Feast configuration is
+owned by `services/feast_store`. The legacy GCS loader remains available for
+rollback only.
 
 Container images are published to Artifact Registry under
 `asia-northeast3-docker.pkg.dev/kalshi-crypto-506614/ml-pipeline/` and referenced

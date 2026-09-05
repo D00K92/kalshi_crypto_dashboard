@@ -12,12 +12,12 @@ REGISTER_IMAGE = f"{REGISTRY}/ml-register:v1"
 
 @dsl.container_component
 def load_container(
-    feature_root: str, target_root: str, start_date: str, end_date: str,
+    feast_repo: str, target_table: str, start_date: str, end_date: str,
     project: str, output_dataset: Output[Dataset],
 ):
     return dsl.ContainerSpec(
         image=LOAD_IMAGE, command=["python", "/app/main.py"],
-        args=["--feature-root", feature_root, "--target-root", target_root,
+        args=["--feast-repo", feast_repo, "--target-table", target_table,
               "--start-date", start_date, "--end-date", end_date,
               "--project", project, "--output", output_dataset.path],
     )
