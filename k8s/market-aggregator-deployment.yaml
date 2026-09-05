@@ -33,6 +33,8 @@ spec:
           value: "aggregator_trades_v3"
         - name: AGGREGATOR_GROUP_START_ID
           value: "$"
+        - name: FEATURE_STREAM_MAXLEN
+          value: "5000"
         - name: AGGREGATION_PRICE_TICK
           value: "0.01"
         - name: AGGREGATION_TAKER_FEES

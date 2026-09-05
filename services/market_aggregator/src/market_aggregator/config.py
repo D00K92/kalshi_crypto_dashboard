@@ -65,7 +65,7 @@ class Settings:
             read_block_ms=_int("AGGREGATOR_READ_BLOCK_MS", 1000),
             output_prefix=os.getenv("AGGREGATOR_OUTPUT_PREFIX", "market"),
             feature_stream=os.getenv("FEATURE_STREAM", "stream:features:v1"),
-            feature_maxlen=_int("FEATURE_STREAM_MAXLEN", 100_000),
+            feature_maxlen=_int("FEATURE_STREAM_MAXLEN", 5_000),
             trade_freshness_ms=_int("FEATURE_TRADE_FRESHNESS_MS", 60_000),
             health_port=_int("HEALTH_PORT", 8080),
             aggregation_venues=tuple(

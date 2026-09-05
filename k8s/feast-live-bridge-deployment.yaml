@@ -29,6 +29,8 @@ spec:
           value: "stream:features:v1"
         - name: FEAST_LIVE_GROUP
           value: "feast-live-features-v1"
+        - name: FEAST_PENDING_IDLE_MS
+          value: "120000"
         resources:
           requests: {cpu: "100m", memory: "256Mi"}
           limits: {cpu: "500m", memory: "1Gi"}

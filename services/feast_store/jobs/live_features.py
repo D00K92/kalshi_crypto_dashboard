@@ -54,7 +54,7 @@ def payload_to_frame(payload: dict, *, spec=None) -> pd.DataFrame:
 
 async def run_bridge(
     *, repo_path: str, redis_url: str, stream: str, group: str, consumer: str,
-    batch_size: int = 100, block_ms: int = 1_000,
+    batch_size: int = 100, block_ms: int = 1_000, pending_idle_ms: int = 120_000,
 ) -> None:
     """Consume live features and write them to Feast until cancelled."""
     client = redis.Redis.from_url(redis_url, decode_responses=False)
@@ -66,37 +66,50 @@ async def run_bridge(
             if "BUSYGROUP" not in str(exc):
                 raise
         while True:
+            # Recover entries abandoned by a terminated pod.  The live stream
+            # is deliberately bounded, so only recent pending entries matter.
+            reclaimed = await client.xautoclaim(
+                stream, group, consumer, min_idle_time=pending_idle_ms,
+                start_id="0-0", count=batch_size,
+            )
+            if len(reclaimed) > 1 and reclaimed[1]:
+                await _process_entries(client, store, stream, group, reclaimed[1])
             rows = await client.xreadgroup(
                 group, consumer, {stream: ">"}, count=batch_size, block=block_ms
             )
             for _, entries in rows:
-                for entry_id, fields in entries:
-                    try:
-                        raw = fields.get(b"payload") or fields.get("payload")
-                        if raw is None:
-                            raise ValueError("missing payload")
-                        payload = json.loads(raw)
-                        spec = resolve_feature_spec(
-                            payload.get("feature_set", "market_features"),
-                            payload.get("feature_version", "v1"),
-                        )
-                        frame = payload_to_frame(payload, spec=spec)
-                        await asyncio.to_thread(
-                            store.push,
-                            source_name=spec.push_source,
-                            df=frame,
-                            to=PushMode.ONLINE,
-                        )
-                        await client.xack(stream, group, entry_id)
-                    except (ValueError, TypeError, KeyError, OverflowError) as exc:
-                        LOGGER.warning("live_feature_rejected", extra={"entry_id": entry_id, "error": str(exc)})
-                        await client.xack(stream, group, entry_id)
-                    except Exception:
-                        LOGGER.exception("live_feature_write_failed", extra={"entry_id": entry_id})
-                        # Leave the entry pending for retry after a transient
-                        # Feast/Redis failure.
+                await _process_entries(client, store, stream, group, entries)
     finally:
         await client.aclose()
+
+
+async def _process_entries(client, store, stream: str, group: str, entries) -> None:
+    """Push entries and acknowledge only success or permanent validation errors."""
+    for entry_id, fields in entries:
+        try:
+            raw = fields.get(b"payload") or fields.get("payload")
+            if raw is None:
+                raise ValueError("missing payload")
+            payload = json.loads(raw)
+            spec = resolve_feature_spec(
+                payload.get("feature_set", "market_features"),
+                payload.get("feature_version", "v1"),
+            )
+            frame = payload_to_frame(payload, spec=spec)
+            await asyncio.to_thread(
+                store.push,
+                source_name=spec.push_source,
+                df=frame,
+                to=PushMode.ONLINE,
+            )
+            await client.xack(stream, group, entry_id)
+        except (ValueError, TypeError, KeyError, OverflowError) as exc:
+            LOGGER.warning("live_feature_rejected entry_id=%s error=%s", entry_id, exc)
+            await client.xack(stream, group, entry_id)
+        except Exception:
+            LOGGER.exception("live_feature_write_failed entry_id=%s", entry_id)
+            # Leave the entry pending for retry after a transient Feast/Redis
+            # failure; XAUTOCLAIM recovers it after pod restarts.
 
 
 def main() -> None:
@@ -106,6 +119,7 @@ def main() -> None:
     parser.add_argument("--stream", default=os.getenv("FEATURE_STREAM", "stream:features:v1"))
     parser.add_argument("--group", default=os.getenv("FEAST_LIVE_GROUP", "feast-live-features"))
     parser.add_argument("--consumer", default=os.getenv("HOSTNAME", "feast-live-1"))
+    parser.add_argument("--pending-idle-ms", type=int, default=int(os.getenv("FEAST_PENDING_IDLE_MS", "120000")))
     args = parser.parse_args()
     logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
     asyncio.run(run_bridge(**vars(args)))
