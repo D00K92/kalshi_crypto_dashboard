@@ -4,14 +4,14 @@ metadata:
   name: "${JOB_NAME}"
   namespace: "${NAMESPACE}"
   labels:
-    app: market-aggregator-integration
+    app: aggregator-integration
 spec:
   backoffLimit: 0
   ttlSecondsAfterFinished: 3600
   template:
     metadata:
       labels:
-        app: market-aggregator-integration
+        app: aggregator-integration
     spec:
       restartPolicy: Never
       containers:

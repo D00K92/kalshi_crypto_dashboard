@@ -29,7 +29,7 @@ jobs:
             path: services/ingestion
           - service: gcs-exporter
             path: services/gcs_exporter
-          - service: market-aggregator
+          - service: aggregator
             path: services/market_aggregator
           - service: dashboard
             path: services/dashboard
@@ -71,7 +71,7 @@ jobs:
             context: services/ingestion
           - service: gcs-exporter
             context: services/gcs_exporter
-          - service: market-aggregator
+          - service: aggregator
             context: services/market_aggregator
           - service: dashboard
             context: services/dashboard

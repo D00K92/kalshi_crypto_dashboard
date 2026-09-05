@@ -12,7 +12,7 @@ Run locally with Redis available:
 
 ```bash
 uv sync --group dev
-uv run market-aggregator
+uv run aggregator
 ```
 
 Configuration is environment-based; see `src/market_aggregator/config.py`.

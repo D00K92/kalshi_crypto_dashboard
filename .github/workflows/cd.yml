@@ -71,13 +71,22 @@ jobs:
         docker build --platform linux/amd64 -t "${IMAGE_URI}:${IMAGE_TAG}" services/ingestion
         docker push "${IMAGE_URI}:${IMAGE_TAG}"
 
-    - name: Build and push market aggregator image
+    - name: Build and push aggregator image
       env:
-        IMAGE_URI: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/market-aggregator
+        IMAGE_URI: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/aggregator
         IMAGE_TAG: ${{ github.event.workflow_run.head_sha || github.sha }}
       run: |
         set -euo pipefail
         docker build --platform linux/amd64 -t "${IMAGE_URI}:${IMAGE_TAG}" services/market_aggregator
+        docker push "${IMAGE_URI}:${IMAGE_TAG}"
+
+    - name: Build and push Feast live bridge image
+      env:
+        IMAGE_URI: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/feast-store
+        IMAGE_TAG: ${{ github.event.workflow_run.head_sha || github.sha }}
+      run: |
+        set -euo pipefail
+        docker build --platform linux/amd64 -t "${IMAGE_URI}:${IMAGE_TAG}" services/feast_store
         docker push "${IMAGE_URI}:${IMAGE_TAG}"
 
     - name: Build and push dashboard image
@@ -123,7 +132,8 @@ jobs:
       env:
         GCS_EXPORTER_IMAGE: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/${{ env.IMAGE_NAME }}:${{ github.event.workflow_run.head_sha || github.sha }}
         INGESTION_IMAGE: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/ingestion:${{ github.event.workflow_run.head_sha || github.sha }}
-        MARKET_AGGREGATOR_IMAGE: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/market-aggregator:${{ github.event.workflow_run.head_sha || github.sha }}
+        AGGREGATOR_IMAGE: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/aggregator:${{ github.event.workflow_run.head_sha || github.sha }}
+        FEAST_STORE_IMAGE: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/feast-store:${{ github.event.workflow_run.head_sha || github.sha }}
         DASHBOARD_IMAGE: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/dashboard:${{ github.event.workflow_run.head_sha || github.sha }}
         BATCH_ETL_IMAGE: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/batch-etl:${{ github.event.workflow_run.head_sha || github.sha }}
         REDIS_HOST: ${{ steps.redis.outputs.host }}
@@ -135,8 +145,11 @@ jobs:
         envsubst '${INGESTION_IMAGE} ${REDIS_HOST} ${REDIS_PORT}' \
           < k8s/ingestion-deployment.yaml \
           | kubectl apply -f -
-        envsubst '${MARKET_AGGREGATOR_IMAGE} ${REDIS_HOST} ${REDIS_PORT}' \
+        envsubst '${AGGREGATOR_IMAGE} ${REDIS_HOST} ${REDIS_PORT}' \
           < k8s/market-aggregator-deployment.yaml \
+          | kubectl apply -f -
+        envsubst '${FEAST_STORE_IMAGE} ${REDIS_HOST}' \
+          < k8s/feast-live-bridge-deployment.yaml \
           | kubectl apply -f -
         envsubst '${DASHBOARD_IMAGE} ${REDIS_HOST} ${REDIS_PORT}' \
           < k8s/dashboard-deployment.yaml \
@@ -153,7 +166,9 @@ jobs:
         set -euo pipefail
         kubectl rollout status deployment/gcs-exporter --timeout=5m
         kubectl rollout status deployment/ingestion-service --timeout=5m
-        kubectl rollout status deployment/market-aggregator --timeout=5m
+        kubectl rollout status deployment/aggregator --timeout=5m
+        kubectl rollout status deployment/feast-live-bridge --timeout=5m
+        kubectl delete deployment/market-aggregator --ignore-not-found
         kubectl rollout status deployment/dashboard --timeout=5m
         kubectl get cronjob/batch-etl
         kubectl get cronjob/batch-etl-features cronjob/batch-etl-targets

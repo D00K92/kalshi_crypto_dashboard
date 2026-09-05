@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: feast-live-bridge
+  labels: {app: feast-live-bridge}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: feast-live-bridge}
+  template:
+    metadata:
+      labels: {app: feast-live-bridge}
+    spec:
+      serviceAccountName: batch-etl
+      containers:
+      - name: feast-live-bridge
+        image: "${FEAST_STORE_IMAGE}"
+        imagePullPolicy: IfNotPresent
+        command: ["python", "jobs/live_features.py"]
+        env:
+        - name: REDIS_URL
+          value: "redis://${REDIS_HOST}:6379/0"
+        - name: FEAST_REPO_PATH
+          value: "/app/feast_store"
+        - name: FEATURE_STREAM
+          value: "stream:features:v1"
+        - name: FEAST_LIVE_GROUP
+          value: "feast-live-features-v1"
+        resources:
+          requests: {cpu: "100m", memory: "256Mi"}
+          limits: {cpu: "500m", memory: "1Gi"}

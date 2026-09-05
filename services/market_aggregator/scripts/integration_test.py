@@ -49,7 +49,7 @@ async def main(wait_seconds: int) -> None:
     assert len(book["bids"]) <= 10 and len(book["asks"]) <= 10
     assert await client.exists(f"{prefix}:candles:BTCUSDT:5s")
     assert await client.exists(f"{prefix}:cvd:BTCUSDT:5s")
-    print("market-aggregator integration test passed")
+    print("aggregator integration test passed")
     await client.aclose()
 
 

@@ -62,7 +62,7 @@ jobs:
 
     - name: Build and push aggregator test image
       env:
-        IMAGE_URI: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/market-aggregator
+        IMAGE_URI: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/aggregator
         IMAGE_TAG: ${{ github.event.workflow_run.head_sha || github.sha }}
       run: |
         set -euo pipefail
@@ -78,9 +78,9 @@ jobs:
 
     - name: Run integration Job in GKE
       env:
-        JOB_NAME: "market-aggregator-it-${{ github.run_id }}"
+        JOB_NAME: "aggregator-it-${{ github.run_id }}"
         NAMESPACE: ${{ env.STAGING_NAMESPACE }}
-        AGGREGATOR_IMAGE: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/market-aggregator:${{ github.event.workflow_run.head_sha || github.sha }}
+        AGGREGATOR_IMAGE: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/aggregator:${{ github.event.workflow_run.head_sha || github.sha }}
         REDIS_URL: redis://${{ env.STAGING_REDIS_HOST }}:6379/0
         BOOK_STREAM: "ci:${{ github.run_id }}:orderbooks"
         TRADE_STREAM: "ci:${{ github.run_id }}:trades"

@@ -15,6 +15,7 @@ dependencies = [
 
 [project.scripts]
 market-aggregator = "market_aggregator.__main__:main"
+aggregator = "market_aggregator.__main__:main"
 
 [dependency-groups]
 dev = [

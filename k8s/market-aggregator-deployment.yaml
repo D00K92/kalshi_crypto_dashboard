@@ -1,24 +1,24 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: market-aggregator
+  name: aggregator
   labels:
-    app: market-aggregator
+    app: aggregator
 spec:
   replicas: 1
   strategy:
     type: Recreate
   selector:
     matchLabels:
-      app: market-aggregator
+      app: aggregator
   template:
     metadata:
       labels:
-        app: market-aggregator
+        app: aggregator
     spec:
       containers:
-      - name: market-aggregator
-        image: "${MARKET_AGGREGATOR_IMAGE}"
+      - name: aggregator
+        image: "${AGGREGATOR_IMAGE}"
         imagePullPolicy: IfNotPresent
         env:
         - name: REDIS_HOST
@@ -28,9 +28,9 @@ spec:
         - name: AGGREGATOR_OUTPUT_PREFIX
           value: "market"
         - name: BOOK_CONSUMER_GROUP
-          value: "market_aggregator_books_v2"
+          value: "aggregator_books_v3"
         - name: TRADE_CONSUMER_GROUP
-          value: "market_aggregator_trades_v2"
+          value: "aggregator_trades_v3"
         - name: AGGREGATOR_GROUP_START_ID
           value: "$"
         - name: AGGREGATION_PRICE_TICK
