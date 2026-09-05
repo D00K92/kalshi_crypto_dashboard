@@ -21,7 +21,7 @@ def redis_url() -> str:
 
 
 def age_ms(payload: dict) -> int | None:
-    generated = payload.get("generated_ts_ms")
+    generated = payload.get("generated_ts_ms", payload.get("event_timestamp_ms"))
     return int(time.time() * 1000 - generated) if generated else None
 
 
@@ -68,6 +68,15 @@ async def inspect(seconds: int) -> None:
                 printer(orjson.loads(raw))
             else:
                 print(f"\n{key}: MISSING")
+        feature_raw = await client.get("market:features:v1:BTCUSD:latest")
+        if feature_raw:
+            feature = orjson.loads(feature_raw)
+            print(
+                f"\nFEATURES {feature.get('feature_set', 'legacy')}/v{feature.get('feature_version', '?')} "
+                f"age_ms={age_ms(feature)} values={feature.get('values', feature)}"
+            )
+        else:
+            print("\nmarket:features:v1:BTCUSD:latest: MISSING")
         print_series("CANDLES", await client.get("market:candles:BTCUSDT:5s"))
         print_series("CVD", await client.get("market:cvd:BTCUSDT:5s"))
 

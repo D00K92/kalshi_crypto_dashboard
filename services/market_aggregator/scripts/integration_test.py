@@ -33,22 +33,26 @@ async def main(wait_seconds: int) -> None:
         for event in events:
             await client.xadd(stream, {"event_id": event["event_id"], "event_type": event["event_type"], "payload": orjson.dumps(event)})
     deadline = time.monotonic() + wait_seconds
-    book = spot = None
+    book = spot = feature = None
     while time.monotonic() < deadline:
         book_raw = await client.get(f"{prefix}:book:BTCUSDT:latest")
         spot_raw = await client.get(f"{prefix}:spot:BTCUSDT:latest")
-        if book_raw and spot_raw:
-            book, spot = orjson.loads(book_raw), orjson.loads(spot_raw)
+        feature_raw = await client.get(f"{prefix}:features:v1:BTCUSD:latest")
+        if book_raw and spot_raw and feature_raw:
+            book, spot, feature = orjson.loads(book_raw), orjson.loads(spot_raw), orjson.loads(feature_raw)
             break
         await asyncio.sleep(0.25)
-    if not book or not spot:
-        raise AssertionError("aggregator did not publish book and spot state")
+    if not book or not spot or not feature:
+        raise AssertionError("aggregator did not publish book, spot, and feature state")
     assert spot["price"] == "107.5", spot
     assert spot["total_volume"] == "4", spot
     assert book["bids"][0]["venues"] == {"binance": "2", "bybit": "2", "coinbase": "2"}, book
     assert len(book["bids"]) <= 10 and len(book["asks"]) <= 10
     assert await client.exists(f"{prefix}:candles:BTCUSDT:5s")
     assert await client.exists(f"{prefix}:cvd:BTCUSDT:5s")
+    assert feature["feature_set"] == "market_features"
+    assert feature["feature_version"] == "v1"
+    assert feature["values"]["venue_count"] >= 1
     print("aggregator integration test passed")
     await client.aclose()
 
