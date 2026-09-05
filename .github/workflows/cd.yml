@@ -151,6 +151,9 @@ jobs:
         envsubst '${FEAST_STORE_IMAGE} ${REDIS_HOST}' \
           < k8s/feast-live-bridge-deployment.yaml \
           | kubectl apply -f -
+        envsubst '${FEAST_STORE_IMAGE}' \
+          < k8s/feast-server-deployment.yaml \
+          | kubectl apply -f -
         envsubst '${DASHBOARD_IMAGE} ${REDIS_HOST} ${REDIS_PORT}' \
           < k8s/dashboard-deployment.yaml \
           | kubectl apply -f -
@@ -168,6 +171,7 @@ jobs:
         kubectl rollout status deployment/ingestion-service --timeout=5m
         kubectl rollout status deployment/aggregator --timeout=5m
         kubectl rollout status deployment/feast-live-bridge --timeout=5m
+        kubectl rollout status deployment/feast-server --timeout=5m
         kubectl delete deployment/market-aggregator --ignore-not-found
         kubectl rollout status deployment/dashboard --timeout=5m
         kubectl get cronjob/batch-etl

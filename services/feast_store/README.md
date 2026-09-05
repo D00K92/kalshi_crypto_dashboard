@@ -42,6 +42,11 @@ the offline source; hourly materialization is retained for reconciliation and
 recovery, not for the real-time inference path. The old `live_features.py`
 entrypoint remains as a compatibility wrapper.
 
+The internal Kubernetes service `feast-server:6566` runs `feast serve` against
+the same repository and Redis online store. Inference workloads should call
+this service for online feature reads; it is intentionally a `ClusterIP` and
+is not exposed publicly.
+
 To add a feature version, register an immutable `FeatureSpec`, define its
 PushSource/FeatureView and model-facing FeatureService, then apply the Feast
 repository before deploying a producer that emits the new version. Producers
