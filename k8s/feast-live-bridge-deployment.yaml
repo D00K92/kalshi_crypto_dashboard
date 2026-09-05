@@ -17,7 +17,9 @@ spec:
       - name: feast-live-bridge
         image: "${FEAST_STORE_IMAGE}"
         imagePullPolicy: IfNotPresent
-        command: ["python", "jobs/live_push.py"]
+        # Execute as a module so the ``jobs`` package is importable from the
+        # Feast repository working directory.
+        command: ["python", "-m", "jobs.live_push"]
         env:
         - name: REDIS_URL
           value: "redis://${REDIS_HOST}:6379/0"
