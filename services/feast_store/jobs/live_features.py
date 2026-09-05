@@ -98,7 +98,7 @@ async def _process_entries(client, store, stream: str, group: str, entries) -> N
             frame = payload_to_frame(payload, spec=spec)
             await asyncio.to_thread(
                 store.push,
-                source_name=spec.push_source,
+                push_source_name=spec.push_source,
                 df=frame,
                 to=PushMode.ONLINE,
             )
