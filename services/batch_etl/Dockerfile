@@ -13,6 +13,7 @@ RUN uv sync --frozen --no-dev --no-install-project
 
 COPY src ./src
 COPY scripts ./scripts
+COPY sql ./sql
 
 RUN addgroup --system batch-etl && adduser --system --ingroup batch-etl batch-etl
 USER 100:101
