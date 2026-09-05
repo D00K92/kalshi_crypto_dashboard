@@ -5,7 +5,8 @@ from market_aggregator.aggregation import MarketAggregator
 from market_aggregator.config import Settings
 
 
-def trade(venue, price, quantity, side="buy", ts=10_000):
+def trade(venue, price, quantity, side="buy", ts=None):
+    ts = ts or int(time.time() * 1000)
     return {"event_type": "trade", "venue": venue, "instrument": "BTCUSDT", "price": str(price), "quantity": str(quantity), "taker_side": side, "exchange_ts_ms": ts, "received_ts_ms": ts}
 
 
@@ -18,10 +19,37 @@ def test_trade_vwap_and_cvd():
     agg.apply_trade(first)
     spot = agg.apply_trade(second)
     assert spot["price"] == "105"
-    assert spot["method"] == "ten_second_trade_average"
+    assert spot["method"] == "simple_average_fresh_venues"
     assert spot["total_volume"] == "4"
     assert spot["used_venues"] == ["binance", "coinbase"]
     assert agg.cvd == Decimal("-2")
+    assert spot["venue_count"] == 2
+
+
+def test_synthetic_price_uses_fresh_venue_prices_not_trade_volume():
+    agg = MarketAggregator(trade_freshness_ms=60_000)
+    first = trade("binance", 100, 100)
+    first["event_id"] = "fresh-one"
+    second = trade("coinbase", 110, 1, ts=first["received_ts_ms"] + 1)
+    second["event_id"] = "fresh-two"
+    spot = agg.apply_trade(first)
+    spot = agg.apply_trade(second)
+    assert spot["price"] == "105"
+    assert spot["log_return"] is not None
+
+
+def test_stale_venue_is_excluded_from_synthetic_price():
+    now = int(time.time() * 1000)
+    agg = MarketAggregator(trade_freshness_ms=60_000)
+    old = trade("binance", 100, 1, ts=now - 61_000)
+    old["event_id"] = "stale"
+    current = trade("coinbase", 110, 1, ts=now)
+    current["event_id"] = "current"
+    agg.apply_trade(old)
+    spot = agg.apply_trade(current)
+    assert spot["price"] == "110"
+    assert spot["used_venues"] == ["coinbase"]
+    assert spot["stale_venues"] == ["binance"]
 
 
 def test_candle_state_round_trips_across_restart():

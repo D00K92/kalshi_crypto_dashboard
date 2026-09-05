@@ -37,17 +37,19 @@ class VenueBook:
 class MarketAggregator:
     """Pure state machine for venue books and trade-derived market data."""
 
-    def __init__(self, price_tick: str | None = None, depth: int = 10, freshness_ms: int = 500, venues: tuple[str, ...] | None = None, taker_fees: Mapping[str, str | Decimal] | None = None) -> None:
+    def __init__(self, price_tick: str | None = None, depth: int = 10, freshness_ms: int = 500, venues: tuple[str, ...] | None = None, taker_fees: Mapping[str, str | Decimal] | None = None, trade_freshness_ms: int = 60_000) -> None:
         self.tick = _dec(price_tick) if price_tick else None
         if self.tick is not None and self.tick <= 0:
             raise ValueError("price_tick must be positive")
         self.depth = depth
         self.freshness_ms = freshness_ms
+        self.trade_freshness_ms = trade_freshness_ms
         self.venues = {venue.lower() for venue in venues} if venues is not None else None
         self.taker_fees = {str(venue).lower(): self._fee(value) for venue, value in (taker_fees or {}).items()}
         self.books: dict[str, VenueBook] = {}
         self.trade_buckets: dict[int, dict[str, Any]] = {}
         self.latest_trades: dict[str, dict[str, Any]] = {}
+        self._last_synthetic_price: Decimal | None = None
         self.cvd = Decimal("0")
         self._seen_events: set[str] = set()
 
@@ -107,10 +109,35 @@ class MarketAggregator:
         return {"schema_version": 1, "event_type": "aggregated_book", "instrument": instrument, "generated_ts_ms": now_ms, "depth": self.depth, "price_tick": str(tick), "bucket_method": "effective_price_bid_floor_ask_ceiling_uncrossed", "taker_fees": {venue: self._fmt(fee) for venue, fee in sorted(self.taker_fees.items())}, "venues": sorted(active), "stale_venues": stale, "bids": bid_buckets[: self.depth], "asks": ask_buckets[: self.depth]}
 
     def spot_snapshot(self, bucket: int, instrument: str, state: dict[str, Any]) -> dict[str, Any]:
-        venues = {venue: {"average_price": self._fmt(v["price_sum"] / v["trade_count"]), "volume": self._fmt(v["volume"]), "last_received_ts_ms": self.latest_trades[venue]["received_ts_ms"]} for venue, v in state["venues"].items() if v["trade_count"] > 0}
+        now_ms = int(time.time() * 1000)
+        venues = {
+            venue: {
+                "price": self._fmt(item["price"]),
+                # Keep the dashboard's historical field name while exposing
+                # the latest price used by the synthetic average.
+                "average_price": self._fmt(item["price"]),
+                "volume": self._fmt(state["venues"].get(venue, {}).get("volume", Decimal("0"))),
+                "last_received_ts_ms": item["received_ts_ms"],
+            }
+            for venue, item in self.latest_trades.items()
+            if now_ms - item["received_ts_ms"] <= self.trade_freshness_ms
+        }
+        prices = [Decimal(item["price"]) for item in venues.values()]
         total = state["volume"]
-        price = self._fmt(state["price_sum"] / state["trade_count"]) if state["trade_count"] else None
-        return {"schema_version": 1, "event_type": "aggregated_spot", "instrument": instrument, "price": price, "method": "ten_second_trade_average", "generated_ts_ms": int(time.time() * 1000), "bucket_start_ts_ms": bucket, "bucket_end_ts_ms": bucket + CANDLE_INTERVAL_MS, "total_volume": self._fmt(total), "venues": venues, "used_venues": sorted(venues), "stale_venues": []}
+        synthetic = sum(prices, Decimal("0")) / len(prices) if prices else None
+        previous = self._last_synthetic_price
+        log_return = (synthetic / previous).ln() if synthetic and previous else None
+        if synthetic:
+            self._last_synthetic_price = synthetic
+        stale = sorted(set(self.latest_trades) - set(venues))
+        return {
+            "schema_version": 1, "event_type": "aggregated_spot", "instrument": instrument,
+            "price": self._fmt(synthetic), "method": "simple_average_fresh_venues",
+            "generated_ts_ms": now_ms, "bucket_start_ts_ms": bucket,
+            "bucket_end_ts_ms": bucket + CANDLE_INTERVAL_MS, "total_volume": self._fmt(total),
+            "venues": venues, "used_venues": sorted(venues), "stale_venues": stale,
+            "log_return": self._fmt(log_return), "venue_count": len(prices),
+        }
 
     def candle_snapshot(self, instrument: str) -> list[dict[str, Any]]:
         return [{"instrument": instrument, "bucket_start_ts_ms": start, "open": self._fmt(s["open"]), "high": self._fmt(s["high"]), "low": self._fmt(s["low"]), "close": self._fmt(s["close"]), "volume": self._fmt(s["volume"]), "vwap": self._fmt(s["notional"] / s["volume"])} for start, s in sorted(self.trade_buckets.items()) if s["volume"] > 0]

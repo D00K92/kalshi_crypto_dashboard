@@ -33,6 +33,9 @@ class Settings:
     read_count: int
     read_block_ms: int
     output_prefix: str
+    feature_stream: str
+    feature_maxlen: int
+    trade_freshness_ms: int
     health_port: int
     aggregation_venues: tuple[str, ...]
     taker_fees: tuple[tuple[str, str], ...]
@@ -61,12 +64,15 @@ class Settings:
             read_count=_int("AGGREGATOR_READ_COUNT", 200),
             read_block_ms=_int("AGGREGATOR_READ_BLOCK_MS", 1000),
             output_prefix=os.getenv("AGGREGATOR_OUTPUT_PREFIX", "market"),
+            feature_stream=os.getenv("FEATURE_STREAM", "stream:features:v1"),
+            feature_maxlen=_int("FEATURE_STREAM_MAXLEN", 100_000),
+            trade_freshness_ms=_int("FEATURE_TRADE_FRESHNESS_MS", 60_000),
             health_port=_int("HEALTH_PORT", 8080),
             aggregation_venues=tuple(
                 venue.strip().lower()
                 for venue in os.getenv(
                     "AGGREGATION_VENUES",
-                    "bitstamp,crypto.com,gemini,coinbase,kraken",
+                    "binance,bitstamp,crypto.com,gemini,coinbase,kraken",
                 ).split(",")
                 if venue.strip()
             ),
