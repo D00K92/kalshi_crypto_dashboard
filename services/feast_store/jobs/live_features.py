@@ -100,6 +100,7 @@ async def _process_entries(client, store, stream: str, group: str, entries) -> N
                 store.push,
                 push_source_name=spec.push_source,
                 df=frame,
+                allow_registry_cache=False,
                 to=PushMode.ONLINE,
             )
             await client.xack(stream, group, entry_id)
