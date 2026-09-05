@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import logging
 import os
 from datetime import datetime, timezone
@@ -68,8 +69,7 @@ async def run_bridge(
                         raw = fields.get(b"payload") or fields.get("payload")
                         if raw is None:
                             raise ValueError("missing payload")
-                        import orjson
-                        payload = orjson.loads(raw)
+                        payload = json.loads(raw)
                         frame = payload_to_frame(payload)
                         await asyncio.to_thread(
                             store.write_to_online_store,
