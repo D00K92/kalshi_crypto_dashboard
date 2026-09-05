@@ -31,7 +31,7 @@ gcloud run deploy feast-server \
 gcloud run jobs create feast-materialize \
   --project "$PROJECT_ID" --region "$REGION" --image "$IMAGE" \
   --service-account "$SERVICE_ACCOUNT" \
-  --command /app/feast_store/materialize.sh \
+  --command /app/feast_store/jobs/materialize.sh \
   --tasks 1
 ```
 

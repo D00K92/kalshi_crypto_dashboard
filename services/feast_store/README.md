@@ -1,8 +1,8 @@
 # Feast feature repository (`services/feast_store`)
 
 This directory is the single ownership boundary for offline and online Feast
-features. It is intentionally a skeleton: feature computation and schemas are
-not implemented yet.
+features. Feature formulas remain in `batch_etl`; this service owns versioned
+contracts, Feast registration, materialization, and low-latency online writes.
 
 ## Current GCP contract
 
@@ -27,13 +27,10 @@ Cloud Run and must be replaced during deployment.
 ```text
 feast_store/
 ├── feature_store.yaml       # Feast project/provider/registry configuration
-├── requirements.txt         # isolated Feast runtime dependencies
-├── entities.py              # entity declarations
-├── data_sources.py          # offline source declarations
 ├── definitions/             # entities, sources, views, and services
-├── jobs/                    # apply, materialize, and backfill entrypoints
+├── registry/                # immutable live feature contracts
+├── jobs/                    # apply, materialize, and live-push entrypoints
 ├── src/feast_repo/           # shared config and validation interfaces
-├── src/feast_repo/           # shared config and interfaces
 └── tests/                   # repository-level contract tests
 ```
 

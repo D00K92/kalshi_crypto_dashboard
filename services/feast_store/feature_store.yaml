@@ -1,6 +1,11 @@
 project: kalshi_crypto
 registry: gs://kalshi-crypto-tick-data/feature_store/registry.db
-provider: local
+provider: gcp
+# Historical features are queried directly from BigQuery; Redis remains the online store.
+offline_store:
+  type: bigquery
+  dataset: feature_store
+  location: asia-northeast3
 online_store:
   type: redis
-  connection_string: redis://redis.default.svc.cluster.local:6379/0
+  connection_string: 10.178.26.139:6379,db=0
