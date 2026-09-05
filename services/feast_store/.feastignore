@@ -1,0 +1,7 @@
+# Only definitions are Feast repository declarations.  Jobs, tests, and
+# shared implementation modules are runtime code and must not be imported by
+# ``feast apply``.
+tests/
+jobs/
+registry/
+src/
