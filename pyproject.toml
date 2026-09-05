@@ -1,0 +1,36 @@
+[project]
+name = "kalshi-crypto-dev"
+version = "0.1.0"
+description = "Repository-wide development and notebook environment"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "kalshi-crypto-analytics",
+    "kalshi-crypto-batch-etl",
+    "kalshi-crypto-dashboard",
+    "kalshi-crypto-gcs-exporter",
+    "kalshi-crypto-ingestion",
+    "kalshi-crypto-market-aggregator",
+    "kalshi-crypto-ml-pipeline",
+]
+
+[dependency-groups]
+dev = [
+    "ipykernel>=6.29,<8",
+    "jupyterlab>=4.4,<5",
+    "matplotlib>=3.10,<4",
+    "pytest>=8.4,<10",
+    "pytest-asyncio>=1.2,<2",
+    "seaborn>=0.13,<1",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+kalshi-crypto-analytics = { path = "services/analytics", editable = true }
+kalshi-crypto-batch-etl = { path = "services/batch_etl", editable = true }
+kalshi-crypto-dashboard = { path = "services/dashboard", editable = true }
+kalshi-crypto-gcs-exporter = { path = "services/gcs_exporter", editable = true }
+kalshi-crypto-ingestion = { path = "services/ingestion", editable = true }
+kalshi-crypto-market-aggregator = { path = "services/market_aggregator", editable = true }
+kalshi-crypto-ml-pipeline = { path = "services/ml_pipeline", editable = true }

@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kalshi-crypto-analytics"
+version = "0.1.0"
+description = "Lightweight Kalshi contract pricing and simple market indicators"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "numpy>=2.0,<3",
+    "pandas>=2.2,<3",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4,<10",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+pythonpath = ["."]
+testpaths = ["tests"]
