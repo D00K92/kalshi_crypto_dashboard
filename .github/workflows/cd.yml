@@ -157,7 +157,7 @@ jobs:
         envsubst '${BATCH_ETL_IMAGE} ${GCS_BUCKET_NAME}' \
           < k8s/batch-etl-cronjob.yaml \
           | kubectl apply -f -
-        envsubst '${BATCH_ETL_IMAGE} ${GCS_BUCKET_NAME}' \
+        envsubst '${BATCH_ETL_IMAGE} ${GCS_BUCKET_NAME} ${GCP_PROJECT_ID}' \
           < k8s/batch-etl-feature-cronjobs.yaml \
           | kubectl apply -f -
 
