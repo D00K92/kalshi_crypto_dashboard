@@ -37,11 +37,18 @@ feast_store/
 └── tests/                   # repository-level contract tests
 ```
 
-The low-latency bridge is `jobs/live_features.py`. It consumes the
-`stream:features:v1` stream emitted by `aggregator` and writes
-`v1_market_features` with `FeatureStore.write_to_online_store`. BigQuery remains
+The low-latency bridge is `jobs/live_push.py`. It consumes the
+`stream:features:v1` stream emitted by `aggregator`, resolves the immutable
+`feature_set`/`feature_version` contract in `registry/feature_specs.py`, and
+pushes validated rows to the corresponding Feast PushSource. BigQuery remains
 the offline source; hourly materialization is retained for reconciliation and
-recovery, not for the real-time inference path.
+recovery, not for the real-time inference path. The old `live_features.py`
+entrypoint remains as a compatibility wrapper.
+
+To add a feature version, register an immutable `FeatureSpec`, define its
+PushSource/FeatureView and model-facing FeatureService, then apply the Feast
+repository before deploying a producer that emits the new version. Producers
+must include entity data, event and creation timestamps, and a `values` object.
 
 Feast configuration files (`feature_store.yaml`, `pyproject.toml`, and the
 Dockerfile) remain at the root because Feast and the container build expect

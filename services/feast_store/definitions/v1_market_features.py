@@ -1,29 +1,24 @@
-"""Feast v1 market feature view backed by daily GCS Parquet files."""
+"""Feast v1 market feature view backed by BigQuery."""
 from datetime import timedelta
-from feast import FeatureService, FeatureView, Field, FileSource
-from feast.types import Float32
-from entities import asset, frequency
+from feast import FeatureService, FeatureView, Field, PushSource
+from feast.types import Float64, Int64
+from definitions.entities import asset
+from definitions.data_sources import build_market_feature_source
 
-FEATURE_COLUMNS = (
-    "trade_log_return", "aggressor_imbalance", "wap_1", "wap_5", "wap_10",
-    "microprice_1", "microprice_5", "microprice_10", "obi_1", "obi_5", "obi_10",
-    "spread", "relative_spread", "book_slope_bid", "book_slope_ask",
-    "liquidity_consumption", "ofi",
-    *(f"{kind}_{window}s" for kind in ("rv", "bv", "jump_component", "gk_vol")
-      for window in (30, 60, 300, 900, 1800, 3600)),
-)
+FEATURE_COLUMNS = ("synthetic_price", "log_return", "venue_count")
 
-source = FileSource(
-    name="v1_market_features_source",
-    path="gs://kalshi-crypto-tick-data/features/v1",
-    timestamp_field="timestamp",
-)
+batch_source = build_market_feature_source()
+source = PushSource(name="v1_market_features_push", batch_source=batch_source)
 
 v1_market_features = FeatureView(
     name="v1_market_features",
-    entities=[asset, frequency],
+    entities=[asset],
     ttl=timedelta(days=30),
-    schema=[Field(name=name, dtype=Float32) for name in FEATURE_COLUMNS],
+    schema=[
+        Field(name="synthetic_price", dtype=Float64),
+        Field(name="log_return", dtype=Float64),
+        Field(name="venue_count", dtype=Int64),
+    ],
     source=source,
     online=True,
 )

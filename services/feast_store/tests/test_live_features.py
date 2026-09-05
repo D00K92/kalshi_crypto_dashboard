@@ -16,7 +16,7 @@ def test_payload_to_frame_matches_feature_view_schema():
     })
     assert list(frame.columns) == [
         "asset", "event_timestamp", "created_timestamp", "synthetic_price",
-        "log_return", "venue_count", "realized_vol_1h", "realized_vol_3h",
+        "log_return", "venue_count",
     ]
     assert frame.iloc[0]["asset"] == "BTCUSD"
     assert frame.iloc[0]["venue_count"] == 6
@@ -26,3 +26,14 @@ def test_payload_to_frame_matches_feature_view_schema():
 def test_payload_requires_entity_and_timestamp():
     with pytest.raises(ValueError, match="missing fields"):
         payload_to_frame({"synthetic_price": 100})
+
+
+def test_versioned_envelope_is_supported():
+    frame = payload_to_frame({
+        "feature_set": "market_features",
+        "feature_version": "v1",
+        "entity": {"asset": "BTCUSD"},
+        "event_timestamp": "2026-09-05T00:00:00+00:00",
+        "values": {"synthetic_price": 100, "log_return": 0, "venue_count": 2},
+    })
+    assert frame.iloc[0]["asset"] == "BTCUSD"

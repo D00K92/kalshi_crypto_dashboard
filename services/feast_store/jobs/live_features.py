@@ -18,6 +18,9 @@ import pandas as pd
 import redis.asyncio as redis
 from redis.exceptions import ResponseError
 from feast import FeatureStore
+from feast.data_source import PushMode
+
+from registry import resolve_feature_spec
 
 LOGGER = logging.getLogger(__name__)
 
@@ -26,24 +29,27 @@ def _decode(value):
     return value.decode() if isinstance(value, bytes) else value
 
 
-def payload_to_frame(payload: dict) -> pd.DataFrame:
-    """Convert one aggregator payload to Feast's online-write schema."""
-    required = {"asset", "event_timestamp", "synthetic_price", "venue_count"}
-    missing = required.difference(payload)
-    if missing:
-        raise ValueError(f"live feature payload missing fields: {sorted(missing)}")
+def payload_to_frame(payload: dict, *, spec=None) -> pd.DataFrame:
+    """Convert a versioned feature envelope into a Feast push dataframe."""
+    spec = spec or resolve_feature_spec(
+        payload.get("feature_set", "market_features"),
+        payload.get("feature_version", "v1"),
+    )
+    values = payload.get("values", payload)
+    if not isinstance(values, dict):
+        raise ValueError("feature payload values must be an object")
+    spec.validate(values)
     event_timestamp = pd.to_datetime(payload["event_timestamp"], utc=True)
     created = pd.to_datetime(payload.get("created_timestamp", datetime.now(timezone.utc)), utc=True)
-    return pd.DataFrame([{
-        "asset": str(payload["asset"]),
+    row = {
+        "asset": str(payload.get("asset", payload.get("entity", {}).get("asset"))),
         "event_timestamp": event_timestamp,
         "created_timestamp": created,
-        "synthetic_price": float(payload["synthetic_price"]),
-        "log_return": None if payload.get("log_return") is None else float(payload["log_return"]),
-        "venue_count": int(payload["venue_count"]),
-        "realized_vol_1h": None,
-        "realized_vol_3h": None,
-    }])
+    }
+    for name in spec.fields:
+        value = values.get(name)
+        row[name] = int(value) if name == "venue_count" else (None if value is None else float(value))
+    return pd.DataFrame([row])
 
 
 async def run_bridge(
@@ -70,10 +76,16 @@ async def run_bridge(
                         if raw is None:
                             raise ValueError("missing payload")
                         payload = json.loads(raw)
-                        frame = payload_to_frame(payload)
+                        spec = resolve_feature_spec(
+                            payload.get("feature_set", "market_features"),
+                            payload.get("feature_version", "v1"),
+                        )
+                        frame = payload_to_frame(payload, spec=spec)
                         await asyncio.to_thread(
-                            store.write_to_online_store,
-                            feature_view_name="v1_market_features", df=frame,
+                            store.push,
+                            source_name=spec.push_source,
+                            df=frame,
+                            to=PushMode.ONLINE,
                         )
                         await client.xack(stream, group, entry_id)
                     except (ValueError, TypeError, KeyError, OverflowError) as exc:

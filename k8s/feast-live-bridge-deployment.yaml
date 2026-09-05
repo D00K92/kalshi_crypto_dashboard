@@ -17,7 +17,7 @@ spec:
       - name: feast-live-bridge
         image: "${FEAST_STORE_IMAGE}"
         imagePullPolicy: IfNotPresent
-        command: ["python", "jobs/live_features.py"]
+        command: ["python", "jobs/live_push.py"]
         env:
         - name: REDIS_URL
           value: "redis://${REDIS_HOST}:6379/0"

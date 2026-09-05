@@ -92,14 +92,18 @@ class AggregatorService:
         pipe.set(f"{prefix}:spot:BTCUSDT:latest", encoded)
         if spot.get("price") is not None:
             feature = {
-                "schema_version": 1, "event_type": "market_feature", "feature_version": "v1",
+                "schema_version": 1, "event_type": "market_feature",
+                "feature_set": "market_features", "feature_version": "v1",
                 "asset": "BTCUSD", "event_timestamp_ms": spot["generated_ts_ms"],
                 "event_timestamp": datetime.fromtimestamp(
                     spot["generated_ts_ms"] / 1000, tz=timezone.utc
                 ).isoformat(),
                 "created_timestamp": datetime.now(timezone.utc).isoformat(),
-                "synthetic_price": spot["price"], "log_return": spot.get("log_return"),
-                "venue_count": spot.get("venue_count", 0),
+                "values": {
+                    "synthetic_price": spot["price"],
+                    "log_return": spot.get("log_return"),
+                    "venue_count": spot.get("venue_count", 0),
+                },
             }
             feature_bytes = orjson.dumps(feature)
             pipe.xadd(self.settings.feature_stream, {"payload": feature_bytes}, maxlen=self.settings.feature_maxlen, approximate=True)
