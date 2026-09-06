@@ -118,8 +118,6 @@ def load_training_table_from_feast(
             "v1_market_features:synthetic_price",
             "v1_market_features:log_return",
             "v1_market_features:venue_count",
-            "v1_market_features:realized_vol_1h",
-            "v1_market_features:realized_vol_3h",
         ],
     ).to_df()
     features["event_timestamp"] = pd.to_datetime(features["event_timestamp"], utc=True)
