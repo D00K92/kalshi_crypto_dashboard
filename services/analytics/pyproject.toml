@@ -5,16 +5,27 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "kalshi-crypto-analytics"
 version = "0.1.0"
-description = "Lightweight Kalshi contract pricing and simple market indicators"
+description = "Live volatility term structure and Kalshi probability pricing"
 requires-python = ">=3.11,<3.13"
 dependencies = [
-    "numpy>=2.0,<3",
+    "cryptography>=44,<47",
+    "google-cloud-aiplatform>=1.70,<2",
+    "google-cloud-storage>=2.18,<4",
+    "joblib>=1.4,<2",
     "pandas>=2.2,<3",
+    "redis>=6.2,<9",
+    "scikit-learn>=1.5,<2",
+    "xgboost>=2.1,<4",
 ]
+
+[project.scripts]
+analytics = "kalshi_crypto_analytics.__main__:main"
 
 [dependency-groups]
 dev = [
     "pytest>=8.4,<10",
+    "pytest-asyncio>=1.2,<2",
+    "ruff>=0.12,<1",
 ]
 
 [tool.setuptools.packages.find]
@@ -22,5 +33,5 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 addopts = "-q"
-pythonpath = ["."]
+asyncio_mode = "auto"
 testpaths = ["tests"]
