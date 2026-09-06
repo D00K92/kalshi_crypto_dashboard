@@ -91,5 +91,34 @@ jobs:
         envsubst '${JOB_NAME} ${NAMESPACE} ${AGGREGATOR_IMAGE} ${REDIS_URL} ${BOOK_STREAM} ${TRADE_STREAM} ${OUTPUT_PREFIX}' \
           < services/market_aggregator/k8s/integration-job.yaml \
           | kubectl apply -f -
-        kubectl wait --for=condition=complete "job/${JOB_NAME}" -n "${NAMESPACE}" --timeout=5m
+
+        cleanup() {
+          kubectl delete "job/${JOB_NAME}" -n "${NAMESPACE}" --ignore-not-found --wait=false
+        }
+        diagnostics() {
+          kubectl get "job/${JOB_NAME}" -n "${NAMESPACE}" -o wide || true
+          kubectl get pods -n "${NAMESPACE}" -l "job-name=${JOB_NAME}" -o wide || true
+          kubectl logs "job/${JOB_NAME}" -n "${NAMESPACE}" --all-containers=true || true
+        }
+        trap cleanup EXIT
+
+        deadline=$((SECONDS + 300))
+        while (( SECONDS < deadline )); do
+          succeeded="$(kubectl get "job/${JOB_NAME}" -n "${NAMESPACE}" -o jsonpath='{.status.succeeded}')"
+          failed="$(kubectl get "job/${JOB_NAME}" -n "${NAMESPACE}" -o jsonpath='{.status.failed}')"
+          if [[ "${succeeded:-0}" -ge 1 ]]; then
+            break
+          fi
+          if [[ "${failed:-0}" -ge 1 ]]; then
+            echo "Integration Job failed." >&2
+            diagnostics
+            exit 1
+          fi
+          sleep 2
+        done
+        if [[ "${succeeded:-0}" -lt 1 ]]; then
+          echo "Integration Job timed out after 5 minutes." >&2
+          diagnostics
+          exit 1
+        fi
         kubectl logs "job/${JOB_NAME}" -n "${NAMESPACE}"

@@ -44,7 +44,8 @@ async def main(wait_seconds: int) -> None:
         await asyncio.sleep(0.25)
     if not book or not spot or not feature:
         raise AssertionError("aggregator did not publish book, spot, and feature state")
-    assert spot["price"] == "107.5", spot
+    assert spot["method"] == "simple_average_fresh_venues", spot
+    assert spot["price"] == "105", spot
     assert spot["total_volume"] == "4", spot
     assert book["bids"][0]["venues"] == {"binance": "2", "bybit": "2", "coinbase": "2"}, book
     assert len(book["bids"]) <= 10 and len(book["asks"]) <= 10
