@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import math
 from dataclasses import dataclass
 from io import BytesIO
@@ -17,6 +18,8 @@ from .schemas import (
     UnavailableReason,
     VolatilitySnapshot,
 )
+
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,16 +93,21 @@ class ConfiguredForecastProvider:
         try:
             outputs: dict[str, float] = {}
             for horizon in HORIZONS:
-                bundle = self._bundles[horizon]
-                columns = bundle.metadata["feature_columns"]
-                row = [observation.values[column] for column in columns]
-                if not all(math.isfinite(float(value)) for value in row):
-                    raise ValueError("non-finite feature")
-                prediction = bundle.model.predict(pd.DataFrame([row], columns=columns))
-                value = max(float(prediction[0]), 0.0)
-                if not math.isfinite(value) or value <= 0:
-                    raise ValueError("volatility prediction must be positive")
-                outputs[horizon] = value
+                try:
+                    bundle = self._bundles[horizon]
+                    columns = bundle.metadata["feature_columns"]
+                    row = [float(observation.values[column]) for column in columns]
+                    if not all(math.isfinite(value) for value in row):
+                        raise ValueError("non-finite feature")
+                    frame = pd.DataFrame([row], columns=columns, dtype=float)
+                    prediction = bundle.model.predict(frame)
+                    value = max(float(prediction[0]), 0.0)
+                    if not math.isfinite(value) or value <= 0:
+                        raise ValueError("volatility prediction must be positive")
+                    outputs[horizon] = value
+                except Exception as exc:
+                    LOGGER.exception("model_inference_failed horizon=%s detail=%s", horizon, exc)
+                    raise
         except Exception as exc:
             raise PricingUnavailable(UnavailableReason.MODEL_INFERENCE_FAILED) from exc
         return VolatilitySnapshot(outputs, observation.event_timestamp_ms, now_ms, dict(self.resources), self.model_version)

@@ -17,18 +17,19 @@ from kalshi_crypto_analytics.schemas import (
 class Model:
     def __init__(self, value=.2, fail=False): self.value, self.fail, self.rows = value, fail, []
     def predict(self, rows):
+        assert all(pd.api.types.is_numeric_dtype(dtype) for dtype in rows.dtypes)
         self.rows.extend(rows.values.tolist())
         if self.fail: raise RuntimeError("boom")
         return [self.value]
 
 
 class Resolver:
-    def __init__(self, fail_horizon=None): self.fail_horizon = fail_horizon; self.bundles = {}
+    def __init__(self, fail_horizon=None, columns=None): self.fail_horizon = fail_horizon; self.columns = columns or ["b", "a"]; self.bundles = {}
     async def resolve(self, resource):
         horizon = resource.removeprefix("resource-")
         model = Model(.2, horizon == self.fail_horizon)
         bundle = ArtifactBundle(resource, f"gs://bucket/{horizon}", {"horizon": horizon, "version": "v1"},
-                                {"horizon": horizon, "feature_columns": ["b", "a"]}, model)
+                                {"horizon": horizon, "feature_columns": self.columns}, model)
         self.bundles[horizon] = bundle
         return bundle
 
@@ -43,6 +44,15 @@ async def test_metadata_feature_order_and_atomic_five_horizon_inference():
     snapshot = await provider.forecast(FeatureObservation({"a": 1, "b": 2}, 100), 110)
     assert set(snapshot.annualized_volatility) == set(HORIZONS)
     assert all(bundle.model.rows == [[2, 1]] for bundle in resolver.bundles.values())
+
+
+async def test_live_string_feature_representation_is_cast_to_numeric():
+    resolver = Resolver(columns=["log_return", "venue_count"])
+    provider = ConfiguredForecastProvider(resources(), resolver)
+    await provider.load()
+    snapshot = await provider.forecast(FeatureObservation({"log_return": "0", "venue_count": 6}, 100), 110)
+    assert set(snapshot.annualized_volatility) == set(HORIZONS)
+    assert all(bundle.model.rows == [[0.0, 6.0]] for bundle in resolver.bundles.values())
 
 
 async def test_partial_model_failure_publishes_no_snapshot():

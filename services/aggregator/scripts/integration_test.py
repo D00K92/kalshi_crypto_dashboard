@@ -50,8 +50,8 @@ async def main(wait_seconds: int) -> None:
     assert book["venues"] == ["binance", "coinbase"], book
     assert book["bids"][0]["venues"] == {"binance": "2", "coinbase": "2"}, book
     assert len(book["bids"]) <= 10 and len(book["asks"]) <= 10
-    assert await client.exists(f"{prefix}:candles:BTCUSDT:5s")
-    assert await client.exists(f"{prefix}:cvd:BTCUSDT:5s")
+    assert await client.exists(f"{prefix}:candles:BTCUSDT:10s")
+    assert await client.exists(f"{prefix}:cvd:BTCUSDT:10s")
     assert feature["feature_set"] == "market_features"
     assert feature["feature_version"] == "v1"
     assert feature["values"]["venue_count"] >= 1
