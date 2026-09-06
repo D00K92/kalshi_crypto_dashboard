@@ -52,6 +52,32 @@ docs/                    Architecture and deployment plans
 
 Each service has its own README with local development, test, container, and deployment details.
 
+## Repository-wide development environment
+
+The root environment installs every service as an editable package and adds
+JupyterLab, plotting, and test tooling. Service-specific environments and
+lockfiles remain the source of truth for deployment.
+
+```bash
+uv sync
+source .venv/bin/activate
+jupyter lab
+```
+
+Select the `.venv/bin/python` kernel when opening notebooks. Local batch ETL
+validation data is under `services/batch_etl/tmp/` and is ignored by Git.
+
+Use this root environment for local development across all services. Running
+`uv run --directory services/<service> ...` creates a separate service-level
+`.venv`; reserve that workflow for validating an individual production lock.
+To run a service's tests with the shared environment, invoke the root pytest
+executable from that service directory, for example:
+
+```bash
+cd services/batch_etl
+../../.venv/bin/pytest
+```
+
 ## Technology
 
 Python, asyncio, uvloop, orjson, Redis Streams, PyArrow, Parquet, Docker, Kubernetes, Google Kubernetes Engine, Google Cloud Storage, and Workload Identity Federation.

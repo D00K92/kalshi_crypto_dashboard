@@ -1,211 +1,177 @@
-# CI/CD Deployment Guide
+# How This Project Deploys Software
 
-Automatic deployment means a developer's local machine stops being part of
-the normal release process.
+This document explains how code moves from a developer's computer into the production system. It is written for someone who does not need to know CI/CD terminology already.
 
-```text
-Push code to GitHub
-        ↓
-GitHub Actions runs tests
-        ↓
-Builds linux/amd64 Docker image
-        ↓
-Pushes image tagged with commit SHA
-        ↓
-Updates GKE Deployment
-        ↓
-Waits for rollout and verifies Redis
-```
+## The Short Version
 
-This is CI/CD:
+When code is pushed to the `main` branch:
 
-- CI: test and build every change.
-- CD: deploy successful builds automatically.
+1. GitHub Actions checks the code and runs tests.
+2. GitHub Actions builds Docker images for the services.
+3. If the checks pass, another GitHub Actions workflow deploys the images to Google Cloud.
+4. Kubernetes, running in Google Kubernetes Engine (GKE), replaces the old service containers with the new ones.
+5. The deployment workflow waits until the new containers are running successfully.
 
-## Current prerequisite
-
-This directory currently has no Git repository or GitHub remote. Automation
-needs:
-
-1. A GitHub repository.
-2. This project committed and pushed there.
-3. GitHub authorized to access GCP.
-4. A workflow in `.github/workflows/deploy-ingestion.yml`.
-
-## Recommended release policy
-
-For a production system:
-
-- Pull request: run tests and build validation only.
-- Merge to `main`: build and deploy ingestion.
-- Tag every image with the Git commit SHA, not `v1` or `latest`.
-
-An image would look like:
+The normal process is therefore:
 
 ```text
-asia-northeast3-docker.pkg.dev/kalshi-crypto-506614/quant-repo/ingestion:a8f41d...
+git push main
+        |
+        v
+GitHub Actions: test and build
+        |
+        v
+GitHub Actions: deploy
+        |
+        +--> Artifact Registry: store Docker images
+        |
+        +--> GKE/Kubernetes: run the new images
 ```
 
-That gives every deployment an immutable, traceable version.
+## What CI/CD Means
 
-## How GitHub accesses GCP
+**CI** means Continuous Integration. It automatically checks new code when it is pushed. In this project, CI installs the locked dependencies, runs Python tests, and checks that Docker images can be built.
 
-Use Workload Identity Federation.
+**CD** means Continuous Delivery or Continuous Deployment. It automatically delivers code to the production environment. In this project, a successful CI run starts the `Deploy Services` workflow.
 
-GitHub presents a short-lived identity token to GCP. GCP verifies that the
-request came from the authorized repository and grants temporary access. No
-permanent GCP service-account key needs to be stored in GitHub.
+GitHub Actions is the service that runs both CI and CD. Each workflow runs on a temporary GitHub-hosted VM. The VM is used for testing, building images, and running deployment commands. The application itself does not run permanently on that VM.
 
-Google recommends Workload Identity Federation over service-account JSON
-keys. `google-github-actions/auth@v3` supports this directly:
+## What Happens During CI
 
-- <https://github.com/google-github-actions/auth>
+The CI workflow is:
 
-The deployment identity needs:
+[`.github/workflows/ci.yml`](../.github/workflows/ci.yml)
 
-- Artifact Registry Writer to push images.
-- GKE Cluster Viewer to obtain cluster credentials.
-- Permission to update the Kubernetes Deployment.
+For each service, CI:
 
-The GKE node identity separately needs Artifact Registry Reader so nodes can
-pull images.
+1. Checks out the pushed commit.
+2. Installs the Python version and dependencies from `uv.lock`.
+3. Runs the service's test suite.
+4. Builds the service's Linux Docker image.
 
-## What the workflow will do
+The current services are:
 
-### 1. Trigger only for ingestion changes
+- `ingestion`
+- `gcs-exporter`
+- `market-aggregator`
+- `dashboard`
 
-The workflow should run when `main` changes in:
+CI builds all service images because this is a monorepo and the deployment workflow deploys the service set together. A Docker build confirms that the image can be assembled; it is not the same as running a full production test.
 
-```text
-services/ingestion/**
-k8s/ingestion-deployment.yaml
-.github/workflows/deploy-ingestion.yml
-```
+## What Happens During Deploy Services
 
-A dashboard-only change will not unnecessarily rebuild ingestion.
+The deployment workflow is:
 
-### 2. Run tests
+[`.github/workflows/cd.yml`](../.github/workflows/cd.yml)
 
-Equivalent to:
+It starts only after CI completes successfully on `main`.
+
+The workflow then:
+
+1. Checks out the exact commit that passed CI.
+2. Authenticates to Google Cloud using GitHub's OIDC identity mechanism.
+3. Builds and pushes versioned Docker images to Google Artifact Registry.
+4. Resolves the production Redis endpoint.
+5. Applies the Kubernetes deployment manifests to the GKE cluster.
+6. Waits for every deployment to finish rolling out successfully.
+
+The image tag is the Git commit SHA. This makes it possible to identify exactly which source code is running in production.
+
+The workflow verifies these deployments:
 
 ```bash
-uv run --directory services/ingestion --group dev pytest
-```
-
-A failing test stops deployment.
-
-### 3. Build the image
-
-GitHub's Linux runner builds `linux/amd64`. This avoids the Apple Silicon/GKE
-architecture mismatch encountered when building locally.
-
-### 4. Push with the commit SHA
-
-Conceptually:
-
-```bash
-IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/quant-repo/ingestion:${GITHUB_SHA}"
-```
-
-The workflow pushes that exact image to Artifact Registry.
-
-### 5. Obtain temporary GKE credentials
-
-Use:
-
-```yaml
-google-github-actions/get-gke-credentials@v3
-```
-
-It creates a temporary kubeconfig for the workflow:
-
-- <https://github.com/google-github-actions/get-gke-credentials>
-
-### 6. Deploy the exact image
-
-The workflow updates only the ingestion container:
-
-```bash
-kubectl set image \
-  deployment/ingestion-service \
-  ingestion="$IMAGE"
-```
-
-Then waits for the rollout:
-
-```bash
-kubectl rollout status \
-  deployment/ingestion-service \
-  --timeout=5m
-```
-
-### 7. Verify behavior
-
-Deployment success should require more than the process starting. The
-workflow should verify:
-
-- The pod is running.
-- The container restart count remains zero.
-- Logs contain `redis_ready`.
-- Logs contain `venue_connected`.
-- `stream:ticks` grows in Redis.
-
-## Important ingestion-specific concern
-
-A normal Kubernetes rolling update can briefly run the old and new ingestion
-pods together. Both could consume Binance and duplicate events.
-
-Initially, use this strategy:
-
-```yaml
-strategy:
-  type: Recreate
-```
-
-That stops the old ingestion pod before starting the new one. It creates a
-short data gap but prevents overlapping feeds. Later, leader election or
-downstream deduplication can support zero-downtime rolling deployments.
-
-## Rollback
-
-Because every image has a unique commit tag:
-
-```bash
-kubectl rollout undo deployment/ingestion-service
-```
-
-Then wait for recovery:
-
-```bash
+kubectl rollout status deployment/gcs-exporter
 kubectl rollout status deployment/ingestion-service
+kubectl rollout status deployment/market-aggregator
+kubectl rollout status deployment/dashboard
 ```
 
-Kubernetes returns to the previous image.
+## What Kubernetes Does
 
-## One-time work versus every deployment
+Kubernetes is the system that keeps the application containers running in GKE.
 
-One-time setup:
+When the deployment workflow applies an updated manifest, Kubernetes notices that a newer Docker image is required. It starts a new pod using that image, waits for it to become ready, and then removes the old pod. This is called a **rolling update** or **rollout**.
 
-- Initialize Git.
-- Create and connect a GitHub repository.
-- Configure Workload Identity Federation.
-- Create the deployment service account and IAM permissions.
-- Add the GitHub Actions workflow.
-- Add rollout-safe Kubernetes settings.
+The `kubectl` commands are executed by the temporary GitHub Actions VM, but they control the real GKE cluster. The services run in GKE after the workflow finishes.
 
-Afterward, the routine becomes:
+## Example: Ingestion Service
+
+The ingestion service is defined in several places because each file has a different responsibility:
+
+- Application source: [`services/ingestion/src`](../services/ingestion/src)
+- Python dependencies: [`services/ingestion/pyproject.toml`](../services/ingestion/pyproject.toml)
+- Docker image instructions: [`services/ingestion/Dockerfile`](../services/ingestion/Dockerfile)
+- Production Kubernetes configuration: [`k8s/ingestion-deployment.yaml`](../k8s/ingestion-deployment.yaml)
+- Deployment workflow step: [`.github/workflows/cd.yml`](../.github/workflows/cd.yml)
+
+For ingestion, the deployment sequence is:
+
+```text
+Change ingestion source code
+        |
+        v
+Push commit to main
+        |
+        v
+Run ingestion tests
+        |
+        v
+Build ingestion Docker image
+        |
+        v
+Push image to Artifact Registry
+        |
+        v
+Apply k8s/ingestion-deployment.yaml
+        |
+        v
+Kubernetes replaces ingestion-service pod
+```
+
+The workflow uses the commit SHA as the image tag, so the Kubernetes deployment can run the exact image produced from the tested commit.
+
+## Staging Integration Test
+
+After successful CI, a separate workflow runs an integration test in GKE:
+
+[`.github/workflows/integration.yml`](../.github/workflows/integration.yml)
+
+This test builds a test version of the market aggregator, starts an integration job in GKE, and checks behavior against the staging configuration. It is separate from the production rollout verification.
+
+## How to Check a Deployment
+
+In GitHub, open the repository's **Actions** tab. The relevant workflows are:
+
+- **CI**: tests and Docker builds
+- **Deploy Services**: production image deployment and Kubernetes rollout verification
+- **Staging Integration**: integration test in GKE
+
+A production deployment is complete when **Deploy Services** is successful. The staging integration result is useful additional evidence, but it is a separate workflow.
+
+## Dashboard Access
+
+The dashboard Kubernetes Service is currently internal (`ClusterIP`). It does not have a public internet URL by default.
+
+For temporary local access, use a port-forward:
 
 ```bash
-git add .
-git commit -m "Add Coinbase ingestion"
-git push
+kubectl port-forward service/dashboard 8052:8050
 ```
 
-GitHub handles testing, building, pushing, deploying, and rollout
-verification. GitHub environments can also require approval before production
-deployment:
+Then open:
 
-- <https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments>
+```text
+http://localhost:8052
+```
 
-Set this up before expanding ingestion substantially so subsequent venue
-changes follow the same tested deployment path.
+This forwards a local computer port to the dashboard service inside GKE. It does not change the deployment or expose the dashboard publicly.
+
+## Important Distinction
+
+There are three different environments involved:
+
+- **GitHub Actions VM**: temporary machine used to test, build, and issue deployment commands.
+- **Artifact Registry**: Google Cloud storage for versioned Docker images.
+- **GKE/Kubernetes**: the production environment where the services actually run.
+
+The GitHub Actions VM disappears after the workflow. Artifact Registry keeps the images. GKE keeps the application services running.

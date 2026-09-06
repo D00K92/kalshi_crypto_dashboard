@@ -47,6 +47,8 @@ spec:
           value: "60"
         - name: RECLAIM_MIN_IDLE_MS
           value: "120000"
+        - name: POST_EXPORT_RETENTION_SEC
+          value: "900"
         - name: SHUTDOWN_GRACE_SECONDS
           value: "30"
         - name: HEALTH_PORT
@@ -75,7 +77,7 @@ spec:
         resources:
           requests:
             cpu: "250m"
-            memory: "512Mi"
+            memory: "256Mi"
           limits:
             cpu: "1000m"
             memory: "1Gi"
