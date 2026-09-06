@@ -27,7 +27,7 @@ async def main(wait_seconds: int) -> None:
     client = redis.Redis.from_url(url, decode_responses=False)
     await client.ping()
     now = int(time.time() * 1000)
-    books = [event_book("binance", "100", "101", "book-binance", now), event_book("coinbase", "100", "101", "book-coinbase", now), event_book("bybit", "100", "101", "book-bybit", now)]
+    books = [event_book("binance", "100", "101", "book-binance", now), event_book("coinbase", "100", "101", "book-coinbase", now)]
     trades = [event_trade("binance", "100", "1", "buy", "trade-binance", now), event_trade("coinbase", "110", "3", "sell", "trade-coinbase", now)]
     for stream, events in ((book_stream, books), (trade_stream, trades)):
         for event in events:
@@ -47,7 +47,8 @@ async def main(wait_seconds: int) -> None:
     assert spot["method"] == "simple_average_fresh_venues", spot
     assert spot["price"] == "105", spot
     assert spot["total_volume"] == "4", spot
-    assert book["bids"][0]["venues"] == {"binance": "2", "bybit": "2", "coinbase": "2"}, book
+    assert book["venues"] == ["binance", "coinbase"], book
+    assert book["bids"][0]["venues"] == {"binance": "2", "coinbase": "2"}, book
     assert len(book["bids"]) <= 10 and len(book["asks"]) <= 10
     assert await client.exists(f"{prefix}:candles:BTCUSDT:5s")
     assert await client.exists(f"{prefix}:cvd:BTCUSDT:5s")
