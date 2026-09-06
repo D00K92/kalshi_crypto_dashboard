@@ -33,6 +33,9 @@ jobs:
             path: services/market_aggregator
           - service: dashboard
             path: services/dashboard
+          - service: analytics
+            path: services/analytics
+            python_version: "3.12"
           - service: batch-etl
             path: services/batch_etl
             python_version: "3.12"
@@ -75,6 +78,8 @@ jobs:
             context: services/market_aggregator
           - service: dashboard
             context: services/dashboard
+          - service: analytics
+            context: services/analytics
           - service: batch-etl
             context: services/batch_etl
     steps:

@@ -1,0 +1,124 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: analytics
+  annotations:
+    iam.gke.io/gcp-service-account: "${ANALYTICS_GCP_SERVICE_ACCOUNT}"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: analytics
+  labels:
+    app: analytics
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: analytics
+  template:
+    metadata:
+      labels:
+        app: analytics
+    spec:
+      serviceAccountName: analytics
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: analytics
+        image: "${ANALYTICS_IMAGE}"
+        imagePullPolicy: Always
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+        env:
+        - name: REDIS_HOST
+          value: "${REDIS_HOST}"
+        - name: REDIS_PORT
+          value: "${REDIS_PORT}"
+        - name: GCP_PROJECT_ID
+          value: "${GCP_PROJECT_ID}"
+        - name: GCP_REGION
+          value: "${GCP_REGION}"
+        - name: VOLATILITY_MODEL_VERSION
+          value: "v1"
+        - name: VOLATILITY_MODEL_1M
+          value: "${VOLATILITY_MODEL_1M}"
+        - name: VOLATILITY_MODEL_5M
+          value: "${VOLATILITY_MODEL_5M}"
+        - name: VOLATILITY_MODEL_15M
+          value: "${VOLATILITY_MODEL_15M}"
+        - name: VOLATILITY_MODEL_30M
+          value: "${VOLATILITY_MODEL_30M}"
+        - name: VOLATILITY_MODEL_1H
+          value: "${VOLATILITY_MODEL_1H}"
+        - name: KALSHI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: kalshi-credentials
+              key: api-key
+        - name: KALSHI_PRIVATE_KEY
+          valueFrom:
+            secretKeyRef:
+              name: kalshi-credentials
+              key: private-key
+        - name: HEALTH_PORT
+          value: "8080"
+        - name: SPOT_MAX_AGE_MS
+          value: "5000"
+        - name: TICKER_MAX_AGE_MS
+          value: "60000"
+        - name: FEATURE_MAX_AGE_MS
+          value: "60000"
+        - name: VOLATILITY_MAX_AGE_MS
+          value: "60000"
+        - name: ALLOWED_FUTURE_SKEW_MS
+          value: "2000"
+        - name: KALSHI_METADATA_REFRESH_MS
+          value: "15000"
+        ports:
+        - name: health
+          containerPort: 8080
+        startupProbe:
+          httpGet:
+            path: /healthz
+            port: health
+          failureThreshold: 30
+          periodSeconds: 2
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: health
+          periodSeconds: 5
+          timeoutSeconds: 2
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: health
+          periodSeconds: 15
+          timeoutSeconds: 2
+        resources:
+          requests:
+            cpu: "250m"
+            memory: "512Mi"
+          limits:
+            cpu: "1000m"
+            memory: "1Gi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: analytics
+spec:
+  selector:
+    app: analytics
+  ports:
+  - name: health
+    port: 8080
+    targetPort: health
+  type: ClusterIP

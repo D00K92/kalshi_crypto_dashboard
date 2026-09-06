@@ -98,6 +98,15 @@ jobs:
         docker build --platform linux/amd64 -t "${IMAGE_URI}:${IMAGE_TAG}" services/dashboard
         docker push "${IMAGE_URI}:${IMAGE_TAG}"
 
+    - name: Build and push analytics image
+      env:
+        IMAGE_URI: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/analytics
+        IMAGE_TAG: ${{ github.event.workflow_run.head_sha || github.sha }}
+      run: |
+        set -euo pipefail
+        docker build --platform linux/amd64 -t "${IMAGE_URI}:${IMAGE_TAG}" services/analytics
+        docker push "${IMAGE_URI}:${IMAGE_TAG}"
+
     - name: Build and push batch ETL image
       env:
         IMAGE_URI: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/batch-etl
@@ -135,6 +144,13 @@ jobs:
         AGGREGATOR_IMAGE: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/aggregator:${{ github.event.workflow_run.head_sha || github.sha }}
         FEAST_STORE_IMAGE: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/feast-store:${{ github.event.workflow_run.head_sha || github.sha }}
         DASHBOARD_IMAGE: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/dashboard:${{ github.event.workflow_run.head_sha || github.sha }}
+        ANALYTICS_IMAGE: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/analytics:${{ github.event.workflow_run.head_sha || github.sha }}
+        ANALYTICS_GCP_SERVICE_ACCOUNT: ${{ vars.ANALYTICS_GCP_SERVICE_ACCOUNT }}
+        VOLATILITY_MODEL_1M: ${{ vars.VOLATILITY_MODEL_1M }}
+        VOLATILITY_MODEL_5M: ${{ vars.VOLATILITY_MODEL_5M }}
+        VOLATILITY_MODEL_15M: ${{ vars.VOLATILITY_MODEL_15M }}
+        VOLATILITY_MODEL_30M: ${{ vars.VOLATILITY_MODEL_30M }}
+        VOLATILITY_MODEL_1H: ${{ vars.VOLATILITY_MODEL_1H }}
         BATCH_ETL_IMAGE: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/batch-etl:${{ github.event.workflow_run.head_sha || github.sha }}
         REDIS_HOST: ${{ steps.redis.outputs.host }}
       run: |
@@ -157,6 +173,14 @@ jobs:
         envsubst '${DASHBOARD_IMAGE} ${REDIS_HOST} ${REDIS_PORT}' \
           < k8s/dashboard-deployment.yaml \
           | kubectl apply -f -
+        required='${ANALYTICS_GCP_SERVICE_ACCOUNT} ${VOLATILITY_MODEL_1M} ${VOLATILITY_MODEL_5M} ${VOLATILITY_MODEL_15M} ${VOLATILITY_MODEL_30M} ${VOLATILITY_MODEL_1H}'
+        if [[ "${required}" == *'  '* || "${required}" == ' '* || "${required}" == *' ' ]]; then
+          echo "Analytics deployment prerequisite missing: configure all analytics repository variables." >&2
+          exit 1
+        fi
+        envsubst '${ANALYTICS_IMAGE} ${REDIS_HOST} ${REDIS_PORT} ${GCP_PROJECT_ID} ${GCP_REGION} ${ANALYTICS_GCP_SERVICE_ACCOUNT} ${VOLATILITY_MODEL_1M} ${VOLATILITY_MODEL_5M} ${VOLATILITY_MODEL_15M} ${VOLATILITY_MODEL_30M} ${VOLATILITY_MODEL_1H}' \
+          < k8s/analytics-deployment.yaml \
+          | kubectl apply -f -
         envsubst '${BATCH_ETL_IMAGE} ${GCS_BUCKET_NAME}' \
           < k8s/batch-etl-cronjob.yaml \
           | kubectl apply -f -
@@ -174,5 +198,38 @@ jobs:
         kubectl rollout status deployment/feast-server --timeout=5m
         kubectl delete deployment/market-aggregator --ignore-not-found
         kubectl rollout status deployment/dashboard --timeout=5m
+        if ! kubectl rollout status deployment/analytics --timeout=5m; then
+          echo "Analytics container did not become ready. Running pods with a failed /readyz usually indicate a missing/invalid model artifact, IAM grant, live feature, spot, ticker, or Kalshi metadata prerequisite." >&2
+          kubectl get pods -l app=analytics -o wide
+          kubectl logs deployment/analytics --tail=100 || true
+          exit 1
+        fi
         kubectl get cronjob/batch-etl
         kubectl get cronjob/batch-etl-features cronjob/batch-etl-targets
+
+    - name: Smoke check analytics outputs
+      run: |
+        set -euo pipefail
+        kubectl exec deployment/analytics -- python -c '
+        import asyncio, json, os, time, urllib.request
+        import redis.asyncio as redis
+        async def check():
+            with urllib.request.urlopen("http://127.0.0.1:8080/readyz", timeout=3) as response:
+                assert response.status == 200, "analytics /readyz failed"
+            client = redis.Redis(host=os.environ["REDIS_HOST"], port=int(os.environ["REDIS_PORT"]))
+            now = int(time.time() * 1000)
+            volatility_raw = await client.get("market:volatility:v1:BTCUSD:latest")
+            assert volatility_raw, "missing fresh volatility snapshot (check model IDs, model IAM, and live features)"
+            volatility = json.loads(volatility_raw)
+            assert now - volatility["generated_ts_ms"] <= 60_000, "stale volatility snapshot"
+            keys = [key async for key in client.scan_iter(match="market:pricing:v1:KXBTCD-*")]
+            fresh = []
+            for key in keys:
+                raw = await client.get(key)
+                if raw:
+                    payload = json.loads(raw)
+                    if payload.get("status") == "available" and now - payload.get("generated_ts_ms", 0) <= 60_000:
+                        fresh.append(key)
+            assert fresh, "no fresh Kalshi price (check open <=1h event, ticker freshness, and REST metadata)"
+            await client.aclose()
+        asyncio.run(check())'
