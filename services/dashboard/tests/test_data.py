@@ -106,3 +106,46 @@ def test_reader_returns_safe_state_when_redis_is_unavailable():
     assert data.redis_error == "ConnectionError"
     assert data.book["bids"] == []
     assert data.kalshi_contracts == []
+
+
+def test_reader_joins_fresh_analytics_prices_read_only():
+    now = int(time.time() * 1000)
+
+    class AnalyticsRedis(FakeRedis):
+        def xrevrange(self, stream, count):
+            if stream == "stream:kalshi_tickers":
+                return [("1-0", {"payload": ('{"event_ticker":"E","market_ticker":"E-T100",'
+                                               '"yes_bid_dollars":"0.40","yes_ask_dollars":"0.50",'
+                                               f'"received_ts_ms":{now}}}').encode()})]
+            return []
+
+        def mget(self, *keys):
+            if keys == ("market:pricing:v1:E-T100",):
+                return [(f'{{"status":"available","model_probability":0.6,"model_value_dollars":0.6,'
+                         f'"model_value_cents":60,"edge_vs_mid_probability":0.15,'
+                         f'"buy_yes_edge_probability":0.1,"sell_yes_edge_probability":-0.2,'
+                         f'"generated_ts_ms":{now}}}').encode()]
+            return super().mget(*keys)
+
+    row = RedisReader(AnalyticsRedis()).read_kalshi_data(100)["contracts"][0]
+    assert row["model_value"] == "60.0¢"
+    assert row["edge_mid"] == "+15.0¢"
+    assert row["buy_yes_edge"] == "+10.0¢"
+    assert row["sell_yes_edge"] == "-20.0¢"
+
+
+def test_reader_ignores_stale_analytics_price():
+    now = int(time.time() * 1000)
+
+    class StaleAnalyticsRedis(FakeRedis):
+        def xrevrange(self, stream, count):
+            if stream == "stream:kalshi_tickers":
+                return [("1-0", {"payload": (f'{{"event_ticker":"E","market_ticker":"E-T100","received_ts_ms":{now}}}').encode()})]
+            return []
+        def mget(self, *keys):
+            if len(keys) == 1 and keys[0].startswith("market:pricing"):
+                return [(f'{{"status":"available","model_value_dollars":0.6,"generated_ts_ms":{now - 60_001}}}').encode()]
+            return super().mget(*keys)
+
+    row = RedisReader(StaleAnalyticsRedis()).read_kalshi_data(100)["contracts"][0]
+    assert row["model_value"] == "-"

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import time
 from typing import Any
 
 import orjson
@@ -125,16 +126,16 @@ class RedisReader:
     def read_kalshi_data(self, spot: Any = None) -> dict[str, Any]:
         """Read and window Kalshi data before sending it to the browser."""
         try:
-            from dashboard.kalshi_contracts import select_contract_window
+            from dashboard.kalshi_contracts import contract_rows, select_contract_window
 
             try:
                 spot_price = float(spot) if spot is not None else None
             except (TypeError, ValueError):
                 spot_price = None
-            rows = contract_rows(
+            rows = self._attach_analytics(contract_rows(
                 self._stream_payloads(self.kalshi_ticker_stream, 600),
                 self._stream_payloads(self.kalshi_trade_stream, 300),
-            )
+            ))
             return {"contracts": select_contract_window(rows, spot_price), "spot": spot, "redis_ok": True, "redis_error": None}
         except redis.RedisError as exc:
             return {"contracts": [], "spot": spot, "redis_ok": False, "redis_error": type(exc).__name__}
@@ -142,10 +143,35 @@ class RedisReader:
     def _read_kalshi_contracts(self) -> list[dict[str, Any]]:
         from dashboard.kalshi_contracts import contract_rows
 
-        return contract_rows(
+        return self._attach_analytics(contract_rows(
             self._stream_payloads(self.kalshi_ticker_stream, 600),
             self._stream_payloads(self.kalshi_trade_stream, 300),
-        )
+        ))
+
+    def _attach_analytics(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Join analytics-owned latest keys without changing producer schemas."""
+        if not rows:
+            return rows
+        keys = [f"market:pricing:v1:{row['market_ticker']}" for row in rows]
+        payloads = self.client.mget(*keys)
+        now_ms = int(time.time() * 1000)
+        for row, raw in zip(rows, payloads, strict=False):
+            row.update({"model_value": "-", "edge_mid": "-", "buy_yes_edge": "-", "sell_yes_edge": "-"})
+            price = decode(raw, {})
+            generated = price.get("generated_ts_ms") if isinstance(price, dict) else None
+            if (not isinstance(price, dict) or price.get("status") != "available"
+                    or not isinstance(generated, (int, float)) or now_ms - generated > 60_000
+                    or generated - now_ms > 2_000):
+                continue
+            row.update({
+                "model_value": _cents_display(price.get("model_value_dollars")),
+                "model_value_cents": price.get("model_value_cents"),
+                "model_probability": price.get("model_probability"),
+                "edge_mid": _signed_cents(price.get("edge_vs_mid_probability")),
+                "buy_yes_edge": _signed_cents(price.get("buy_yes_edge_probability")),
+                "sell_yes_edge": _signed_cents(price.get("sell_yes_edge_probability")),
+            })
+        return rows
 
     def _stream_payloads(self, stream: str, count: int) -> list[dict[str, Any]]:
         entries = self.client.xrevrange(stream, count=count)
@@ -166,3 +192,19 @@ def redis_client_from_env() -> redis.Redis:
     if url:
         return redis.Redis.from_url(url, decode_responses=False, health_check_interval=30)
     return redis.Redis(host=os.getenv("REDIS_HOST", "localhost"), port=int(os.getenv("REDIS_PORT", "6379")), decode_responses=False, health_check_interval=30)
+
+
+def _cents_display(value: Any) -> str:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return "-"
+    return f"{parsed * 100:.1f}¢"
+
+
+def _signed_cents(value: Any) -> str:
+    try:
+        parsed = float(value) * 100
+    except (TypeError, ValueError):
+        return "-"
+    return f"{parsed:+.1f}¢"
