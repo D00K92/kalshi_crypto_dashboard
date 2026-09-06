@@ -1,6 +1,6 @@
 """Bridge live aggregator features into the Feast Redis online store.
 
-The market aggregator remains a lightweight Redis-stream producer. This
+The aggregator remains a lightweight Redis-stream producer. This
 process owns the Feast SDK call and therefore can be deployed independently
 without adding Feast's dependencies to the ingestion path.
 """

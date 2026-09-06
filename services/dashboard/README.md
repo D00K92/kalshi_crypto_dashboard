@@ -1,6 +1,6 @@
 # Dashboard
 
-Plotly Dash desktop terminal for the `market-aggregator` latest-state keys.
+Plotly Dash desktop terminal for the `aggregator` latest-state keys.
 
 ## Run locally
 

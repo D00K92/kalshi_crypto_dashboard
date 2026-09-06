@@ -30,7 +30,7 @@ jobs:
           - service: gcs-exporter
             path: services/gcs_exporter
           - service: aggregator
-            path: services/market_aggregator
+            path: services/aggregator
           - service: dashboard
             path: services/dashboard
           - service: analytics
@@ -75,7 +75,7 @@ jobs:
           - service: gcs-exporter
             context: services/gcs_exporter
           - service: aggregator
-            context: services/market_aggregator
+            context: services/aggregator
           - service: dashboard
             context: services/dashboard
           - service: analytics

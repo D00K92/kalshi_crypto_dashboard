@@ -1,8 +1,8 @@
 from decimal import Decimal
 import time
 
-from market_aggregator.aggregation import MarketAggregator
-from market_aggregator.config import Settings
+from aggregator.aggregation import MarketAggregator
+from aggregator.config import Settings
 
 
 def trade(venue, price, quantity, side="buy", ts=None):

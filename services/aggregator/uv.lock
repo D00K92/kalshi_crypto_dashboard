@@ -30,7 +30,7 @@ wheels = [
 ]
 
 [[package]]
-name = "kalshi-crypto-market-aggregator"
+name = "kalshi-crypto-aggregator"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

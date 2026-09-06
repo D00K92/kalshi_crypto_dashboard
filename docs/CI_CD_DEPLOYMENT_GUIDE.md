@@ -53,7 +53,7 @@ The current services are:
 
 - `ingestion`
 - `gcs-exporter`
-- `market-aggregator`
+- `aggregator`
 - `dashboard`
 
 CI builds all service images because this is a monorepo and the deployment workflow deploys the service set together. A Docker build confirms that the image can be assembled; it is not the same as running a full production test.
@@ -82,7 +82,7 @@ The workflow verifies these deployments:
 ```bash
 kubectl rollout status deployment/gcs-exporter
 kubectl rollout status deployment/ingestion-service
-kubectl rollout status deployment/market-aggregator
+kubectl rollout status deployment/aggregator
 kubectl rollout status deployment/dashboard
 ```
 
@@ -136,7 +136,7 @@ After successful CI, a separate workflow runs an integration test in GKE:
 
 [`.github/workflows/integration.yml`](../.github/workflows/integration.yml)
 
-This test builds a test version of the market aggregator, starts an integration job in GKE, and checks behavior against the staging configuration. It is separate from the production rollout verification.
+This test builds a test version of the aggregator, starts an integration job in GKE, and checks behavior against the staging configuration. It is separate from the production rollout verification.
 
 ## How to Check a Deployment
 

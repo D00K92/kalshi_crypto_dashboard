@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import orjson
 
-from market_aggregator.redis_service import AggregatorService
+from aggregator.redis_service import AggregatorService
 
 
 class FakeRedis:

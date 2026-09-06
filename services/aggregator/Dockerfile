@@ -7,4 +7,4 @@ RUN uv pip install --system --no-cache -r pyproject.toml
 COPY src/ ./src/
 COPY scripts/ ./scripts/
 ENV PYTHONUNBUFFERED=1 PYTHONPATH=/app/src
-CMD ["python", "-m", "market_aggregator"]
+CMD ["python", "-m", "aggregator"]

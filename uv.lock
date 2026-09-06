@@ -1514,7 +1514,7 @@ dependencies = [
     { name = "kalshi-crypto-dashboard" },
     { name = "kalshi-crypto-gcs-exporter" },
     { name = "kalshi-crypto-ingestion" },
-    { name = "kalshi-crypto-market-aggregator" },
+    { name = "kalshi-crypto-aggregator" },
     { name = "kalshi-crypto-ml-pipeline" },
 ]
 
@@ -1535,7 +1535,7 @@ requires-dist = [
     { name = "kalshi-crypto-dashboard", editable = "services/dashboard" },
     { name = "kalshi-crypto-gcs-exporter", editable = "services/gcs_exporter" },
     { name = "kalshi-crypto-ingestion", editable = "services/ingestion" },
-    { name = "kalshi-crypto-market-aggregator", editable = "services/market_aggregator" },
+    { name = "kalshi-crypto-aggregator", editable = "services/aggregator" },
     { name = "kalshi-crypto-ml-pipeline", editable = "services/ml_pipeline" },
 ]
 
@@ -1610,9 +1610,9 @@ dev = [
 ]
 
 [[package]]
-name = "kalshi-crypto-market-aggregator"
+name = "kalshi-crypto-aggregator"
 version = "0.1.0"
-source = { editable = "services/market_aggregator" }
+source = { editable = "services/aggregator" }
 dependencies = [
     { name = "orjson" },
     { name = "redis" },

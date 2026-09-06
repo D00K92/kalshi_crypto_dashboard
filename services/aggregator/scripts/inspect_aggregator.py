@@ -1,4 +1,4 @@
-"""Read-only inspection tool for market-aggregator Redis outputs."""
+"""Read-only inspection tool for aggregator Redis outputs."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ import redis.asyncio as redis
 
 
 def redis_url() -> str:
-    explicit = os.getenv("MARKET_AGGREGATOR_REDIS_URL") or os.getenv("INGESTION_REDIS_URL")
+    explicit = os.getenv("AGGREGATOR_REDIS_URL") or os.getenv("MARKET_AGGREGATOR_REDIS_URL") or os.getenv("INGESTION_REDIS_URL")
     if explicit:
         return explicit
     host = os.getenv("REDIS_HOST", "localhost")

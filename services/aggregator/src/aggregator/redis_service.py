@@ -8,9 +8,9 @@ import orjson
 import redis.asyncio as redis
 from redis.exceptions import ResponseError
 
-from market_aggregator.aggregation import MarketAggregator
-from market_aggregator.config import Settings
-from market_aggregator.health import HealthServer
+from aggregator.aggregation import MarketAggregator
+from aggregator.config import Settings
+from aggregator.health import HealthServer
 
 LOGGER = logging.getLogger(__name__)
 
@@ -30,7 +30,7 @@ class AggregatorService:
             await self._ensure_group(self.settings.book_stream, self.settings.book_group)
             await self._ensure_group(self.settings.trade_stream, self.settings.trade_group)
             self.health.ready = True
-            LOGGER.info("market_aggregator_ready")
+            LOGGER.info("aggregator_ready")
             book_task = asyncio.create_task(self._consume(self.settings.book_stream, self.settings.book_group, self._handle_book))
             trade_task = asyncio.create_task(self._consume(self.settings.trade_stream, self.settings.trade_group, self._handle_trade))
             await stop_event.wait()

@@ -12,7 +12,9 @@ def _int(name: str, default: int) -> int:
 
 
 def _redis_url() -> str:
-    explicit = os.getenv("MARKET_AGGREGATOR_REDIS_URL")
+    # Keep the old variable as a rollout-safe fallback for existing secrets and
+    # manifests. New deployments should set AGGREGATOR_REDIS_URL.
+    explicit = os.getenv("AGGREGATOR_REDIS_URL") or os.getenv("MARKET_AGGREGATOR_REDIS_URL")
     if explicit:
         return explicit
     return f"redis://{os.getenv('REDIS_HOST', 'localhost')}:{_int('REDIS_PORT', 6379)}/0"

@@ -20,7 +20,7 @@ def event_book(venue: str, bid: str, ask: str, event_id: str, ts: int) -> dict:
 
 
 async def main(wait_seconds: int) -> None:
-    url = os.getenv("MARKET_AGGREGATOR_REDIS_URL") or f"redis://{os.getenv('REDIS_HOST', 'localhost')}:{os.getenv('REDIS_PORT', '6379')}/0"
+    url = os.getenv("AGGREGATOR_REDIS_URL") or os.getenv("MARKET_AGGREGATOR_REDIS_URL") or f"redis://{os.getenv('REDIS_HOST', 'localhost')}:{os.getenv('REDIS_PORT', '6379')}/0"
     prefix = os.getenv("AGGREGATOR_OUTPUT_PREFIX", "ci-market")
     book_stream = os.getenv("BOOK_STREAM", "ci:orderbooks")
     trade_stream = os.getenv("TRADE_STREAM", "ci:trades")

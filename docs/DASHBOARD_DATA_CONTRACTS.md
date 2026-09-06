@@ -1,8 +1,8 @@
-# Dashboard and Market Aggregator Data Contracts
+# Dashboard and Aggregator Data Contracts
 
 Version: 1
 
-The market aggregator consumes normalized ingestion events and publishes
+The aggregator consumes normalized ingestion events and publishes
 dashboard-ready state. JSON numeric values are encoded as strings where price
 or quantity precision matters.
 

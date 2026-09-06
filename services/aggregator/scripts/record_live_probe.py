@@ -12,7 +12,7 @@ import redis.asyncio as redis
 
 
 async def main(seconds: int, prefix: str) -> None:
-    url = os.getenv("MARKET_AGGREGATOR_REDIS_URL", "redis://127.0.0.1:6380/0")
+    url = os.getenv("AGGREGATOR_REDIS_URL") or os.getenv("MARKET_AGGREGATOR_REDIS_URL", "redis://127.0.0.1:6380/0")
     client = redis.Redis.from_url(url, decode_responses=False, socket_connect_timeout=5, socket_timeout=5)
     await client.ping()
     deadline = time.monotonic() + seconds

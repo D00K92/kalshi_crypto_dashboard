@@ -20,7 +20,7 @@ now.
 ## Delivery phases
 
 1. Define shared market-data contracts for the aggregator and dashboard.
-2. Build the `market-aggregator` service for books, synthetic spot, candles,
+2. Build the `aggregator` service for books, synthetic spot, candles,
    and CVD.
 3. Add unit tests for aggregation, freshness, price calculation, candle
    boundaries, CVD, and malformed events.

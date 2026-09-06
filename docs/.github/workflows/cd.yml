@@ -77,7 +77,7 @@ jobs:
         IMAGE_TAG: ${{ github.event.workflow_run.head_sha || github.sha }}
       run: |
         set -euo pipefail
-        docker build --platform linux/amd64 -t "${IMAGE_URI}:${IMAGE_TAG}" services/market_aggregator
+        docker build --platform linux/amd64 -t "${IMAGE_URI}:${IMAGE_TAG}" services/aggregator
         docker push "${IMAGE_URI}:${IMAGE_TAG}"
 
     - name: Build and push Feast live bridge image
@@ -162,7 +162,7 @@ jobs:
           < k8s/ingestion-deployment.yaml \
           | kubectl apply -f -
         envsubst '${AGGREGATOR_IMAGE} ${REDIS_HOST} ${REDIS_PORT}' \
-          < k8s/market-aggregator-deployment.yaml \
+          < k8s/aggregator-deployment.yaml \
           | kubectl apply -f -
         envsubst '${FEAST_STORE_IMAGE} ${REDIS_HOST}' \
           < k8s/feast-live-bridge-deployment.yaml \
@@ -196,7 +196,6 @@ jobs:
         kubectl rollout status deployment/aggregator --timeout=5m
         kubectl rollout status deployment/feast-live-bridge --timeout=5m
         kubectl rollout status deployment/feast-server --timeout=5m
-        kubectl delete deployment/market-aggregator --ignore-not-found
         kubectl rollout status deployment/dashboard --timeout=5m
         if ! kubectl rollout status deployment/analytics --timeout=5m; then
           echo "Analytics container did not become ready. Running pods with a failed /readyz usually indicate a missing/invalid model artifact, IAM grant, live feature, spot, ticker, or Kalshi metadata prerequisite." >&2

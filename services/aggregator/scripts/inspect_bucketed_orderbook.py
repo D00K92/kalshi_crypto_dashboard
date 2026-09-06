@@ -14,12 +14,12 @@ from decimal import Decimal
 import orjson
 import redis
 
-from market_aggregator.aggregation import MarketAggregator
+from aggregator.aggregation import MarketAggregator
 
 
 def redis_url() -> str:
     return os.getenv(
-        "MARKET_AGGREGATOR_REDIS_URL",
+        "AGGREGATOR_REDIS_URL",
         os.getenv("REDIS_URL", "redis://localhost:6379/0"),
     )
 

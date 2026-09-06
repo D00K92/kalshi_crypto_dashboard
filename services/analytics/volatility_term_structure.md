@@ -3,7 +3,7 @@
 ## Goal and compatibility rule
 
 Build `services/analytics` as a new consumer and publisher around the current
-architecture. Existing ingestion, market-aggregator, Feast, ML-training, GCS
+architecture. Existing ingestion, aggregator, Feast, ML-training, GCS
 exporter, and dashboard contracts remain unchanged.
 
 Analytics adapts the data that those services already expose. It must not
@@ -30,7 +30,7 @@ crypto exchanges
 ingestion (unchanged) ---> Redis trade/book streams
       |                              |
       |                              v
-      |                    market-aggregator (unchanged)
+      |                    aggregator (unchanged)
       |                       |                 |
       |                       |                 +--> stream:features:v1
       |                       |                          |
@@ -62,9 +62,9 @@ existing services. Each dependency has a narrow purpose:
 
 | Dependency | Existing interface used by analytics | Purpose | Required upstream change |
 |---|---|---|---|
-| Market aggregator | `GET market:spot:BTCUSDT:latest` | Synthetic spot and spot timestamp | None |
-| Market aggregator | `GET market:features:v1:BTCUSD:latest` | One timestamped v1 model-feature observation | None |
-| Market aggregator | `SUBSCRIBE market:aggregated_spot` | Low-latency wake-up only | None |
+| Aggregator | `GET market:spot:BTCUSDT:latest` | Synthetic spot and spot timestamp | None |
+| Aggregator | `GET market:features:v1:BTCUSD:latest` | One timestamped v1 model-feature observation | None |
+| Aggregator | `SUBSCRIBE market:aggregated_spot` | Low-latency wake-up only | None |
 | Ingestion | `stream:kalshi_tickers` | Bid, ask, ticker freshness, event and market identifiers | None |
 | Kalshi REST | Existing authenticated event/market endpoints | Authoritative market definition, strike, settlement/expiry time, and status | None |
 | Vertex AI Model Registry/GCS | Five configured model resource names and their artifact URIs | Load the approved horizon models and `metadata.json` | None |
@@ -95,7 +95,7 @@ changing ingestion.
 
 - Ingestion owns exchange and Kalshi WebSocket connections and normalized raw
   Redis streams.
-- Market aggregator owns the synthetic spot calculation and live feature
+- Aggregator owns the synthetic spot calculation and live feature
   publication.
 - Feast store owns feature definitions, the live bridge, and online feature
   serving.
@@ -175,7 +175,7 @@ Example:
 }
 ```
 
-`BTCUSD` is the live entity emitted by the market aggregator. Historical label
+`BTCUSD` is the live entity emitted by the aggregator. Historical label
 rows currently use `BTC`; analytics does not ask either producer to rename it.
 The mapping is explicit in the adapter, and `asset` is not passed as a numeric
 model feature.

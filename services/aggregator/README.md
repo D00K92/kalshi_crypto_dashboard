@@ -1,4 +1,4 @@
-# Market aggregator
+# Aggregator
 
 Consumes normalized trade and top-15 order-book events from Redis Streams and
 publishes dashboard-ready state. The service maintains per-venue books, an
@@ -15,7 +15,7 @@ uv sync --group dev
 uv run aggregator
 ```
 
-Configuration is environment-based; see `src/market_aggregator/config.py`.
+Configuration is environment-based; see `src/aggregator/config.py`.
 Set `AGGREGATOR_OUTPUT_PREFIX` for isolated staging runs; it defaults to
 `market`. Live feature freshness defaults to 60 seconds and can be configured
 with `FEATURE_TRADE_FRESHNESS_MS`.

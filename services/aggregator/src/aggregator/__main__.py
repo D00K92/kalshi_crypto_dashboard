@@ -10,8 +10,8 @@ try:
 except ImportError:
     pass
 
-from market_aggregator.config import Settings
-from market_aggregator.redis_service import AggregatorService
+from aggregator.config import Settings
+from aggregator.redis_service import AggregatorService
 
 
 def main() -> None:
