@@ -11,7 +11,7 @@ from pathlib import Path
 
 from google.cloud import bigquery
 
-FREQUENCIES = {"1s": (1, "SECOND"), "5s": (5, "SECOND"), "1m": (1, "MINUTE"), "5m": (5, "MINUTE"), "10m": (10, "MINUTE"), "30m": (30, "MINUTE"), "1h": (1, "HOUR")}
+FREQUENCIES = {"1s": (1, "SECOND"), "5s": (5, "SECOND"), "1m": (1, "MINUTE"), "5m": (5, "MINUTE"), "10m": (10, "MINUTE"), "15m": (15, "MINUTE"), "30m": (30, "MINUTE"), "1h": (1, "HOUR")}
 VENUES = ("binance", "bitstamp", "coinbase", "crypto.com", "gemini", "kraken")
 INSTRUMENTS = {
     "binance": "BTCUSDT",

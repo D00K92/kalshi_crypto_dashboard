@@ -56,6 +56,7 @@ FREQUENCIES = {
     "5m": "5min",
     "5min": "5min",
     "10m": "10min",
+    "15m": "15min",
     "10min": "10min",
     "30m": "30min",
     "30min": "30min",

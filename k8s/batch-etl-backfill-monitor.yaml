@@ -1,0 +1,42 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: batch-etl-backfill-monitor
+  namespace: default
+  labels:
+    app: batch-etl-backfill-monitor
+spec:
+  schedule: "*/15 * * * *"
+  timeZone: "Etc/UTC"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      ttlSecondsAfterFinished: 86400
+      template:
+        metadata:
+          labels:
+            app: batch-etl-backfill-monitor
+        spec:
+          serviceAccountName: batch-etl
+          restartPolicy: Never
+          containers:
+          - name: monitor
+            image: "${BATCH_ETL_IMAGE}"
+            imagePullPolicy: IfNotPresent
+            command: ["python", "scripts/monitor_backfill.py"]
+            args:
+            - "--start-date"
+            - "2026-08-26"
+            - "--end-date"
+            - "2026-09-06"
+            - "--dataset"
+            - "backfill_raw"
+            resources:
+              requests:
+                cpu: "100m"
+                memory: "256Mi"
+              limits:
+                cpu: "500m"

@@ -2,7 +2,7 @@
 
 This is the execution handoff for getting ML volatility predictions into live
 Kalshi prices on the dashboard. It is based on `ARCHITECTURE.md`, the repository
-at commit `422c366`, and read-only checks of the GKE deployment on 2026-09-06.
+at commit `422c366`, and read-only checks of the GKE deployment and BigQuery backfill on 2026-09-07.
 
 Follow the tasks in the stated order. Do not redesign service contracts and do
 not make upstream services change their payloads to accommodate a consumer.
@@ -43,10 +43,12 @@ bootstrap models can produce live prices. Complete Phase A first.
 | Live model inference | All pricing status records say `model_inference_failed`; no volatility snapshot or active price exists. | **Yes** |
 | `dashboard` | GKE Ready `1/1`; code already joins analytics keys by Kalshi ticker. | Waiting on analytics output |
 | `gcs_exporter` | GKE Ready `1/1`. | No |
-| `batch_etl` raw job | Recent hourly raw load completed successfully. | No for Phase A |
-| `batch_etl` feature/label jobs | Repeatedly fail on `bigquery.tables.updateData`. | **Yes for retraining**, not Phase A |
+| `batch_etl` raw job | Production CronJob resumed with canonical GCS → BigQuery landing → `market_data.raw_*` loading; target-hour replacement is partition-safe. | No |
+| `batch_etl` feature/label jobs | Feature and target MERGE jobs succeed; same-hour idempotency verified. Repaired window contains 15,060 feature/target rows, with 14,720 complete target rows. | No |
 | Feast live bridge/server | Bridge Ready `1/1`; server Ready `2/2`. Analytics intentionally uses the direct Redis feature key. | No |
 | `ml_pipeline` | Tests pass and bootstrap models are registered, but there is no complete automated image-build/run/promotion release path. | No for Phase A; yes for lifecycle |
+
+Backfill verification: `market_data.bars` contains unique repaired rows for 1m (67,800), 5m (13,560), 15m (4,520), 30m (2,260), and 1h (1,130) over the available venue-hour intersection. `backfill_raw` was temporary staging and is no longer part of the production dependency chain.
 
 The exact analytics failure was reproduced inside the running pod. Aggregator
 publishes `log_return` as a JSON string, so pandas infers an `object` column.
@@ -66,10 +68,13 @@ analytics owns input adaptation.
 
 ### Phase A — show live ML prices now
 
-1. Restore GitHub workflow discovery.
-2. Fix analytics numeric feature adaptation and add a regression test.
-3. Fix the aggregator staging integration test’s `5s`/`10s` mismatch.
-4. Run local service tests and container builds.
+~~1. Restore GitHub workflow discovery.~~
+
+~~2. Fix analytics numeric feature adaptation and add a regression test.~~
+
+~~3. Fix the aggregator staging integration test’s `5s`/`10s` mismatch.~~
+
+~~4. Run local service tests and container builds.~~
 5. Commit and push Phase A changes.
 6. Watch CI, staging integration, and deployment through completion.
 7. Verify live Redis outputs, analytics readiness, and dashboard rendering.
@@ -295,11 +300,19 @@ Current status: Ready and not on the immediate pricing path.
 
 - [ ] Verify recent crypto and Kalshi Parquet objects continue arriving for all
   enabled stream types.
-- [ ] Check exporter consumer-group pending counts and dead-letter growth.
+- [x] Check exporter consumer-group pending counts and dead-letter growth.
 - [ ] Do not block Phase A on historical export if live Redis inputs are fresh.
 
 Acceptance: recent GCS objects exist, exporter remains Ready, and pending
 entries do not grow continuously.
+
+Observed 2026-09-06: exporter is Ready `1/1` and recent tick, book, and
+Kalshi Parquet partitions exist. However, pending entries grew over 15 seconds:
+`stream:ticks` 1,194 -> 1,915; `stream:orderbook_snapshots` 1,984 -> 4,339;
+`stream:kalshi_tickers` 49 -> 219; `stream:kalshi_trades` 172 -> 279; and
+`stream:kalshi_orderbook` 3,747 -> 7,910. The dead-letter prefix was empty, but
+backlog growth means the continuity acceptance condition is not met; investigate
+exporter throughput or upstream stream volume before marking this TODO complete.
 
 ## `batch_etl` TODO
 
@@ -319,19 +332,16 @@ Permission bigquery.tables.updateData denied
 
 ### P1. Repair effective BigQuery write authorization
 
-- [ ] Inspect the effective IAM policy for the exact principal above.
-- [ ] The project policy currently appears to include
-  `roles/bigquery.dataEditor`, `dataViewer`, `jobUser`, and
-  `readSessionUser`. Because writes still failed, do not blindly add duplicate
-  project roles. First determine whether the grant was added after the failed
-  jobs, is conditional, or is not effective for these datasets.
-- [ ] Grant least-privilege dataset-level write access on `feature_store` and
-  `training_labels` to the same KSA principal if effective access is still
-  missing. Keep project-level `roles/bigquery.jobUser`.
-- [ ] Run one manual feature job and one manual target job from their CronJobs.
-- [ ] Query the written target hours and confirm rerunning the same hour is
-  idempotent through `MERGE`.
-- [ ] Confirm the next scheduled executions complete without retries.
+- [x] Inspect the effective IAM policy for the exact principal above.
+- [x] The project policy was inspected: `roles/bigquery.dataEditor` was conditional
+  to `market_data`, so duplicate unconditional project roles were not added.
+- [x] Grant least-privilege write access scoped to `market_data`, `feature_store`,
+  and `training_labels` for the same KSA principal; project-level
+  `roles/bigquery.jobUser` was preserved.
+- [x] Run one manual feature job and one manual target job from their CronJobs.
+- [x] Query the written target hours and confirm rerunning the same hour is
+  idempotent through `MERGE` (2026-09-06 14:00 UTC; counts and hashes stable).
+- [x] Confirm the next scheduled executions complete without retries.
 
 Acceptance:
 
@@ -341,12 +351,22 @@ Acceptance:
 
 ### P1. Validate model-facing data
 
-- [ ] Verify `log_return` and `venue_count` are non-null for enough 1-minute
-  rows to train each horizon.
-- [ ] Verify all five target columns have usable rows through the chosen
+- [x] Verify `log_return` and `venue_count` are non-null for enough 1-minute
+  rows to train each horizon (14,884 usable rows in the repaired window).
+- [x] Verify all five target columns have usable rows through the chosen
   training cutoff.
-- [ ] Record row counts, minimum timestamp, maximum timestamp, and null counts
+- [x] Record row counts, minimum timestamp, maximum timestamp, and null counts
   before starting an ML pipeline run.
+
+**DATA QUALITY STATUS - REPAIRED BACKFILL:** The canonical raw tables and 1-minute bars were rebuilt from intact GCS staging data. The repaired feature window contains 15,060 rows, with 14,884 rows having non-null `log_return` and positive `venue_count`; 14,720 target rows have all five horizons populated. Venue-specific source gaps and boundary nulls remain expected and are now monitored rather than treated as the former failed backfill state.
+
+**SINGLE-HOUR TRACE (2026-09-06 11:00-11:59 UTC):** 358 tick Parquet objects and
+360 book Parquet objects (60 per crypto venue) were present in GCS. The same
+hour contained 72,298 raw trade rows, 4,009,840 raw book-level rows, 360
+resampled 1-minute bar rows (6 venues x 60 minutes), and 60 feature rows.
+This recent interval is complete end-to-end; the observed historical loss is
+therefore a backfill or resampling-history problem, not a live-path loss for
+this hour.
 
 ## `feast_store` TODO
 

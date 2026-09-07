@@ -1,128 +1,46 @@
-"""Load one GCS raw-data hour into normalized BigQuery landing tables.
-
-This is the first step of the SQL-resampling migration. It is deliberately
-bounded and partition-scoped so retries cannot affect sibling hours.
-"""
+"""Load one GCS raw-data hour into canonical BigQuery raw tables."""
 from __future__ import annotations
-
 import argparse
-import json
 from datetime import datetime, timezone
-from pathlib import PurePosixPath
+from google.cloud import bigquery, storage
 
-import gcsfs
-import pandas as pd
-from google.cloud import bigquery
+INSTRUMENTS={"binance":"BTCUSDT","coinbase":"BTC-USD","kraken":"BTC_USD"}
 
+def _uris(bucket,kind,venue,instrument,day,hour,project):
+    client=storage.Client(project=project); prefix=f"{kind}/venue={venue}/instrument={instrument}/date={day}/hour={hour}/"
+    return sorted(f"gs://{bucket}/{b.name}" for b in client.list_blobs(bucket,prefix=prefix) if b.name.endswith(".parquet"))
 
-def _paths(fs, bucket: str, dataset: str, venue: str, instrument: str, day: str, hour: str) -> list[str]:
-    pattern = f"{bucket}/{dataset}/venue={venue}/instrument={instrument}/date={day}/hour={hour}/*.parquet"
-    return [p if p.startswith("gs://") else f"gs://{p}" for p in fs.glob(pattern)]
+def _load(client,uris,table):
+    if not uris: return 0
+    cfg=bigquery.LoadJobConfig(source_format=bigquery.SourceFormat.PARQUET,autodetect=True,write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE)
+    client.load_table_from_uri(uris,table,job_config=cfg).result(); return len(uris)
 
+def _replace_trades(client,landing,target,venue,instrument,start,end):
+    client.query(f"DELETE FROM `{target}` WHERE event_timestamp>=@start AND event_timestamp<@end AND venue=@venue AND instrument=@instrument",job_config=bigquery.QueryJobConfig(query_parameters=[bigquery.ScalarQueryParameter("start","TIMESTAMP",start),bigquery.ScalarQueryParameter("end","TIMESTAMP",end),bigquery.ScalarQueryParameter("venue","STRING",venue),bigquery.ScalarQueryParameter("instrument","STRING",instrument)])).result()
+    sql=f"""INSERT INTO `{target}` (event_timestamp,received_timestamp,venue,instrument,trade_id,price,quantity,taker_side,source_object,ingested_at) SELECT TIMESTAMP_MILLIS(exchange_ts_ms),TIMESTAMP_MILLIS(COALESCE(received_ts_ms,exchange_ts_ms)),@venue,@instrument,COALESCE(trade_id,event_id,redis_id),price,quantity,taker_side,@source,CURRENT_TIMESTAMP() FROM `{landing}` WHERE TIMESTAMP_MILLIS(exchange_ts_ms)>=@start AND TIMESTAMP_MILLIS(exchange_ts_ms)<@end"""
+    client.query(sql,job_config=bigquery.QueryJobConfig(query_parameters=[bigquery.ScalarQueryParameter("start","TIMESTAMP",start),bigquery.ScalarQueryParameter("end","TIMESTAMP",end),bigquery.ScalarQueryParameter("venue","STRING",venue),bigquery.ScalarQueryParameter("instrument","STRING",instrument),bigquery.ScalarQueryParameter("source","STRING",landing)])).result()
 
-def _read(paths: list[str], fs) -> pd.DataFrame:
-    if not paths:
-        return pd.DataFrame()
-    frames = [pd.read_parquet(path, filesystem=fs) for path in paths]
-    return pd.concat(frames, ignore_index=True)
+def _replace_books(client,landing,target,venue,instrument,start,end):
+    client.query(f"DELETE FROM `{target}` WHERE event_timestamp>=@start AND event_timestamp<@end AND venue=@venue AND instrument=@instrument",job_config=bigquery.QueryJobConfig(query_parameters=[bigquery.ScalarQueryParameter("start","TIMESTAMP",start),bigquery.ScalarQueryParameter("end","TIMESTAMP",end),bigquery.ScalarQueryParameter("venue","STRING",venue),bigquery.ScalarQueryParameter("instrument","STRING",instrument)])).result()
+    parts=[]
+    for side,col in (("bid","bids"),("ask","asks")):
+        parts.append(f"SELECT TIMESTAMP_MILLIS(exchange_ts_ms),TIMESTAMP_MILLIS(COALESCE(received_ts_ms,exchange_ts_ms)),@venue,@instrument,@side,off+1,SAFE_CAST(JSON_VALUE(x,'$.price') AS FLOAT64),SAFE_CAST(JSON_VALUE(x,'$.quantity') AS FLOAT64),@source,CURRENT_TIMESTAMP() FROM `{landing}`,UNNEST(JSON_QUERY_ARRAY({col})) x WITH OFFSET off WHERE TIMESTAMP_MILLIS(exchange_ts_ms)>=@start AND TIMESTAMP_MILLIS(exchange_ts_ms)<@end")
+    sql=f"INSERT INTO `{target}` (event_timestamp,received_timestamp,venue,instrument,side,level,price,quantity,source_object,ingested_at) " + " UNION ALL ".join(parts)
+    cfg=bigquery.QueryJobConfig(query_parameters=[bigquery.ScalarQueryParameter("start","TIMESTAMP",start),bigquery.ScalarQueryParameter("end","TIMESTAMP",end),bigquery.ScalarQueryParameter("venue","STRING",venue),bigquery.ScalarQueryParameter("instrument","STRING",instrument),bigquery.ScalarQueryParameter("side","STRING","bid"),bigquery.ScalarQueryParameter("source","STRING",landing)])
+    # side is embedded as a literal per branch to avoid parameter type ambiguity.
+    sql=sql.replace("@side,", "'bid',", 1).replace("@side,", "'ask',", 1)
+    cfg.query_parameters=[x for x in cfg.query_parameters if x.name!="side"]
+    client.query(sql,job_config=cfg).result()
 
-
-def normalize_trades(frame: pd.DataFrame, *, venue: str, instrument: str, source_object: str) -> pd.DataFrame:
-    """Normalize exporter trade rows into the raw_trades BigQuery schema."""
-    required = {"price", "quantity", "taker_side", "exchange_ts_ms"}
-    missing = required.difference(frame.columns)
-    if missing:
-        raise ValueError(f"trade input missing columns: {sorted(missing)}")
-    result = pd.DataFrame({
-        "event_timestamp": pd.to_datetime(frame["exchange_ts_ms"], unit="ms", utc=True),
-        "received_timestamp": pd.to_datetime(frame.get("received_ts_ms", frame["exchange_ts_ms"]), unit="ms", utc=True),
-        "venue": venue,
-        "instrument": instrument,
-        "trade_id": frame.get("event_id", frame.get("redis_id")),
-        "price": pd.to_numeric(frame["price"], errors="raise"),
-        "quantity": pd.to_numeric(frame["quantity"], errors="raise"),
-        "taker_side": frame["taker_side"].astype(str),
-        "source_object": source_object,
-        "ingested_at": pd.Timestamp.now(tz="UTC"),
-    })
-    return result
-
-
-def _levels(value) -> list[tuple[float, float]]:
-    parsed = json.loads(value) if isinstance(value, str) else value
-    if not isinstance(parsed, list):
-        raise ValueError("book levels must be a JSON array")
-    return [(float(row["price"]), float(row["quantity"])) for row in parsed[:10]]
-
-
-def normalize_books(frame: pd.DataFrame, *, venue: str, instrument: str, source_object: str) -> pd.DataFrame:
-    """Expand JSON bid/ask arrays into one normalized row per book level."""
-    required = {"bids", "asks", "exchange_ts_ms"}
-    missing = required.difference(frame.columns)
-    if missing:
-        raise ValueError(f"book input missing columns: {sorted(missing)}")
-    rows: list[dict] = []
-    now = pd.Timestamp.now(tz="UTC")
-    for record in frame.to_dict("records"):
-        event_ts = pd.to_datetime(record["exchange_ts_ms"], unit="ms", utc=True)
-        received_ts = pd.to_datetime(record.get("received_ts_ms", record["exchange_ts_ms"]), unit="ms", utc=True)
-        for side in ("bids", "asks"):
-            for level, (price, quantity) in enumerate(_levels(record[side]), start=1):
-                rows.append({
-                    "event_timestamp": event_ts,
-                    "received_timestamp": received_ts,
-                    "venue": venue,
-                    "instrument": instrument,
-                    "side": side[:-1],
-                    "level": level,
-                    "price": price,
-                    "quantity": quantity,
-                    "source_object": source_object,
-                    "ingested_at": now,
-                })
-    return pd.DataFrame(rows)
-
-
-def replace_partition(client: bigquery.Client, frame: pd.DataFrame, *, table: str, day: str, venue: str, instrument: str) -> int:
-    """Replace one venue/day partition, returning rows written."""
-    if frame.empty:
-        return 0
-    client.query(
-        f"DELETE FROM `{table}` WHERE DATE(event_timestamp) = @day AND venue = @venue AND instrument = @instrument",
-        job_config=bigquery.QueryJobConfig(query_parameters=[
-            bigquery.ScalarQueryParameter("day", "DATE", day),
-            bigquery.ScalarQueryParameter("venue", "STRING", venue),
-            bigquery.ScalarQueryParameter("instrument", "STRING", instrument),
-        ]),
-    ).result()
-    load = client.load_table_from_dataframe(frame, table, job_config=bigquery.LoadJobConfig(write_disposition="WRITE_APPEND"))
-    load.result()
-    return len(frame)
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--date", required=True, help="UTC date, YYYY-MM-DD")
-    parser.add_argument("--hour", required=True, help="UTC hour, 00-23")
-    parser.add_argument("--venue", required=True)
-    parser.add_argument("--instrument", required=True)
-    parser.add_argument("--bucket", default="kalshi-crypto-tick-data")
-    parser.add_argument("--types", default="trades,books")
-    parser.add_argument("--project", default="kalshi-crypto-506614")
-    args = parser.parse_args()
-    datetime.fromisoformat(f"{args.date}T{args.hour}:00:00+00:00")
-    fs = gcsfs.GCSFileSystem()
-    client = bigquery.Client(project=args.project, location="asia-northeast3")
-    kinds = {item.strip() for item in args.types.split(",") if item.strip()}
-    if "trades" in kinds:
-        paths = _paths(fs, args.bucket, "ticks", args.venue, args.instrument, args.date, args.hour)
-        frame = normalize_trades(_read(paths, fs), venue=args.venue, instrument=args.instrument, source_object=str(PurePosixPath(paths[0]).parent) if paths else "")
-        print(f"trades source_files={len(paths)} rows={replace_partition(client, frame, table=f'{args.project}.market_data.raw_trades', day=args.date, venue=args.venue, instrument=args.instrument)}", flush=True)
-    if "books" in kinds:
-        paths = _paths(fs, args.bucket, "books", args.venue, args.instrument, args.date, args.hour)
-        frame = normalize_books(_read(paths, fs), venue=args.venue, instrument=args.instrument, source_object=str(PurePosixPath(paths[0]).parent) if paths else "")
-        print(f"books source_files={len(paths)} rows={replace_partition(client, frame, table=f'{args.project}.market_data.raw_book_levels', day=args.date, venue=args.venue, instrument=args.instrument)}", flush=True)
-
-
-if __name__ == "__main__":
-    main()
+def main():
+    ap=argparse.ArgumentParser(); ap.add_argument("--date",required=True); ap.add_argument("--hour",required=True); ap.add_argument("--venue",required=True); ap.add_argument("--instrument"); ap.add_argument("--bucket",default="kalshi-crypto-tick-data"); ap.add_argument("--project",default="kalshi-crypto-506614"); ap.add_argument("--types",default="trades,books"); a=ap.parse_args()
+    target=datetime.fromisoformat(f"{a.date}T{a.hour}:00:00+00:00"); end=target.replace(minute=0)+__import__('datetime').timedelta(hours=1); instrument=a.instrument or INSTRUMENTS.get(a.venue,"BTCUSD")
+    c=bigquery.Client(project=a.project,location="asia-northeast3"); kinds={x.strip() for x in a.types.split(",")}
+    for kind in kinds:
+        uris=_uris(a.bucket,"ticks" if kind=="trades" else "books",a.venue,instrument,a.date,a.hour,a.project)
+        if not uris: print(f"{kind} source_files=0 rows=0",flush=True); continue
+        landing=f"{a.project}.market_data._landing_{kind}_{a.venue.replace('.','_').replace('-','_')}"; n=_load(c,uris,landing)
+        if kind=="trades": _replace_trades(c,landing,f"{a.project}.market_data.raw_trades",a.venue,instrument,target,end)
+        else: _replace_books(c,landing,f"{a.project}.market_data.raw_book_levels",a.venue,instrument,target,end)
+        c.delete_table(landing,not_found_ok=True); print(f"{kind} source_files={n} loaded=1",flush=True)
+if __name__=="__main__": main()

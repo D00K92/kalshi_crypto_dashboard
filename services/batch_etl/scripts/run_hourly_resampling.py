@@ -35,7 +35,7 @@ else:
     )
 
 
-PRODUCTION_FREQUENCIES = ("1s", "5s", "1m", "5m", "10m", "30m", "1h")
+PRODUCTION_FREQUENCIES = ("1s", "5s", "1m", "5m", "10m", "15m", "30m", "1h")
 BIGQUERY_BAR_COLUMNS = (
     "event_timestamp", "created_timestamp", "venue", "instrument", "frequency",
     "p_open", "p_high", "p_low", "p_close", "p_trade", "p_trade_mean",
@@ -49,6 +49,7 @@ EXPECTED_ROWS_PER_HOUR = {
     "1m": 60,
     "5m": 12,
     "10m": 6,
+    "15m": 4,
     "30m": 2,
     "1h": 1,
 }
