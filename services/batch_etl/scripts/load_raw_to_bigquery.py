@@ -2,9 +2,41 @@
 from __future__ import annotations
 import argparse
 from datetime import datetime, timezone
+import json
+import pandas as pd
 from google.cloud import bigquery, storage
 
 INSTRUMENTS={"binance":"BTCUSDT","coinbase":"BTC-USD","kraken":"BTC_USD"}
+
+def _timestamp(value):
+    return pd.to_datetime(value, unit="ms", utc=True)
+
+def normalize_trades(frame, *, venue, instrument, source_object):
+    """Normalize a raw trade frame for callers that need local transformation."""
+    result = frame.copy()
+    result["event_timestamp"] = _timestamp(result["exchange_ts_ms"])
+    result["received_timestamp"] = _timestamp(result.get("received_ts_ms", result["exchange_ts_ms"]))
+    result["venue"] = venue
+    result["instrument"] = instrument
+    result["source_object"] = source_object
+    return result
+
+def normalize_books(frame, *, venue, instrument, source_object):
+    """Expand bid/ask JSON arrays into canonical level rows."""
+    rows = []
+    for record in frame.to_dict("records"):
+        timestamp = _timestamp(record["exchange_ts_ms"])
+        received = _timestamp(record.get("received_ts_ms", record["exchange_ts_ms"]))
+        for side, field in (("bid", "bids"), ("ask", "asks")):
+            values = record.get(field) or []
+            if isinstance(values, str):
+                values = json.loads(values)
+            for level, quote in enumerate(values, start=1):
+                rows.append({"event_timestamp": timestamp, "received_timestamp": received,
+                             "venue": venue, "instrument": instrument, "side": side,
+                             "level": level, "price": float(quote["price"]),
+                             "quantity": float(quote["quantity"]), "source_object": source_object})
+    return pd.DataFrame(rows)
 
 def _uris(bucket,kind,venue,instrument,day,hour,project):
     client=storage.Client(project=project); prefix=f"{kind}/venue={venue}/instrument={instrument}/date={day}/hour={hour}/"

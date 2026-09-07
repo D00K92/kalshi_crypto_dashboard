@@ -30,7 +30,6 @@ os.environ.setdefault("GCSFS_EXPERIMENTAL_ZB_HNS_SUPPORT", "false")
 os.environ.setdefault("USE_EXPERIMENTAL_ADAPTIVE_PREFETCHING", "false")
 
 import dask.dataframe as dd
-import gcsfs
 import numpy as np
 import pandas as pd
 import pyarrow as pa
@@ -398,6 +397,7 @@ def main() -> None:
     if not args.overwrite and (output.startswith("/") and Path(output).exists()):
         parser.error("output exists; pass --overwrite to replace it")
 
+    import gcsfs
     fs = gcsfs.GCSFileSystem()
     result = build_dataset(fs, args)
     write_dataset(result, output, args.overwrite)

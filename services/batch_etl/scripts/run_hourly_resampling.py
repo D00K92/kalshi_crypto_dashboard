@@ -8,7 +8,6 @@ from datetime import datetime, timedelta, timezone
 import os
 
 import dask
-import gcsfs
 import pandas as pd
 
 from kalshi_crypto_batch_etl.bigquery.io import write_frame as write_bigquery_partition
@@ -208,7 +207,7 @@ def main() -> None:
         parser.error(str(exc))
 
     run_hourly(
-        fs=gcsfs.GCSFileSystem(),
+        fs=__import__("gcsfs").GCSFileSystem(),
         bucket=args.bucket,
         output_dataset=args.output_dataset,
         target=target,
