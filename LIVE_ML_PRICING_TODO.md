@@ -378,11 +378,11 @@ dependency.
 
 ### P1. Prove historical retrieval used by training
 
-- [ ] Run `feast apply` through the existing apply job and verify the registry
+- [x] Run `feast apply` through the existing apply job and verify the registry
   at `gs://kalshi-crypto-tick-data/feature_store/registry.db` is current.
-- [ ] Execute a bounded point-in-time historical retrieval for several known
+- [x] Execute a bounded point-in-time historical retrieval for several known
   label timestamps and confirm no future feature enters a row.
-- [ ] Confirm returned columns include `synthetic_price`, `log_return`, and
+- [x] Confirm returned columns include `synthetic_price`, `log_return`, and
   `venue_count` with numeric dtypes.
 
 ### P2. Remove placeholder operational code
@@ -393,10 +393,10 @@ These files still raise `NotImplementedError`:
 - `services/feast_store/jobs/backfill.py`
 - `services/feast_store/jobs/materialize.py`
 
-- [ ] Either implement each supported command with bounded, resumable behavior
+- [x] Either implement each supported command with bounded, resumable behavior
   and tests, or delete it if the declarative apply/live-push path supersedes it.
   Do not leave callable placeholder entrypoints.
-- [ ] Replace the placeholder contract test with assertions against the actual
+- [x] Replace the placeholder contract test with assertions against the actual
   entity, FeatureView, FeatureService, and source definitions.
 
 ## `ml_pipeline` TODO
@@ -406,11 +406,11 @@ for Phase A. The repeatable production training/release path is incomplete.
 
 ### P1. Build and publish the four KFP images
 
-- [ ] Add reproducible build steps for `ml-load`, `ml-train`, `ml-evaluate`, and
+- [x] Add reproducible build steps for `ml-load`, `ml-train`, `ml-evaluate`, and
   `ml-register` from `services/ml_pipeline/containers`.
-- [ ] Stop relying on mutable `:v1` alone. Publish immutable commit-SHA tags and
+- [x] Stop relying on mutable `:v1` alone. Publish immutable commit-SHA tags and
   pass those image references into pipeline compilation.
-- [ ] Add all four image builds and ML tests to CI without coupling deployment
+- [x] Add all four image builds and ML tests to CI without coupling deployment
   of unrelated live services to model promotion.
 
 ### P1. Run the end-to-end training contract
