@@ -30,8 +30,12 @@ def main() -> None:
     decision = retrain_decision(result, champion.get(a.horizon, champion))
     promoted = bool(decision["beats_benchmark"] and not decision["degraded"])
     result["decision"], result["promoted"] = decision, promoted
-    Path(a.report).write_text(json.dumps(result, indent=2), encoding="utf-8")
-    Path(a.promote).write_text(str(promoted).lower(), encoding="utf-8")
+    report = Path(a.report)
+    promote = Path(a.promote)
+    report.parent.mkdir(parents=True, exist_ok=True)
+    promote.parent.mkdir(parents=True, exist_ok=True)
+    report.write_text(json.dumps(result, indent=2), encoding="utf-8")
+    promote.write_text(str(promoted).lower(), encoding="utf-8")
 
 
 if __name__ == "__main__":
