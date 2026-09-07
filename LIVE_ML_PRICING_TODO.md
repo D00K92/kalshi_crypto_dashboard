@@ -190,8 +190,10 @@ The staging integration job must print `aggregator integration test passed`.
 
 ## `analytics` TODO
 
-Current status: this is the immediate live-pricing blocker. Models load, but the
-live feature row reaches XGBoost with `log_return` dtype `object`.
+Current status: model input adaptation is fixed and all five models produce volatility.
+The remaining deployment issue was Kalshi expiry parsing: the service selected the
+administrative `expiration_time` instead of `expected_expiration_time`, making active
+hourly contracts appear outside the supported lifetime; this is now fixed and tested.
 
 ### P0. Coerce model inputs at the consumer boundary
 
@@ -209,11 +211,11 @@ File: `services/analytics/src/kalshi_crypto_analytics/forecast.py`
   prediction = bundle.model.predict(frame)
   ```
 
-- [ ] Do not sort feature names. `metadata.json.feature_columns` defines the
+- [x] Do not sort feature names. `metadata.json.feature_columns` defines the
   model input order.
-- [ ] Continue rejecting missing, nonnumeric, NaN, infinite, zero, or negative
+- [x] Continue rejecting missing, nonnumeric, NaN, infinite, zero, or negative
   predictions as `model_inference_failed`.
-- [ ] Do not introduce fallback volatility. Unavailable inputs must remain
+- [x] Do not introduce fallback volatility. Unavailable inputs must remain
   unavailable.
 
 ### P0. Add regression and diagnostic coverage
@@ -229,7 +231,7 @@ File: `services/analytics/tests/test_forecast.py`
 - [x] Make the fake model assert that both DataFrame columns have numeric
   dtypes. The test must fail on the current implementation and pass after the
   cast.
-- [ ] Retain the existing feature-order and atomic-five-model tests.
+- [x] Retain the existing feature-order and atomic-five-model tests.
 - [x] Log the exception detail when inference fails, including the horizon but
   not full payloads or credentials. Currently Redis records only the broad
   reason, making production diagnosis unnecessarily difficult.
