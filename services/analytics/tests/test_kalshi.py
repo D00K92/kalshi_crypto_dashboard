@@ -42,3 +42,11 @@ async def test_rest_client_falls_back_to_market_endpoint_when_events_are_not_nes
     monkeypatch.setattr(client, "_get", fake_get)
     events = await client.event_markets("KXBTCD")
     assert events[0]["markets"] == [{"ticker": "E-T100"}]
+
+
+def test_metadata_prefers_expected_expiration_over_administrative_expiration():
+    market = {"ticker": "KXBTCD-E-T70000", "strike_type": "greater", "floor_strike": 70000,
+              "expected_expiration_time": "2026-09-07T03:05:00Z",
+              "expiration_time": "2026-09-14T03:00:00Z", "status": "open"}
+    parsed = parse_market(market, "KXBTCD-E")
+    assert parsed and parsed.expiry_ts_ms == 1788750300000

@@ -45,8 +45,12 @@ def parse_market(market: dict[str, Any], event_ticker: str) -> MarketMetadata | 
         strike = suffix_strike
     elif suffix_strike is not None and strike != suffix_strike:
         return None
+    # Kalshi's expiration_time may be a long-lived administrative deadline
+    # (often days after settlement). Pricing must use the contract's actual
+    # near-term resolution time when available.
     expiry = next((_timestamp_ms(market.get(field)) for field in
-                   ("settlement_time", "determination_time", "expiration_time") if market.get(field)), None)
+                   ("expected_expiration_time", "settlement_time", "determination_time",
+                    "close_time", "expiration_time") if market.get(field)), None)
     if strike is None or expiry is None:
         return None
     return MarketMetadata(ticker, event_ticker, strike, expiry, str(market.get("status", "")),
