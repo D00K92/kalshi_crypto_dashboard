@@ -99,7 +99,7 @@ def test_contract_table_builds_ag_grid():
     assert grid.columnDefs[0]["field"] == "contract"
 
 
-def test_select_contract_window_keeps_eight_strikes_each_side_of_atm():
+def test_select_contract_window_keeps_six_strikes_each_side_of_atm():
     rows = [
         {"strike": float(strike), "market_ticker": f"M-T{strike}"}
         for strike in range(90, 111)
@@ -107,7 +107,7 @@ def test_select_contract_window_keeps_eight_strikes_each_side_of_atm():
 
     selected = select_contract_window(rows, spot=100.2)
 
-    assert [row["strike"] for row in selected] == list(range(92, 109))
+    assert [row["strike"] for row in selected] == list(range(94, 107))
 
 
 def test_select_contract_window_uses_probability_when_spot_is_missing():

@@ -159,10 +159,10 @@ def select_contract_window(
     rows: list[dict[str, Any]],
     spot: float | None,
     *,
-    lower: int = 8,
-    upper: int = 8,
+    lower: int = 6,
+    upper: int = 6,
 ) -> list[dict[str, Any]]:
-    """Keep the ATM contract and a bounded strike window around it."""
+    """Keep the ATM contract and six strikes on each side when available."""
     if not rows or lower < 0 or upper < 0:
         return [] if not rows else rows
 
