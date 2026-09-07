@@ -1,5 +1,7 @@
 """Configuration boundary for Feast jobs and serving."""
 from dataclasses import dataclass
+import os
+from pathlib import Path
 
 
 @dataclass(frozen=True)
@@ -15,4 +17,16 @@ class FeastSettings:
 
 def load_settings() -> FeastSettings:
     """Load validated settings from environment or deployment configuration."""
-    raise NotImplementedError
+    repo_path = os.getenv("FEAST_REPO_PATH", ".")
+    if not (Path(repo_path) / "feature_store.yaml").is_file():
+        raise ValueError(f"FEAST_REPO_PATH must contain feature_store.yaml: {repo_path}")
+    feature_version = os.getenv("FEATURE_VERSION", "v1")
+    if not feature_version:
+        raise ValueError("FEATURE_VERSION must not be empty")
+    return FeastSettings(
+        repo_path=repo_path,
+        project=os.getenv("GCP_PROJECT_ID", "kalshi-crypto-506614"),
+        feature_version=feature_version,
+        gcs_bucket=os.getenv("GCS_BUCKET", "kalshi-crypto-tick-data"),
+        redis_url=os.getenv("REDIS_URL"),
+    )
