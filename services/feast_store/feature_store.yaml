@@ -4,6 +4,7 @@ provider: gcp
 # Historical features are queried directly from BigQuery; Redis remains the online store.
 offline_store:
   type: bigquery
+  project_id: kalshi-crypto-506614
   dataset: feature_store
   location: asia-northeast3
 online_store:
