@@ -9,6 +9,11 @@ dependencies = [
   "pyarrow<=17",
 ]
 
+[dependency-groups]
+dev = [
+  "pytest>=8,<10",
+]
+
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
