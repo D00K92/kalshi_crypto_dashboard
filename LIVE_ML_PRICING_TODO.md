@@ -75,15 +75,15 @@ analytics owns input adaptation.
 ~~3. Fix the aggregator staging integration test’s `5s`/`10s` mismatch.~~
 
 ~~4. Run local service tests and container builds.~~
-5. Commit and push Phase A changes.
-6. Watch CI, staging integration, and deployment through completion.
-7. Verify live Redis outputs, analytics readiness, and dashboard rendering.
+~~5. Commit and push Phase A changes.~~
+~~6. Watch CI, staging integration, and deployment through completion.~~
+~~7. Verify live Redis outputs, analytics readiness, and dashboard rendering.~~
 
 ### Phase B — make model training sustainable
 
-8. Repair BigQuery write authorization for the batch feature and target jobs.
-9. Prove hourly feature/label generation and close any data gaps.
-10. Finish Feast operational jobs and tests needed by historical retrieval.
+~~8. Repair BigQuery write authorization for the batch feature and target jobs.~~
+~~9. Prove hourly feature/label generation and close any data gaps.~~
+~~10. Finish Feast operational jobs and tests needed by historical retrieval.~~
 11. Build, publish, and execute the ML pipeline; promote immutable models.
 12. Update analytics model resource variables and repeat Phase A verification.
 
