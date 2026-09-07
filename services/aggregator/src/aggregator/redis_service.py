@@ -21,6 +21,7 @@ class AggregatorService:
         self.client = redis.Redis.from_url(settings.redis_url, decode_responses=False, health_check_interval=30)
         self.state = MarketAggregator(settings.price_tick, settings.book_depth, settings.freshness_ms, settings.aggregation_venues, dict(settings.taker_fees), settings.trade_freshness_ms)
         self.health = HealthServer(settings.health_port)
+        self._last_candle_publish_bucket: int | None = None
 
     async def run(self, stop_event: asyncio.Event) -> None:
         await self.health.start()
@@ -86,8 +87,6 @@ class AggregatorService:
             return
         encoded = orjson.dumps(spot)
         prefix = self.settings.output_prefix
-        candles = orjson.dumps(self.state.candle_snapshot("BTCUSDT"))
-        cvd = orjson.dumps(self.state.cvd_snapshot("BTCUSDT"))
         pipe = self.client.pipeline(transaction=False)
         pipe.set(f"{prefix}:spot:BTCUSDT:latest", encoded)
         if spot.get("price") is not None:
@@ -110,11 +109,16 @@ class AggregatorService:
             pipe.set(f"{prefix}:features:v1:BTCUSD:latest", feature_bytes, ex=120)
             pipe.publish(f"pub:features:v1", feature_bytes)
         pipe.publish(f"{prefix}:aggregated_spot", encoded)
-        pipe.set(f"{prefix}:candle_state:BTCUSDT:10s", orjson.dumps(self.state.export_candle_state()))
-        pipe.set(f"{prefix}:candles:BTCUSDT:10s", candles)
-        pipe.set(f"{prefix}:cvd:BTCUSDT:10s", cvd)
-        pipe.publish(f"{prefix}:aggregated_candles", candles)
-        pipe.publish(f"{prefix}:aggregated_cvd", cvd)
+        bucket = spot["bucket_start_ts_ms"]
+        if bucket != self._last_candle_publish_bucket:
+            candles = orjson.dumps(self.state.candle_snapshot("BTCUSDT"))
+            cvd = orjson.dumps(self.state.cvd_snapshot("BTCUSDT"))
+            pipe.set(f"{prefix}:candle_state:BTCUSDT:10s", orjson.dumps(self.state.export_candle_state()))
+            pipe.set(f"{prefix}:candles:BTCUSDT:10s", candles)
+            pipe.set(f"{prefix}:cvd:BTCUSDT:10s", cvd)
+            pipe.publish(f"{prefix}:aggregated_candles", candles)
+            pipe.publish(f"{prefix}:aggregated_cvd", cvd)
+            self._last_candle_publish_bucket = bucket
         await pipe.execute()
 
     async def _ensure_group(self, stream: str, group: str) -> None:
