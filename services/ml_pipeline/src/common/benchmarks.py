@@ -6,16 +6,41 @@ import numpy as np
 import pandas as pd
 
 SECONDS_PER_YEAR = 365 * 24 * 60 * 60
+FREQUENCY_SECONDS = {
+    "1s": 1,
+    "5s": 5,
+    "1m": 60,
+    "5m": 300,
+    "10m": 600,
+    "15m": 900,
+    "30m": 1800,
+    "1h": 3600,
+}
+
+
+def _benchmark_frame(table: pd.DataFrame) -> pd.DataFrame:
+    """Normalize legacy and Feast training schemas for benchmark evaluation."""
+    if {"timestamp", "frequency_seconds", "trade_log_return"}.issubset(table.columns):
+        frame = table[["timestamp", "frequency_seconds", "trade_log_return"]].copy()
+    elif {"timestamp", "frequency", "log_return"}.issubset(table.columns):
+        frame = table[["timestamp", "frequency", "log_return"]].rename(
+            columns={"log_return": "trade_log_return"}
+        )
+        frame["frequency_seconds"] = frame["frequency"].map(FREQUENCY_SECONDS)
+        if frame["frequency_seconds"].isna().any():
+            unknown = sorted(frame.loc[frame["frequency_seconds"].isna(), "frequency"].dropna().unique())
+            raise ValueError(f"benchmark data has unsupported frequencies: {unknown}")
+        frame = frame[["timestamp", "frequency_seconds", "trade_log_return"]]
+    else:
+        required = {"timestamp", "frequency_seconds", "trade_log_return"}
+        raise ValueError(f"benchmark data missing columns: {sorted(required.difference(table.columns))}")
+    return frame
 
 
 def ewma_annualized_volatility(table: pd.DataFrame, horizon: str, decay: float = 0.96) -> np.ndarray:
     """Forecast annualized volatility from prior same-frequency returns."""
     horizon_seconds = {"1m": 60, "5m": 300, "15m": 900, "30m": 1800, "1h": 3600}[horizon]
-    required = {"timestamp", "frequency_seconds", "trade_log_return"}
-    missing = required.difference(table.columns)
-    if missing:
-        raise ValueError(f"benchmark data missing columns: {sorted(missing)}")
-    frame = table[["timestamp", "frequency_seconds", "trade_log_return"]].copy()
+    frame = _benchmark_frame(table)
     frame["timestamp"] = pd.to_datetime(frame["timestamp"], utc=True)
     frame["trade_log_return"] = pd.to_numeric(frame["trade_log_return"], errors="coerce").fillna(0.0)
     frame["_variance"] = frame.groupby("frequency_seconds", sort=False)["trade_log_return"].transform(
