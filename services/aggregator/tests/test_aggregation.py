@@ -10,7 +10,7 @@ def trade(venue, price, quantity, side="buy", ts=None):
     return {"event_type": "trade", "venue": venue, "instrument": "BTCUSDT", "price": str(price), "quantity": str(quantity), "taker_side": side, "exchange_ts_ms": ts, "received_ts_ms": ts}
 
 
-def test_trade_vwap_and_cvd():
+def test_trade_vwap():
     agg = MarketAggregator()
     first = trade("binance", 100, 1)
     first["event_id"] = "one"
@@ -22,8 +22,38 @@ def test_trade_vwap_and_cvd():
     assert spot["method"] == "simple_average_fresh_venues"
     assert spot["total_volume"] == "4"
     assert spot["used_venues"] == ["binance", "coinbase"]
-    assert agg.cvd == Decimal("-2")
     assert spot["venue_count"] == 2
+
+
+def test_resampled_bars_include_one_hour_context():
+    agg = MarketAggregator(history_ms=2 * 60 * 60 * 1000)
+    first = trade("binance", 100, 1, ts=3_600_000)
+    first["event_id"] = "hour-one"
+    agg.apply_trade(first)
+    latest = trade("binance", 110, 2, ts=7_200_000)
+    latest["event_id"] = "hour-two"
+    agg.apply_trade(latest)
+
+    bars = agg.resampled_bars("BTCUSDT", {"1h": 3_600_000})
+    assert bars == [{
+        "schema_version": 1,
+        "event_type": "market_bar",
+        "instrument": "BTCUSDT",
+        "frequency": "1h",
+        "interval_ms": 3_600_000,
+        "bucket_start_ts_ms": 3_600_000,
+        "bucket_end_ts_ms": 7_200_000,
+        "open": "100",
+        "high": "100",
+        "low": "100",
+        "close": "100",
+        "vwap": "100",
+        "volume": "1",
+            "delta": "1",
+            "trade_count": 1,
+            "venue_count": 1,
+            "venue_prices": {"binance": "100"},
+        }]
 
 
 def test_synthetic_price_uses_fresh_venue_prices_not_trade_volume():
@@ -62,7 +92,6 @@ def test_candle_state_round_trips_across_restart():
     restored = MarketAggregator()
     assert restored.restore_candle_state(persisted) == 1
     assert restored.candle_snapshot("BTCUSDT") == original.candle_snapshot("BTCUSDT")
-    assert restored.cvd_snapshot("BTCUSDT") == original.cvd_snapshot("BTCUSDT")
 
     next_trade = trade("coinbase", 110, 1, "buy", ts=10_001)
     next_trade["event_id"] = "persisted-two"
@@ -77,6 +106,9 @@ def test_book_preserves_venue_contributions_and_depth():
     assert snapshot["bids"][0]["price"] == "100"
     assert snapshot["bids"][0]["venues"] == {"binance": "2"}
     assert snapshot["asks"][0]["price"] == "102"
+    assert snapshot["best_bid"] == "100"
+    assert snapshot["best_ask"] == "102"
+    assert snapshot["mid_price"] == "101"
 
 
 def test_price_bucketing_is_side_aware():

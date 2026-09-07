@@ -1,0 +1,75 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: live-feature-service
+  labels:
+    app: live-feature-service
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: live-feature-service
+  template:
+    metadata:
+      labels:
+        app: live-feature-service
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: live-feature-service
+        image: "${LIVE_FEATURE_SERVICE_IMAGE}"
+        imagePullPolicy: Always
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+        env:
+        - name: REDIS_URL
+          value: "${REDIS_URL}"
+        - name: BARS_STREAM
+          value: "stream:bars:v1"
+        - name: FEATURE_STREAM
+          value: "stream:features:v1"
+        - name: FEATURE_KEY
+          value: "market:features:BTCUSD:latest"
+        - name: FEATURE_STATE_KEY
+          value: "market:features:BTCUSD:state:v1"
+        - name: LIVE_FEATURE_GROUP
+          value: "live-features-v1"
+        - name: EWMA_DECAY
+          value: "0.96"
+        - name: HEALTH_PORT
+          value: "8080"
+        ports:
+        - name: health
+          containerPort: 8080
+        startupProbe:
+          httpGet:
+            path: /healthz
+            port: health
+          failureThreshold: 30
+          periodSeconds: 2
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: health
+          periodSeconds: 5
+          timeoutSeconds: 2
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: health
+          periodSeconds: 15
+          timeoutSeconds: 2
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "500m"
+            memory: "512Mi"

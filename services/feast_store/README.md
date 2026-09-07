@@ -35,7 +35,7 @@ feast_store/
 ```
 
 The low-latency bridge is `jobs/live_push.py`. It consumes the
-`stream:features:v1` stream emitted by `aggregator`, resolves the immutable
+`stream:features:v1` stream emitted by `live_feature_service`, resolves the immutable
 `feature_set`/`feature_version` contract in `registry/feature_specs.py`, and
 pushes validated rows to the corresponding Feast PushSource. BigQuery remains
 the offline source; hourly materialization is retained for reconciliation and

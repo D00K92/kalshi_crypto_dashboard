@@ -7,6 +7,14 @@ import time
 from typing import Any, Mapping
 
 CANDLE_INTERVAL_MS = 10_000
+DEFAULT_BAR_FREQUENCIES_MS = {
+    "1m": 60_000,
+    "5m": 300_000,
+    "10m": 600_000,
+    "15m": 900_000,
+    "30m": 1_800_000,
+    "1h": 3_600_000,
+}
 
 
 def _dec(value: Any) -> Decimal:
@@ -37,20 +45,20 @@ class VenueBook:
 class MarketAggregator:
     """Pure state machine for venue books and trade-derived market data."""
 
-    def __init__(self, price_tick: str | None = None, depth: int = 10, freshness_ms: int = 500, venues: tuple[str, ...] | None = None, taker_fees: Mapping[str, str | Decimal] | None = None, trade_freshness_ms: int = 60_000) -> None:
+    def __init__(self, price_tick: str | None = None, depth: int = 10, freshness_ms: int = 500, venues: tuple[str, ...] | None = None, taker_fees: Mapping[str, str | Decimal] | None = None, trade_freshness_ms: int = 60_000, history_ms: int = 2 * 60 * 60 * 1000) -> None:
         self.tick = _dec(price_tick) if price_tick else None
         if self.tick is not None and self.tick <= 0:
             raise ValueError("price_tick must be positive")
         self.depth = depth
         self.freshness_ms = freshness_ms
         self.trade_freshness_ms = trade_freshness_ms
+        self.history_ms = history_ms
         self.venues = {venue.lower() for venue in venues} if venues is not None else None
         self.taker_fees = {str(venue).lower(): self._fee(value) for venue, value in (taker_fees or {}).items()}
         self.books: dict[str, VenueBook] = {}
         self.trade_buckets: dict[int, dict[str, Any]] = {}
         self.latest_trades: dict[str, dict[str, Any]] = {}
         self._last_synthetic_price: Decimal | None = None
-        self.cvd = Decimal("0")
         self._seen_events: set[str] = set()
 
     def apply_book(self, event: dict[str, Any], published_ts_ms: int | None = None) -> dict[str, Any] | None:
@@ -94,7 +102,6 @@ class MarketAggregator:
         venue_state["price_sum"] += price
         venue_state["trade_count"] += 1
         self.latest_trades[venue] = {"price": price, "received_ts_ms": received}
-        self.cvd += quantity if event.get("taker_side") == "buy" else -quantity
         self._trim_buckets(bucket)
         return self.spot_snapshot(bucket, str(event.get("instrument", "BTCUSDT")).upper(), state)
 
@@ -106,7 +113,15 @@ class MarketAggregator:
         ask_buckets = self._aggregate_side(active, "asks", tick, reverse=False, rounding=ROUND_CEILING)
 
         bid_buckets, ask_buckets = self._uncross(bid_buckets, ask_buckets)
-        return {"schema_version": 1, "event_type": "aggregated_book", "instrument": instrument, "generated_ts_ms": now_ms, "depth": self.depth, "price_tick": str(tick), "bucket_method": "effective_price_bid_floor_ask_ceiling_uncrossed", "taker_fees": {venue: self._fmt(fee) for venue, fee in sorted(self.taker_fees.items())}, "venues": sorted(active), "stale_venues": stale, "bids": bid_buckets[: self.depth], "asks": ask_buckets[: self.depth]}
+        bids, asks = bid_buckets[: self.depth], ask_buckets[: self.depth]
+        best_bid = Decimal(bids[0]["price"]) if bids else None
+        best_ask = Decimal(asks[0]["price"]) if asks else None
+        mid = (best_bid + best_ask) / 2 if best_bid is not None and best_ask is not None else None
+        spread = best_ask - best_bid if best_bid is not None and best_ask is not None else None
+        bid_depth = sum((Decimal(level["total_quantity"]) for level in bids), Decimal("0"))
+        ask_depth = sum((Decimal(level["total_quantity"]) for level in asks), Decimal("0"))
+        imbalance = (bid_depth - ask_depth) / (bid_depth + ask_depth) if bid_depth + ask_depth else None
+        return {"schema_version": 1, "event_type": "aggregated_book", "instrument": instrument, "generated_ts_ms": now_ms, "depth": self.depth, "price_tick": str(tick), "bucket_method": "effective_price_bid_floor_ask_ceiling_uncrossed", "taker_fees": {venue: self._fmt(fee) for venue, fee in sorted(self.taker_fees.items())}, "venues": sorted(active), "stale_venues": stale, "bids": bids, "asks": asks, "best_bid": self._fmt(best_bid), "best_ask": self._fmt(best_ask), "mid_price": self._fmt(mid), "spread": self._fmt(spread), "bid_depth": self._fmt(bid_depth), "ask_depth": self._fmt(ask_depth), "imbalance": self._fmt(imbalance)}
 
     def spot_snapshot(self, bucket: int, instrument: str, state: dict[str, Any]) -> dict[str, Any]:
         now_ms = int(time.time() * 1000)
@@ -141,6 +156,36 @@ class MarketAggregator:
 
     def candle_snapshot(self, instrument: str) -> list[dict[str, Any]]:
         return [{"instrument": instrument, "bucket_start_ts_ms": start, "open": self._fmt(s["open"]), "high": self._fmt(s["high"]), "low": self._fmt(s["low"]), "close": self._fmt(s["close"]), "volume": self._fmt(s["volume"]), "vwap": self._fmt(s["notional"] / s["volume"])} for start, s in sorted(self.trade_buckets.items()) if s["volume"] > 0]
+
+    def resampled_bars(self, instrument: str, frequencies_ms: Mapping[str, int] | None = None) -> list[dict[str, Any]]:
+        """Return completed multi-frequency bars from retained 10-second buckets."""
+        frequencies_ms = frequencies_ms or DEFAULT_BAR_FREQUENCIES_MS
+        bars: list[dict[str, Any]] = []
+        current_bucket = max(self.trade_buckets, default=0)
+        for frequency, interval in frequencies_ms.items():
+            grouped: dict[int, list[dict[str, Any]]] = defaultdict(list)
+            for start, state in self.trade_buckets.items():
+                if state["volume"] <= 0:
+                    continue
+                grouped[(start // interval) * interval].append(state | {"start": start})
+            for start, parts in sorted(grouped.items()):
+                end = start + interval
+                if end > current_bucket:
+                    continue
+                parts.sort(key=lambda part: part["start"])
+                notional = sum((part["notional"] for part in parts), Decimal("0"))
+                volume = sum((part["volume"] for part in parts), Decimal("0"))
+                delta = sum((part["delta"] for part in parts), Decimal("0"))
+                venue_prices = {}
+                for venue in sorted({venue for part in parts for venue in part["venues"]}):
+                    venue_state = {
+                        key: sum((part["venues"].get(venue, {}).get(key, Decimal("0")) for part in parts), Decimal("0"))
+                        for key in ("price_sum", "trade_count")
+                    }
+                    if venue_state["trade_count"]:
+                        venue_prices[venue] = self._fmt(venue_state["price_sum"] / venue_state["trade_count"])
+                bars.append({"schema_version": 1, "event_type": "market_bar", "instrument": instrument, "frequency": frequency, "interval_ms": interval, "bucket_start_ts_ms": start, "bucket_end_ts_ms": end, "open": self._fmt(parts[0]["open"]), "high": self._fmt(max(part["high"] for part in parts)), "low": self._fmt(min(part["low"] for part in parts)), "close": self._fmt(parts[-1]["close"]), "vwap": self._fmt(notional / volume), "volume": self._fmt(volume), "delta": self._fmt(delta), "trade_count": sum(part["trade_count"] for part in parts), "venue_count": len(venue_prices), "venue_prices": venue_prices})
+        return bars
 
     def export_candle_state(self) -> dict[str, Any]:
         """Return the complete candle state in JSON-safe Decimal form."""
@@ -193,7 +238,6 @@ class MarketAggregator:
                 }
             restored[start] = state
         self.trade_buckets = restored
-        self.cvd = sum((state["delta"] for state in restored.values()), Decimal("0"))
         return len(restored)
 
     def restore_candle_snapshot(self, rows: list[dict[str, Any]]) -> int:
@@ -209,16 +253,6 @@ class MarketAggregator:
                 "delta": "0", "venues": {},
             })
         return self.restore_candle_state(payload)
-
-    def cvd_snapshot(self, instrument: str) -> list[dict[str, Any]]:
-        cumulative = Decimal("0")
-        rows = []
-        for start, state in sorted(self.trade_buckets.items()):
-            if state["volume"] <= 0:
-                continue
-            cumulative += state["delta"]
-            rows.append({"instrument": instrument, "bucket_start_ts_ms": start, "delta": self._fmt(state["delta"]), "cvd": self._fmt(cumulative)})
-        return rows
 
     def _levels(self, raw: list[dict[str, Any]], reverse: bool) -> list[tuple[Decimal, Decimal]]:
         levels = [(_dec(level["price"]), _dec(level["quantity"])) for level in raw]
@@ -290,7 +324,7 @@ class MarketAggregator:
 
     def _trim_buckets(self, current: int) -> None:
         for start in list(self.trade_buckets):
-            if start < current - 60 * 60 * 1000:
+            if start < current - self.history_ms:
                 del self.trade_buckets[start]
 
     def _remember_event(self, event: dict[str, Any]) -> None:
