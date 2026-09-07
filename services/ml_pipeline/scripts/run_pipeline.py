@@ -26,7 +26,10 @@ def main() -> None:
                           "model_version": args.model_version},
         enable_caching=False,
     )
-    job.run(service_account=args.service_account, sync=False)
+    # `run(sync=False)` submits from a background thread, so its resource name
+    # is not safe to read immediately. Submit synchronously, then let Vertex
+    # execute the pipeline asynchronously.
+    job.submit(service_account=args.service_account)
     print(job.resource_name)
 
 
