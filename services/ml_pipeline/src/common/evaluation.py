@@ -48,6 +48,10 @@ def retrain_decision(current: dict, champion: dict, *, degradation_threshold: fl
                      benchmark_margin: float = .02, consecutive_failures: int = 2,
                      prior_failures: int = 0,
                      last_triggered_at: str | None = None, cooldown_hours: float = 6) -> dict:
+    # Champion artifacts store each horizon's metrics flat, while evaluation
+    # results wrap them under ``metrics``. Normalize both forms at the boundary.
+    if "metrics" not in champion:
+        champion = {"metrics": champion}
     current_metrics, champion_metrics = current["metrics"], champion["metrics"]
     metric = "qlike" if "qlike" in current_metrics and "qlike" in champion_metrics else "rmse"
     qlike_change = (current_metrics[metric] - champion_metrics[metric]) / max(abs(champion_metrics[metric]), 1e-12)

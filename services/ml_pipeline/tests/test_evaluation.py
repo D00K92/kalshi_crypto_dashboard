@@ -22,3 +22,12 @@ def test_retrain_requires_two_degraded_windows() -> None:
     champion = {"metrics": {"rmse": 1.0, "mae": 1.0}}
     assert not retrain_decision(current, champion)["trigger_retraining"]
     assert retrain_decision(current, champion, prior_failures=1)["trigger_retraining"]
+
+
+def test_retrain_accepts_flat_champion_metrics() -> None:
+    current = {"metrics": {"qlike": -0.9, "rmse": 0.1, "mae": 0.1}}
+    champion = {"qlike": -0.8, "rmse": 0.2, "mae": 0.2}
+
+    decision = retrain_decision(current, champion)
+
+    assert "qlike_change" in decision
