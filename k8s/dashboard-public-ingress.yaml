@@ -1,0 +1,54 @@
+# The dashboard remains a ClusterIP service.  This is its only public entry
+# point, backed by a Google external Application Load Balancer.
+apiVersion: cloud.google.com/v1
+kind: BackendConfig
+metadata:
+  name: crypto-dashboard-backend
+spec:
+  healthCheck:
+    type: HTTP
+    port: 8050
+    requestPath: /healthz
+    checkIntervalSec: 15
+    timeoutSec: 5
+    healthyThreshold: 1
+    unhealthyThreshold: 2
+---
+apiVersion: networking.gke.io/v1
+kind: ManagedCertificate
+metadata:
+  name: crypto-dashboard-cert
+spec:
+  domains:
+  - crypto-dashboard.kairos-trading.com
+---
+apiVersion: networking.gke.io/v1beta1
+kind: FrontendConfig
+metadata:
+  name: crypto-dashboard-https
+spec:
+  redirectToHttps:
+    enabled: true
+    responseCodeName: MOVED_PERMANENTLY_DEFAULT
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: crypto-dashboard-public
+  annotations:
+    kubernetes.io/ingress.class: gce
+    kubernetes.io/ingress.global-static-ip-name: crypto-dashboard-public-ip
+    networking.gke.io/managed-certificates: crypto-dashboard-cert
+    networking.gke.io/v1beta1.FrontendConfig: crypto-dashboard-https
+spec:
+  rules:
+  - host: crypto-dashboard.kairos-trading.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: dashboard
+            port:
+              name: http

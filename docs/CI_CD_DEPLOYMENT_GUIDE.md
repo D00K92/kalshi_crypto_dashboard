@@ -150,7 +150,18 @@ A production deployment is complete when **Deploy Services** is successful. The 
 
 ## Dashboard Access
 
-The dashboard Kubernetes Service is currently internal (`ClusterIP`). It does not have a public internet URL by default.
+The dashboard Kubernetes Service remains internal (`ClusterIP`). Its public,
+read-only portfolio URL is served by the GKE external HTTPS load balancer:
+
+```text
+https://crypto-dashboard.kairos-trading.com
+```
+
+The ingress redirects HTTP to HTTPS and uses a Google-managed certificate. The
+Cloudflare DNS record must point at the reserved global address named
+`crypto-dashboard-public-ip`. Keep Cloudflare set to **DNS only** while the
+Google certificate is provisioning. Once the certificate is `Active`, Cloudflare
+may be proxied with SSL/TLS mode set to **Full (strict)**.
 
 For temporary local access, use a port-forward:
 

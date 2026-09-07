@@ -173,6 +173,7 @@ jobs:
         envsubst '${DASHBOARD_IMAGE} ${REDIS_HOST} ${REDIS_PORT}' \
           < k8s/dashboard-deployment.yaml \
           | kubectl apply -f -
+        kubectl apply -f k8s/dashboard-public-ingress.yaml
         required='${ANALYTICS_GCP_SERVICE_ACCOUNT} ${VOLATILITY_MODEL_1M} ${VOLATILITY_MODEL_5M} ${VOLATILITY_MODEL_15M} ${VOLATILITY_MODEL_30M} ${VOLATILITY_MODEL_1H}'
         if [[ "${required}" == *'  '* || "${required}" == ' '* || "${required}" == *' ' ]]; then
           echo "Analytics deployment prerequisite missing: configure all analytics repository variables." >&2
