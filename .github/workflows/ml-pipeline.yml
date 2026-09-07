@@ -1,0 +1,102 @@
+name: ML Pipeline CI
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - services/ml_pipeline/**
+      - services/feast_store/**
+      - .github/workflows/ml-pipeline.yml
+  push:
+    branches: [main]
+    paths:
+      - services/ml_pipeline/**
+      - services/feast_store/**
+      - .github/workflows/ml-pipeline.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: ml-pipeline-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GCP_PROJECT_ID: kalshi-crypto-506614
+  GCP_REGION: asia-northeast3
+  GAR_REPOSITORY: ml-pipeline
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [feast_store, ml_pipeline]
+    defaults:
+      run:
+        working-directory: services/${{ matrix.service }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.12.6"
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: services/${{ matrix.service }}/uv.lock
+      - run: uv sync --locked
+      - run: uv run --locked pytest
+
+  publish:
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: projects/229993998036/locations/global/workloadIdentityPools/github-pool/providers/github-provider
+          service_account: gh-actions-deployer@kalshi-crypto-506614.iam.gserviceaccount.com
+      - uses: google-github-actions/setup-gcloud@v3
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+      - run: gcloud auth configure-docker "${GCP_REGION}-docker.pkg.dev" --quiet
+      - name: Build and publish immutable task images
+        env:
+          IMAGE_ROOT: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          for task in load train evaluate register; do
+            image="${IMAGE_ROOT}/ml-${task}:${IMAGE_TAG}"
+            docker build --platform linux/amd64 \
+              -f "services/ml_pipeline/containers/${task}/Dockerfile" \
+              -t "${image}" .
+            docker push "${image}"
+          done
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.12.6"
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: services/ml_pipeline/uv.lock
+      - name: Compile immutable Vertex template
+        working-directory: services/ml_pipeline
+        env:
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          uv sync --locked
+          uv run --locked python scripts/compile_pipeline.py \
+            --output "pipeline-${IMAGE_TAG}.yaml" --image-tag "${IMAGE_TAG}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vertex-pipeline-${{ github.sha }}
+          path: services/ml_pipeline/pipeline-${{ github.sha }}.yaml
+          if-no-files-found: error

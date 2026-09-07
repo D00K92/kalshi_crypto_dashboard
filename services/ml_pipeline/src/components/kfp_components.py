@@ -1,13 +1,16 @@
 """KFP container components for the production Vertex pipeline."""
 
+import os
+
 from kfp import dsl
 from kfp.dsl import Dataset, Input, Model, Output
 
-REGISTRY = "asia-northeast3-docker.pkg.dev/kalshi-crypto-506614/ml-pipeline"
-LOAD_IMAGE = f"{REGISTRY}/ml-load:v1"
-TRAIN_IMAGE = f"{REGISTRY}/ml-train:v1"
-EVALUATE_IMAGE = f"{REGISTRY}/ml-evaluate:v1"
-REGISTER_IMAGE = f"{REGISTRY}/ml-register:v1"
+REGISTRY = os.getenv("ML_PIPELINE_REGISTRY", "asia-northeast3-docker.pkg.dev/kalshi-crypto-506614/ml-pipeline")
+IMAGE_TAG = os.getenv("ML_PIPELINE_IMAGE_TAG", "v1")
+LOAD_IMAGE = f"{REGISTRY}/ml-load:{IMAGE_TAG}"
+TRAIN_IMAGE = f"{REGISTRY}/ml-train:{IMAGE_TAG}"
+EVALUATE_IMAGE = f"{REGISTRY}/ml-evaluate:{IMAGE_TAG}"
+REGISTER_IMAGE = f"{REGISTRY}/ml-register:{IMAGE_TAG}"
 
 
 @dsl.container_component

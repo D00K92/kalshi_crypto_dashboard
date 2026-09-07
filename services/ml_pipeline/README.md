@@ -42,9 +42,17 @@ Inference prediction records should be written under
 Compile and submit from the unified repository environment:
 
 ```bash
-uv run --directory services/ml_pipeline python scripts/compile_pipeline.py
+uv run --directory services/ml_pipeline python scripts/compile_pipeline.py \
+  --image-tag <immutable-git-sha>
 uv run --directory services/ml_pipeline python scripts/run_pipeline.py ...
 ```
+
+`ML Pipeline CI` runs the Feast and ML test suites and, on a `main` change to
+either service, publishes `ml-load`, `ml-train`, `ml-evaluate`, and
+`ml-register` with the immutable commit SHA. It also uploads a compiled Vertex
+template that references those exact images. Image publication does not submit
+or promote a model; use `run_pipeline.py` with a completed training range and
+record the resulting Vertex resources before changing analytics variables.
 
 Historical feature retrieval is centralized in
 `src/common/data_io.py::load_training_table_from_feast`; Feast configuration is
