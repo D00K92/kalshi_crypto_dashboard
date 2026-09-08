@@ -28,22 +28,29 @@ async def main(wait_seconds: int) -> None:
     await client.ping()
     now = int(time.time() * 1000)
     books = [event_book("binance", "100", "101", "book-binance", now), event_book("coinbase", "100", "101", "book-coinbase", now)]
-    trades = [event_trade("binance", "100", "1", "buy", "trade-binance", now), event_trade("coinbase", "110", "3", "sell", "trade-coinbase", now)]
+    # A later bucket closes the first completed 10-second primitive bar.
+    now = (now // 10_000) * 10_000
+    trades = [
+        event_trade("binance", "100", "1", "buy", "trade-binance", now),
+        event_trade("coinbase", "110", "3", "sell", "trade-coinbase", now),
+        event_trade("binance", "100", "1", "buy", "trade-binance-boundary", now + 10_000),
+        event_trade("coinbase", "110", "3", "sell", "trade-coinbase-boundary", now + 10_000),
+    ]
     for stream, events in ((book_stream, books), (trade_stream, trades)):
         for event in events:
             await client.xadd(stream, {"event_id": event["event_id"], "event_type": event["event_type"], "payload": orjson.dumps(event)})
     deadline = time.monotonic() + wait_seconds
-    book = spot = feature = None
+    book = spot = primitive = None
     while time.monotonic() < deadline:
         book_raw = await client.get(f"{prefix}:book:BTCUSDT:latest")
         spot_raw = await client.get(f"{prefix}:spot:BTCUSDT:latest")
-        feature_raw = await client.get(f"{prefix}:features:v1:BTCUSD:latest")
-        if book_raw and spot_raw and feature_raw:
-            book, spot, feature = orjson.loads(book_raw), orjson.loads(spot_raw), orjson.loads(feature_raw)
+        primitive_raw = await client.get(f"{prefix}:primitive:binance:10s:latest")
+        if book_raw and spot_raw and primitive_raw:
+            book, spot, primitive = orjson.loads(book_raw), orjson.loads(spot_raw), orjson.loads(primitive_raw)
             break
         await asyncio.sleep(0.25)
-    if not book or not spot or not feature:
-        raise AssertionError("aggregator did not publish book, spot, and feature state")
+    if not book or not spot or not primitive:
+        raise AssertionError("aggregator did not publish book, spot, and completed 10s primitive state")
     assert spot["method"] == "simple_average_fresh_venues", spot
     assert spot["price"] == "105", spot
     assert spot["total_volume"] == "4", spot
@@ -51,9 +58,10 @@ async def main(wait_seconds: int) -> None:
     assert book["bids"][0]["venues"] == {"binance": "2", "coinbase": "2"}, book
     assert len(book["bids"]) <= 10 and len(book["asks"]) <= 10
     assert await client.exists(f"{prefix}:candles:BTCUSDT:30s")
-    assert feature["feature_set"] == "market_features"
-    assert feature["feature_version"] == "v1"
-    assert feature["values"]["venue_count"] >= 1
+    assert primitive["event_type"] == "primitive_bar"
+    assert primitive["frequency"] == "10s"
+    assert primitive["interval_ms"] == 10_000
+    assert primitive["bucket_start_ts_ms"] == now
     print("aggregator integration test passed")
     await client.aclose()
 
