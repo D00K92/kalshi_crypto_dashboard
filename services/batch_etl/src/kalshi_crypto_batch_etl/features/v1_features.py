@@ -14,7 +14,7 @@ import pandas as pd
 
 WINDOWS_SECONDS = (30, 60, 300, 900, 1800, 3600)
 BOOK_LEVELS = (1, 5, 10)
-FREQUENCY_LABELS = {1: "1s", 5: "5s", 60: "1m", 300: "5m", 600: "10m", 900: "15m", 1800: "30m", 3600: "1h"}
+FREQUENCY_LABELS = {10: "10s"}
 
 
 def _ratio(numerator: pd.Series, denominator: pd.Series) -> pd.Series:

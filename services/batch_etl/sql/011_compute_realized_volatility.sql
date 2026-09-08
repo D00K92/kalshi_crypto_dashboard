@@ -1,9 +1,9 @@
 -- BigQuery-native venue-agnostic realized-volatility features.
--- Input is the canonical 1-minute bars table.  The synthetic price is the
--- equal-weight mean of available venue trade prices at each minute.
+-- Input is the canonical 10-second bars table.  The synthetic price is the
+-- equal-weight mean of available venue trade prices at each 10-second bar.
 -- @target_start and @target_end bound the output hour; the three-hour
 -- lookback is included so the 3h window is complete at the first output row.
-DECLARE annualization_factor FLOAT64 DEFAULT 365 * 24 * 60;
+DECLARE annualization_factor FLOAT64 DEFAULT 365 * 24 * 60 * 60;
 
 MERGE `${project}.feature_store.realized_volatility_v1` AS target
 USING (
@@ -13,7 +13,7 @@ USING (
       AVG(COALESCE(p_trade_mean, p_trade)) AS synthetic_price,
       COUNTIF(COALESCE(p_trade_mean, p_trade) IS NOT NULL) AS venue_count
     FROM `${project}.market_data.bars`
-    WHERE frequency = '1m'
+    WHERE frequency = '10s'
       AND event_timestamp >= TIMESTAMP_SUB(@target_start, INTERVAL 3 HOUR)
       AND event_timestamp < @target_end
     GROUP BY event_timestamp
@@ -65,14 +65,14 @@ USING (
     'BTC' AS asset,
     event_timestamp,
     CURRENT_TIMESTAMP() AS created_timestamp,
-    '1m' AS source_frequency,
+    '10s' AS source_frequency,
     'v1' AS feature_version,
     synthetic_price,
     log_return,
     venue_count,
-    IF(observations_1h >= 45,
+    IF(observations_1h >= 360,
        SQRT(sum_sq_1h * annualization_factor), NULL) AS realized_vol_1h,
-    IF(observations_3h >= 135,
+    IF(observations_3h >= 1080,
        SQRT(sum_sq_3h * annualization_factor), NULL) AS realized_vol_3h
   FROM windows
   WHERE event_timestamp >= @target_start

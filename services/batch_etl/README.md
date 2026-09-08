@@ -14,7 +14,7 @@ gs://<bucket>/books/venue=<venue>/instrument=<instrument>/date=<yyyy-mm-dd>/hour
 Default processed output layout:
 
 ```text
-gs://<bucket>/processed/resampled_market_data/frequency=<1s|5s|1m|5m|10m|30m|1h>/date=<yyyy-mm-dd>/hour=<hh>/venue=<venue>/*.parquet
+gs://<bucket>/processed/resampled_market_data/frequency=<10s>/date=<yyyy-mm-dd>/hour=<hh>/venue=<venue>/*.parquet
 ```
 
 The resampling job applies these data semantics:
@@ -54,7 +54,7 @@ Run a specific hour manually from the unified development environment:
 ../../.venv/bin/python scripts/run_hourly_resampling.py \
   --target-hour 2026-09-01T08:00:00Z \
   --venues binance \
-  --frequencies 1s
+  --frequencies 10s
 ```
 
 `BATCH_ETL_VENUES`, `BATCH_ETL_FREQUENCIES`, `GCS_BUCKET_NAME`, and

@@ -51,7 +51,7 @@ spec:
             - name: BATCH_ETL_VENUES
               value: "binance,bitstamp,coinbase,crypto.com,gemini,kraken"
             - name: BATCH_ETL_FREQUENCIES
-              value: "1s,5s,1m,5m,10m,30m,1h"
+              value: "10s"
             - name: BATCH_ETL_BIGQUERY_TABLE
               value: "bars"
             - name: DASK_TEMPORARY_DIRECTORY

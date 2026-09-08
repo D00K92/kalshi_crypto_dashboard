@@ -34,7 +34,7 @@ else:
     )
 
 
-PRODUCTION_FREQUENCIES = ("1s", "5s", "1m", "5m", "10m", "15m", "30m", "1h")
+PRODUCTION_FREQUENCIES = ("10s",)
 BIGQUERY_BAR_COLUMNS = (
     "event_timestamp", "created_timestamp", "venue", "instrument", "frequency",
     "p_open", "p_high", "p_low", "p_close", "p_trade", "p_trade_mean",
@@ -43,6 +43,7 @@ BIGQUERY_BAR_COLUMNS = (
         f"p_bid_{level}", f"p_ask_{level}", f"q_bid_{level}", f"q_ask_{level}")],
 )
 EXPECTED_ROWS_PER_HOUR = {
+    "10s": 360,
     "1s": 3600,
     "5s": 720,
     "1m": 60,

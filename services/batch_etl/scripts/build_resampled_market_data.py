@@ -48,6 +48,7 @@ VENUES = {
     "kraken": "BTC_USD",
 }
 FREQUENCIES = {
+    "10s": "10s",
     "1s": "1s",
     "5s": "5s",
     "1m": "1min",
@@ -377,7 +378,7 @@ def main() -> None:
     parser.add_argument("--end-date", required=True, type=date.fromisoformat)
     parser.add_argument("--venue", choices=(*VENUES, "all"), default="all")
     parser.add_argument("--hour", help="optional UTC hour (00-23) for bounded validation/backfills")
-    parser.add_argument("--frequency", choices=FREQUENCIES, default="1s")
+    parser.add_argument("--frequency", choices=FREQUENCIES, default="10s")
     parser.add_argument(
         "--output",
         help=(

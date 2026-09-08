@@ -8,9 +8,9 @@ import numpy as np
 import pandas as pd
 
 VENUES = ("binance", "bitstamp", "coinbase", "crypto.com", "gemini", "kraken")
-FREQUENCIES = {"1s": 1, "5s": 5, "1m": 60, "5m": 300, "10m": 600, "15m": 900, "30m": 1800, "1h": 3600}
-HORIZONS = (60, 300, 900, 1800, 3600)
-LABELS = {60: "1m", 300: "5m", 900: "15m", 1800: "30m", 3600: "1h"}
+FREQUENCIES = {"10s": 10}
+HORIZONS = (300, 900, 1800, 3600)
+LABELS = {300: "5m", 900: "15m", 1800: "30m", 3600: "1h"}
 SECONDS_PER_YEAR = 365 * 24 * 60 * 60  # crypto trades continuously
 
 def _paths(fs, bucket, dataset, venue, frequency, hour):

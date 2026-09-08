@@ -35,7 +35,7 @@ def main() -> None:
     venues, frequencies = tuple(args.venues.split(',')), tuple(args.frequencies.split(','))
     frames = {}
     for frequency in frequencies:
-        seconds = int({'1s': 1, '5s': 5, '1m': 60, '5m': 300, '10m': 600, '30m': 1800, '1h': 3600}[frequency])
+        seconds = int({'10s': 10}[frequency])
         loaded = {}
         for venue in venues:
             try:

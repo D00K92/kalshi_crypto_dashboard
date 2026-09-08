@@ -46,7 +46,7 @@ The following replaces only the requested BigQuery hour:
 ```bash
 PYTHONPATH=.:src uv run python scripts/run_hourly_resampling.py \
   --target-hour 2026-09-01T08:00:00Z \
-  --venues binance --frequencies 1m --bigquery-table bars
+  --venues binance --frequencies 10s --bigquery-table bars
 ```
 
 ### BigQuery realized-volatility features
@@ -62,7 +62,7 @@ uv run python scripts/run_bigquery_features.py \
 ```
 
 `011_compute_realized_volatility.sql` computes an equal-weight mean of all
-available venue `1m` trade prices, log returns, and annualized realized
+available venue `10s` trade prices, log returns, and annualized realized
 volatility over 1-hour and 3-hour rolling windows. It requires at least 45 and
 135 observations respectively, so sparse input produces `NULL` instead of a
 misleading value. BigQuery performs the aggregation and window functions;
@@ -83,7 +83,7 @@ uv run python scripts/backfill_bigquery.py \
   --start-hour 2026-08-31T08:00:00Z \
   --end-hour 2026-09-03T08:00:00Z \
   --resample-only \
-  --frequencies 1m \
+  --frequencies 10s \
   --parallelism 3
 ```
 
