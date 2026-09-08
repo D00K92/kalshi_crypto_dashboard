@@ -39,6 +39,12 @@ jobs:
           - service: batch-etl
             path: services/batch_etl
             python_version: "3.12"
+          - service: live-feature-service
+            path: services/live_feature_service
+            python_version: "3.12"
+          - service: model-serving
+            path: services/model_serving
+            python_version: "3.12"
     defaults:
       run:
         working-directory: ${{ matrix.path }}
@@ -57,10 +63,20 @@ jobs:
           cache-dependency-glob: ${{ matrix.path }}/uv.lock
 
       - name: Install locked dependencies
-        run: uv sync --locked
+        run: |
+          if [[ -f uv.lock ]]; then
+            uv sync --locked
+          else
+            uv sync
+          fi
 
       - name: Run tests
-        run: uv run --locked pytest
+        run: |
+          if [[ -f uv.lock ]]; then
+            uv run --locked pytest
+          else
+            uv run pytest
+          fi
 
   docker-builds:
     name: Docker build - ${{ matrix.service }}
@@ -82,6 +98,10 @@ jobs:
             context: services/analytics
           - service: batch-etl
             context: services/batch_etl
+          - service: live-feature-service
+            context: services/live_feature_service
+          - service: model-serving
+            context: services/model_serving
     steps:
       - name: Check out repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1

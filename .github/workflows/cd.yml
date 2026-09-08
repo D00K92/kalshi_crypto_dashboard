@@ -89,6 +89,24 @@ jobs:
         docker build --platform linux/amd64 -t "${IMAGE_URI}:${IMAGE_TAG}" services/feast_store
         docker push "${IMAGE_URI}:${IMAGE_TAG}"
 
+    - name: Build and push live feature service image
+      env:
+        IMAGE_URI: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/live-feature-service
+        IMAGE_TAG: ${{ github.event.workflow_run.head_sha || github.sha }}
+      run: |
+        set -euo pipefail
+        docker build --platform linux/amd64 -t "${IMAGE_URI}:${IMAGE_TAG}" services/live_feature_service
+        docker push "${IMAGE_URI}:${IMAGE_TAG}"
+
+    - name: Build and push model serving image
+      env:
+        IMAGE_URI: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/model-serving
+        IMAGE_TAG: ${{ github.event.workflow_run.head_sha || github.sha }}
+      run: |
+        set -euo pipefail
+        docker build --platform linux/amd64 -t "${IMAGE_URI}:${IMAGE_TAG}" services/model_serving
+        docker push "${IMAGE_URI}:${IMAGE_TAG}"
+
     - name: Build and push dashboard image
       env:
         IMAGE_URI: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/dashboard
@@ -143,6 +161,8 @@ jobs:
         INGESTION_IMAGE: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/ingestion:${{ github.event.workflow_run.head_sha || github.sha }}
         AGGREGATOR_IMAGE: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/aggregator:${{ github.event.workflow_run.head_sha || github.sha }}
         FEAST_STORE_IMAGE: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/feast-store:${{ github.event.workflow_run.head_sha || github.sha }}
+        LIVE_FEATURE_SERVICE_IMAGE: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/live-feature-service:${{ github.event.workflow_run.head_sha || github.sha }}
+        MODEL_SERVING_IMAGE: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/model-serving:${{ github.event.workflow_run.head_sha || github.sha }}
         DASHBOARD_IMAGE: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/dashboard:${{ github.event.workflow_run.head_sha || github.sha }}
         ANALYTICS_IMAGE: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/analytics:${{ github.event.workflow_run.head_sha || github.sha }}
         ANALYTICS_GCP_SERVICE_ACCOUNT: ${{ vars.ANALYTICS_GCP_SERVICE_ACCOUNT }}
@@ -164,6 +184,9 @@ jobs:
         envsubst '${AGGREGATOR_IMAGE} ${REDIS_HOST} ${REDIS_PORT}' \
           < k8s/aggregator-deployment.yaml \
           | kubectl apply -f -
+        envsubst '${LIVE_FEATURE_SERVICE_IMAGE} ${REDIS_HOST} ${REDIS_PORT}' \
+          < k8s/live-feature-service-deployment.yaml \
+          | kubectl apply -f -
         envsubst '${FEAST_STORE_IMAGE} ${REDIS_HOST}' \
           < k8s/feast-live-bridge-deployment.yaml \
           | kubectl apply -f -
@@ -174,6 +197,9 @@ jobs:
           < k8s/dashboard-deployment.yaml \
           | kubectl apply -f -
         kubectl apply -f k8s/dashboard-public-ingress.yaml
+        envsubst '${MODEL_SERVING_IMAGE}' \
+          < k8s/model-serving-deployment.yaml \
+          | kubectl apply -f -
         required='${ANALYTICS_GCP_SERVICE_ACCOUNT} ${VOLATILITY_MODEL_1M} ${VOLATILITY_MODEL_5M} ${VOLATILITY_MODEL_15M} ${VOLATILITY_MODEL_30M} ${VOLATILITY_MODEL_1H}'
         if [[ "${required}" == *'  '* || "${required}" == ' '* || "${required}" == *' ' ]]; then
           echo "Analytics deployment prerequisite missing: configure all analytics repository variables." >&2
@@ -195,8 +221,10 @@ jobs:
         kubectl rollout status deployment/gcs-exporter --timeout=5m
         kubectl rollout status deployment/ingestion-service --timeout=5m
         kubectl rollout status deployment/aggregator --timeout=5m
+        kubectl rollout status deployment/live-feature-service --timeout=5m
         kubectl rollout status deployment/feast-live-bridge --timeout=5m
         kubectl rollout status deployment/feast-server --timeout=5m
+        kubectl rollout status deployment/model-serving --timeout=5m
         kubectl rollout status deployment/dashboard --timeout=5m
         if ! kubectl rollout status deployment/analytics --timeout=5m; then
           echo "Analytics container did not become ready. Running pods with a failed /readyz usually indicate a missing/invalid model artifact, IAM grant, live feature, spot, ticker, or Kalshi metadata prerequisite." >&2

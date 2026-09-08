@@ -30,7 +30,7 @@ spec:
             drop: ["ALL"]
         env:
         - name: REDIS_URL
-          value: "${REDIS_URL}"
+          value: "redis://${REDIS_HOST}:${REDIS_PORT}/0"
         - name: BARS_STREAM
           value: "stream:bars:v1"
         - name: FEATURE_STREAM
