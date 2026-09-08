@@ -6,14 +6,12 @@ from decimal import Decimal, ROUND_CEILING, ROUND_DOWN
 import time
 from typing import Any, Mapping
 
-CANDLE_INTERVAL_MS = 30_000
+# Ten seconds is the canonical live primitive interval.  Longer market views
+# (including the dashboard's 30-second candle feed) are derived from these
+# completed buckets, never the other way around.
+CANDLE_INTERVAL_MS = 10_000
 DEFAULT_BAR_FREQUENCIES_MS = {
-    "1m": 60_000,
-    "5m": 300_000,
-    "10m": 600_000,
-    "15m": 900_000,
-    "30m": 1_800_000,
-    "1h": 3_600_000,
+    "10s": CANDLE_INTERVAL_MS,
 }
 
 
@@ -259,8 +257,28 @@ class MarketAggregator:
         candidates = [bucket for bucket, books in self.book_buckets.items() if bucket < end_ts_ms and venue in books]
         return self.book_buckets[max(candidates)][venue] if candidates else None
 
-    def candle_snapshot(self, instrument: str) -> list[dict[str, Any]]:
-        return [{"instrument": instrument, "bucket_start_ts_ms": start, "open": self._fmt(s["open"]), "high": self._fmt(s["high"]), "low": self._fmt(s["low"]), "close": self._fmt(s["close"]), "volume": self._fmt(s["volume"]), "vwap": self._fmt(s["notional"] / s["volume"])} for start, s in sorted(self.trade_buckets.items()) if s["volume"] > 0]
+    def candle_snapshot(self, instrument: str, interval_ms: int = CANDLE_INTERVAL_MS) -> list[dict[str, Any]]:
+        """Return dashboard candles resampled from canonical 10-second buckets."""
+        if interval_ms <= 0 or interval_ms % CANDLE_INTERVAL_MS:
+            raise ValueError("candle snapshot interval must be a multiple of 10 seconds")
+        grouped: dict[int, list[dict[str, Any]]] = defaultdict(list)
+        for start, state in self.trade_buckets.items():
+            if state["volume"] > 0:
+                grouped[(start // interval_ms) * interval_ms].append(state | {"start": start})
+        candles = []
+        for start, parts in sorted(grouped.items()):
+            parts.sort(key=lambda part: part["start"])
+            volume = sum((part["volume"] for part in parts), Decimal("0"))
+            if not volume:
+                continue
+            candles.append({"instrument": instrument, "bucket_start_ts_ms": start,
+                            "open": self._fmt(parts[0]["open"]),
+                            "high": self._fmt(max(part["high"] for part in parts)),
+                            "low": self._fmt(min(part["low"] for part in parts)),
+                            "close": self._fmt(parts[-1]["close"]),
+                            "volume": self._fmt(volume),
+                            "vwap": self._fmt(sum((part["notional"] for part in parts), Decimal("0")) / volume)})
+        return candles
 
     def resampled_bars(self, instrument: str, frequencies_ms: Mapping[str, int] | None = None) -> list[dict[str, Any]]:
         """Return completed multi-frequency bars from retained 10-second buckets."""

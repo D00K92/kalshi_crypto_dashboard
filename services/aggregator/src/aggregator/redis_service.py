@@ -106,7 +106,7 @@ class AggregatorService:
         pipe.publish(f"{prefix}:aggregated_spot", encoded)
         bucket = spot["bucket_start_ts_ms"]
         if bucket != self._last_candle_publish_bucket:
-            frequencies = dict(getattr(self.settings, "bar_frequencies", (("1m", 60_000), ("5m", 300_000), ("10m", 600_000), ("15m", 900_000), ("30m", 1_800_000), ("1h", 3_600_000))))
+            frequencies = dict(getattr(self.settings, "bar_frequencies", (("10s", 10_000),)))
             published_bars = getattr(self, "_published_bars", None)
             if published_bars is None:
                 published_bars = self._published_bars = set()
@@ -129,8 +129,10 @@ class AggregatorService:
                 encoded_primitive = orjson.dumps(primitive)
                 pipe.xadd(getattr(self.settings, "primitive_stream", "stream:primitives:v1"), {"payload": encoded_primitive}, maxlen=getattr(self.settings, "primitive_maxlen", 50_000), approximate=True)
                 pipe.set(f"{prefix}:primitive:{primitive['venue']}:{primitive['frequency']}:latest", encoded_primitive)
-            candles = orjson.dumps(self.state.candle_snapshot("BTCUSDT"))
-            pipe.set(f"{prefix}:candle_state:BTCUSDT:30s", orjson.dumps(self.state.export_candle_state()))
+            # Keep the dashboard's public 30-second contract while deriving it
+            # from the 10-second canonical state.
+            candles = orjson.dumps(self.state.candle_snapshot("BTCUSDT", interval_ms=30_000))
+            pipe.set(f"{prefix}:candle_state:BTCUSDT:10s", orjson.dumps(self.state.export_candle_state()))
             pipe.set(f"{prefix}:candles:BTCUSDT:30s", candles)
             pipe.publish(f"{prefix}:aggregated_candles", candles)
             self._last_candle_publish_bucket = bucket
@@ -147,19 +149,19 @@ class AggregatorService:
 
     async def _restore_candles(self) -> None:
         prefix = self.settings.output_prefix
-        state_key = f"{prefix}:candle_state:BTCUSDT:30s"
+        state_key = f"{prefix}:candle_state:BTCUSDT:10s"
         raw_state = await self.client.get(state_key)
         try:
             if raw_state:
                 loaded = self.state.restore_candle_state(orjson.loads(raw_state))
             else:
-                raw_candles = await self.client.get(f"{prefix}:candles:BTCUSDT:30s")
+                raw_candles = await self.client.get(f"{prefix}:candles:BTCUSDT:10s")
                 loaded = self.state.restore_candle_snapshot(orjson.loads(raw_candles)) if raw_candles else 0
                 if loaded:
                     await self.client.set(state_key, orjson.dumps(self.state.export_candle_state()))
             if loaded:
                 LOGGER.info("candles_restored", extra={"buckets": loaded})
-                frequencies = dict(getattr(self.settings, "bar_frequencies", (("1m", 60_000), ("5m", 300_000), ("10m", 600_000), ("15m", 900_000), ("30m", 1_800_000), ("1h", 3_600_000))))
+                frequencies = dict(getattr(self.settings, "bar_frequencies", (("10s", 10_000),)))
                 self._published_bars.update(
                     (bar["frequency"], bar["bucket_start_ts_ms"])
                     for bar in self.state.resampled_bars("BTCUSDT", frequencies)

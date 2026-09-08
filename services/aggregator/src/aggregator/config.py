@@ -80,7 +80,7 @@ class Settings:
             orderbook_maxlen=_int("AGGREGATED_ORDERBOOK_MAXLEN", 10_000),
             bar_frequencies=tuple(
                 (name, _int(f"BAR_{name.upper()}_MS", milliseconds))
-                for name, milliseconds in (("1m", 60_000), ("5m", 300_000), ("10m", 600_000), ("15m", 900_000), ("30m", 1_800_000), ("1h", 3_600_000))
+                for name, milliseconds in (("10s", 10_000),)
             ),
             history_ms=_int("AGGREGATION_HISTORY_MS", 2 * 60 * 60 * 1000),
             trade_freshness_ms=_int("FEATURE_TRADE_FRESHNESS_MS", 60_000),

@@ -160,6 +160,29 @@ def test_primitive_bars_are_per_venue_and_forward_fill_empty_intervals():
     assert rows[0]["q_ask_1"] == "3"
 
 
+def test_default_primitive_frequency_is_ten_seconds():
+    agg = MarketAggregator()
+    first = trade("binance", 100, 1, ts=10_000)
+    boundary = trade("binance", 101, 1, ts=20_000)
+    agg.apply_trade(first)
+    agg.apply_trade(boundary)
+
+    rows = agg.primitive_bars("BTCUSDT")
+    assert [(row["frequency"], row["interval_ms"], row["bucket_start_ts_ms"]) for row in rows] == [("10s", 10_000, 10_000)]
+
+
+def test_dashboard_thirty_second_candles_are_resampled_from_ten_second_state():
+    agg = MarketAggregator()
+    for timestamp, price in ((10_000, 100), (20_000, 110), (30_000, 120)):
+        agg.apply_trade(trade("binance", price, 1, ts=timestamp))
+
+    candles = agg.candle_snapshot("BTCUSDT", interval_ms=30_000)
+    assert [(candle["bucket_start_ts_ms"], candle["open"], candle["close"], candle["volume"]) for candle in candles] == [
+        (0, "100", "110", "2"),
+        (30_000, "120", "120", "1"),
+    ]
+
+
 def test_price_bucketing_is_side_aware():
     agg = MarketAggregator(price_tick="1", depth=10)
     now = int(time.time() * 1000)

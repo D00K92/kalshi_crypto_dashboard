@@ -87,7 +87,7 @@ async def test_process_entries_acknowledges_rejected_rows_with_batch(caplog) -> 
     assert "error_type=ValueError error=missing payload" in caplog.text
 
 
-async def test_trade_publishes_candle_state_once_per_thirty_second_bucket() -> None:
+async def test_trade_publishes_ten_second_candle_state_and_resampled_dashboard_candles() -> None:
     service = object.__new__(AggregatorService)
     service.client = TradeRedis()
     service.state = MarketAggregator()
@@ -96,7 +96,7 @@ async def test_trade_publishes_candle_state_once_per_thirty_second_bucket() -> N
 
     first = {"event_id": "one", "event_type": "trade", "venue": "binance", "instrument": "BTCUSDT", "price": "100", "quantity": "1", "taker_side": "buy", "exchange_ts_ms": 10_000, "received_ts_ms": 10_000}
     second = {**first, "event_id": "two", "price": "101", "exchange_ts_ms": 10_001, "received_ts_ms": 10_001}
-    third = {**first, "event_id": "three", "price": "102", "exchange_ts_ms": 30_000, "received_ts_ms": 30_000}
+    third = {**first, "event_id": "three", "price": "102", "exchange_ts_ms": 20_000, "received_ts_ms": 20_000}
 
     await service._handle_trade(first)
     await service._handle_trade(second)
@@ -104,6 +104,6 @@ async def test_trade_publishes_candle_state_once_per_thirty_second_bucket() -> N
 
     state_writes = [
         operation for pipeline in service.client.pipelines for operation in pipeline.operations
-        if operation[0] == "set" and operation[1][0] == "market:candle_state:BTCUSDT:30s"
+        if operation[0] == "set" and operation[1][0] == "market:candle_state:BTCUSDT:10s"
     ]
     assert len(state_writes) == 2
