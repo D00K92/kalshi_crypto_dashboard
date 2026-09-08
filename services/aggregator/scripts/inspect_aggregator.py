@@ -77,13 +77,12 @@ async def inspect(seconds: int) -> None:
             )
         else:
             print("\nmarket:features:v1:BTCUSD:latest: MISSING")
-        print_series("CANDLES", await client.get("market:candles:BTCUSDT:5s"))
-        print_series("CVD", await client.get("market:cvd:BTCUSDT:5s"))
+        print_series("CANDLES", await client.get("market:candles:BTCUSDT:30s"))
 
         if seconds <= 0:
             return
         pubsub = client.pubsub()
-        await pubsub.subscribe("pub:aggregated_orderbook", "pub:aggregated_spot", "pub:aggregated_candles", "pub:aggregated_cvd")
+        await pubsub.subscribe("pub:aggregated_orderbook", "pub:aggregated_spot", "pub:aggregated_candles")
         print(f"\nWatching aggregated updates for {seconds}s...")
         deadline = time.monotonic() + seconds
         while time.monotonic() < deadline:

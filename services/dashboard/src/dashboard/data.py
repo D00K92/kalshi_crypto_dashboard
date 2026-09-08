@@ -48,8 +48,8 @@ class RedisReader:
             values = self.client.mget(
                 f"{self.prefix}:book:{self.instrument}:latest",
                 f"{self.prefix}:spot:{self.instrument}:latest",
-                f"{self.prefix}:candles:{self.instrument}:10s",
-                f"{self.prefix}:cvd:{self.instrument}:10s",
+                f"{self.prefix}:candles:{self.instrument}:30s",
+                f"{self.prefix}:cvd:{self.instrument}:30s",
             )
             kalshi_contracts = self._read_kalshi_contracts()
         except redis.RedisError as exc:
@@ -76,7 +76,7 @@ class RedisReader:
             values = self.client.mget(
                 f"{self.prefix}:book:{self.instrument}:latest",
                 f"{self.prefix}:spot:{self.instrument}:latest",
-                f"{self.prefix}:candles:{self.instrument}:10s",
+                f"{self.prefix}:candles:{self.instrument}:30s",
             )
         except redis.RedisError as exc:
             return {
@@ -118,7 +118,7 @@ class RedisReader:
     def read_candle_data(self) -> dict[str, Any]:
         """Read the candle snapshot at its lower refresh frequency."""
         try:
-            raw = self.client.get(f"{self.prefix}:candles:{self.instrument}:10s")
+            raw = self.client.get(f"{self.prefix}:candles:{self.instrument}:30s")
         except redis.RedisError as exc:
             return {"candles": [], "redis_ok": False, "redis_error": type(exc).__name__}
         return {"candles": decode(raw, []), "redis_ok": True, "redis_error": None}

@@ -47,7 +47,7 @@ def test_market_reader_fetches_only_market_panel_keys():
     assert client.keys == (
         "market:book:BTCUSDT:latest",
         "market:spot:BTCUSDT:latest",
-        "market:candles:BTCUSDT:10s",
+        "market:candles:BTCUSDT:30s",
     )
 
 

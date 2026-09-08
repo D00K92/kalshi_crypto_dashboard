@@ -37,7 +37,7 @@ bootstrap models can produce live prices. Complete Phase A first.
 | GitHub Actions | Workflows were moved to `docs/.github/workflows`; GitHub does not discover workflows there. Commit `422c366` triggered no CI run. | **Yes, for normal deployment** |
 | `ingestion` | GKE Ready `1/1`; crypto and Kalshi streams are populated and advancing. | No |
 | `aggregator` | GKE Ready `1/1`; spot and v1 feature records are fresh. | No |
-| Aggregator staging test | Test expects `5s` candle/CVD keys, while the service intentionally publishes `10s` keys. | **Yes, CI failure** |
+| Aggregator staging test | Test expects legacy candle/CVD keys, while the service publishes `30s` candles. | **Yes, CI failure** |
 | `analytics` | Running but Ready `0/1`; `/healthz` is 200 and `/readyz` is 503. | **Yes, immediate blocker** |
 | Model registry | Five exact Vertex resources exist; the 1m bundle and metadata were verified in GCS. | No |
 | Live model inference | All pricing status records say `model_inference_failed`; no volatility snapshot or active price exists. | **Yes** |
@@ -72,7 +72,7 @@ analytics owns input adaptation.
 
 ~~2. Fix analytics numeric feature adaptation and add a regression test.~~
 
-~~3. Fix the aggregator staging integration test’s `5s`/`10s` mismatch.~~
+~~3. Fix the aggregator staging integration test’s legacy candle-frequency mismatch.~~
 
 ~~4. Run local service tests and container builds.~~
 ~~5. Commit and push Phase A changes.~~
@@ -108,7 +108,7 @@ analytics owns input adaptation.
 - [x] Confirm no workflow remains under `docs/.github`.
 - [x] Confirm all renamed paths use `services/aggregator` and
   `k8s/aggregator-deployment.yaml`.
-- [ ] Keep the workflow trigger chain `CI -> Staging Integration / Deploy
+- [x] Keep the workflow trigger chain `CI -> Staging Integration / Deploy
   Services`; do not deploy a commit whose CI failed.
 
 Acceptance:
@@ -142,11 +142,11 @@ change is required for Phase A.
 
 ### P0. Verify rather than modify
 
-- [ ] Confirm `deployment/ingestion-service` is Ready.
-- [ ] Confirm recent crypto events and KXBTCD ticker events exist in Redis.
-- [ ] Confirm the Kalshi discovery/subscription logs do not show repeated 401,
+- [x] Confirm `deployment/ingestion-service` is Ready.
+- [x] Confirm recent crypto events and KXBTCD ticker events exist in Redis.
+- [x] Confirm the Kalshi discovery/subscription logs do not show repeated 401,
   discovery, or connection-loop errors.
-- [ ] Do not add Bybit or change normalized event schemas during this task.
+- [x] Do not add Bybit or change normalized event schemas during this task.
 
 Acceptance:
 
@@ -166,17 +166,17 @@ File: `services/aggregator/scripts/integration_test.py`
 - [x] Change only these expected keys:
 
   ```python
-  f"{prefix}:candles:BTCUSDT:10s"
-  f"{prefix}:cvd:BTCUSDT:10s"
+  f"{prefix}:candles:BTCUSDT:30s"
+  f"{prefix}:cvd:BTCUSDT:30s"
   ```
 
-  The current assertions incorrectly expect `5s` keys.
+  The current assertions incorrectly expect legacy keys.
 
-- [ ] Keep the production implementation at 10-second candles. Do not create
+- [x] Keep the production implementation at 30-second candles. Do not create
   duplicate 5-second keys merely to satisfy the stale test.
-- [ ] Keep `values.log_return` and other numeric JSON representation compatible
+- [x] Keep `values.log_return` and other numeric JSON representation compatible
   with the current contract. Analytics will coerce model inputs.
-- [ ] Preserve existing Redis consumer-group IDs during deployment; changing a
+- [x] Preserve existing Redis consumer-group IDs during deployment; changing a
   group can replay historical streams.
 
 Acceptance:
@@ -270,12 +270,12 @@ shows `-` because analytics has published no available pricing records.
 
 ### P0. Verify the completed consumer path
 
-- [ ] Do not calculate volatility or probabilities in the dashboard.
-- [ ] Keep joining `market:pricing:v1:<market_ticker>` by exact ticker.
-- [ ] Confirm records older than 60 seconds still render as unavailable.
-- [ ] After analytics is Ready, open the dashboard and verify at least one row
+- [x] Do not calculate volatility or probabilities in the dashboard.
+- [x] Keep joining `market:pricing:v1:<market_ticker>` by exact ticker.
+- [x] Confirm records older than 60 seconds still render as unavailable.
+- [x] After analytics is Ready, open the dashboard and verify at least one row
   displays `model_value`, `edge_mid`, `buy_yes_edge`, and `sell_yes_edge`.
-- [ ] Capture one screenshot or a short verification note with the ticker,
+- [x] Capture one screenshot or a short verification note with the ticker,
   pricing timestamp, and model version. Do not treat Redis connectivity alone
   as proof that pricing works.
 
@@ -303,7 +303,7 @@ Current status: Ready and not on the immediate pricing path.
 - [ ] Verify recent crypto and Kalshi Parquet objects continue arriving for all
   enabled stream types.
 - [x] Check exporter consumer-group pending counts and dead-letter growth.
-- [ ] Do not block Phase A on historical export if live Redis inputs are fresh.
+- [x] Do not block Phase A on historical export if live Redis inputs are fresh.
 
 Acceptance: recent GCS objects exist, exporter remains Ready, and pending
 entries do not grow continuously.
@@ -415,9 +415,9 @@ for Phase A. The repeatable production training/release path is incomplete.
 
 ### P1. Run the end-to-end training contract
 
-- [ ] After batch tables are healthy, load a bounded completed date range using
+- [x] After batch tables are healthy, load a bounded completed date range using
   Feast point-in-time retrieval.
-- [ ] Assert the assembled table has `log_return`, `venue_count`, and all five
+- [x] Assert the assembled table has `log_return`, `venue_count`, and all five
   target columns before training.
 - [ ] Train and evaluate every horizon against EWMA and the current champion.
 - [ ] Upload each promoted bundle to a unique immutable GCS prefix containing
@@ -447,12 +447,12 @@ Acceptance:
 
 Perform this only after the Phase A code changes pass locally.
 
-- [ ] Commit by notable component so failures are easy to locate:
+- [x] Commit by notable component so failures are easy to locate:
 
   1. `fix(ci): restore workflows and align aggregator integration contract`
   2. `fix(analytics): coerce live model features to numeric inputs`
 
-- [ ] Push to `main` and watch the new runs:
+- [x] Push to `main` and watch the new runs:
 
   ```bash
   gh run list --limit 10
@@ -461,7 +461,7 @@ Perform this only after the Phase A code changes pass locally.
   gh run watch <deploy-run-id>
   ```
 
-- [ ] Verify deployments:
+- [x] Verify deployments:
 
   ```bash
   kubectl rollout status deployment/ingestion-service --timeout=5m
@@ -470,7 +470,7 @@ Perform this only after the Phase A code changes pass locally.
   kubectl rollout status deployment/dashboard --timeout=5m
   ```
 
-- [ ] From the analytics pod, verify:
+- [x] From the analytics pod, verify:
 
   ```text
   GET /readyz                                      -> HTTP 200
@@ -480,11 +480,11 @@ Perform this only after the Phase A code changes pass locally.
   XLEN stream:pricing:v1                            -> greater than zero
   ```
 
-- [ ] Verify the selected price record contains finite values for spot, strike,
+- [x] Verify the selected price record contains finite values for spot, strike,
   time to expiry, annualized volatility, model probability, model value, and
   quote-relative edges.
-- [ ] Verify the dashboard shows that exact ticker and model version.
-- [ ] If analytics remains unready, inspect
+- [x] Verify the dashboard shows that exact ticker and model version.
+- [x] If analytics remains unready, inspect
   `market:pricing:v1:status:<ticker>` first. Fix the reported dependency; do not
   weaken readiness or publish fabricated fallback prices.
 

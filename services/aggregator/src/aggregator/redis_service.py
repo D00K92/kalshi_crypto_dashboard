@@ -106,8 +106,8 @@ class AggregatorService:
         bucket = spot["bucket_start_ts_ms"]
         if bucket != self._last_candle_publish_bucket:
             candles = orjson.dumps(self.state.candle_snapshot("BTCUSDT"))
-            pipe.set(f"{prefix}:candle_state:BTCUSDT:10s", orjson.dumps(self.state.export_candle_state()))
-            pipe.set(f"{prefix}:candles:BTCUSDT:10s", candles)
+            pipe.set(f"{prefix}:candle_state:BTCUSDT:30s", orjson.dumps(self.state.export_candle_state()))
+            pipe.set(f"{prefix}:candles:BTCUSDT:30s", candles)
             pipe.publish(f"{prefix}:aggregated_candles", candles)
             self._last_candle_publish_bucket = bucket
         await pipe.execute()
@@ -121,13 +121,13 @@ class AggregatorService:
 
     async def _restore_candles(self) -> None:
         prefix = self.settings.output_prefix
-        state_key = f"{prefix}:candle_state:BTCUSDT:10s"
+        state_key = f"{prefix}:candle_state:BTCUSDT:30s"
         raw_state = await self.client.get(state_key)
         try:
             if raw_state:
                 loaded = self.state.restore_candle_state(orjson.loads(raw_state))
             else:
-                raw_candles = await self.client.get(f"{prefix}:candles:BTCUSDT:10s")
+                raw_candles = await self.client.get(f"{prefix}:candles:BTCUSDT:30s")
                 loaded = self.state.restore_candle_snapshot(orjson.loads(raw_candles)) if raw_candles else 0
                 if loaded:
                     await self.client.set(state_key, orjson.dumps(self.state.export_candle_state()))

@@ -6,7 +6,7 @@ from decimal import Decimal, ROUND_CEILING, ROUND_DOWN
 import time
 from typing import Any, Mapping
 
-CANDLE_INTERVAL_MS = 10_000
+CANDLE_INTERVAL_MS = 30_000
 DEFAULT_BAR_FREQUENCIES_MS = {
     "1m": 60_000,
     "5m": 300_000,

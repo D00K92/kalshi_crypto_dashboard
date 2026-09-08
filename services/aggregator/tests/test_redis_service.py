@@ -82,7 +82,7 @@ async def test_process_entries_acknowledges_rejected_rows_with_batch() -> None:
     assert service.client.acks == [("stream:ticks", "group", b"1000-0")]
 
 
-async def test_trade_publishes_candle_state_once_per_ten_second_bucket() -> None:
+async def test_trade_publishes_candle_state_once_per_thirty_second_bucket() -> None:
     service = object.__new__(AggregatorService)
     service.client = TradeRedis()
     service.state = MarketAggregator()
@@ -91,7 +91,7 @@ async def test_trade_publishes_candle_state_once_per_ten_second_bucket() -> None
 
     first = {"event_id": "one", "event_type": "trade", "venue": "binance", "instrument": "BTCUSDT", "price": "100", "quantity": "1", "taker_side": "buy", "exchange_ts_ms": 10_000, "received_ts_ms": 10_000}
     second = {**first, "event_id": "two", "price": "101", "exchange_ts_ms": 10_001, "received_ts_ms": 10_001}
-    third = {**first, "event_id": "three", "price": "102", "exchange_ts_ms": 20_000, "received_ts_ms": 20_000}
+    third = {**first, "event_id": "three", "price": "102", "exchange_ts_ms": 30_000, "received_ts_ms": 30_000}
 
     await service._handle_trade(first)
     await service._handle_trade(second)
@@ -99,6 +99,6 @@ async def test_trade_publishes_candle_state_once_per_ten_second_bucket() -> None
 
     state_writes = [
         operation for pipeline in service.client.pipelines for operation in pipeline.operations
-        if operation[0] == "set" and operation[1][0] == "market:candle_state:BTCUSDT:10s"
+        if operation[0] == "set" and operation[1][0] == "market:candle_state:BTCUSDT:30s"
     ]
     assert len(state_writes) == 2
