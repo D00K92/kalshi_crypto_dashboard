@@ -11,7 +11,7 @@ from pathlib import Path
 
 from google.cloud import bigquery
 
-FREQUENCIES = {"1s": (1, "SECOND"), "5s": (5, "SECOND"), "1m": (1, "MINUTE"), "5m": (5, "MINUTE"), "10m": (10, "MINUTE"), "15m": (15, "MINUTE"), "30m": (30, "MINUTE"), "1h": (1, "HOUR")}
+FREQUENCIES = {"10s": (10, "SECOND")}
 VENUES = ("binance", "bitstamp", "coinbase", "crypto.com", "gemini", "kraken")
 INSTRUMENTS = {
     "binance": "BTCUSDT",
@@ -38,6 +38,21 @@ def process_venue(target: datetime, *, venue: str, frequencies: tuple[str, ...],
     subprocess.run([sys.executable, str(loader), "--date", target.strftime("%Y-%m-%d"), "--hour", target.strftime("%H"), "--venue", venue, "--instrument", instrument, "--bucket", bucket, "--project", project], check=True)
     client = bigquery.Client(project=project, location="asia-northeast3")
     for frequency in frequencies:
+        # Replacing the exact bar slice makes a resumed backfill idempotent
+        # and removes rows written twice by previously concurrent workers.
+        replace_config = bigquery.QueryJobConfig(query_parameters=[
+            bigquery.ScalarQueryParameter("target_start", "TIMESTAMP", target),
+            bigquery.ScalarQueryParameter("target_end", "TIMESTAMP", target + timedelta(hours=1)),
+            bigquery.ScalarQueryParameter("venue", "STRING", venue),
+            bigquery.ScalarQueryParameter("instrument", "STRING", instrument),
+            bigquery.ScalarQueryParameter("frequency", "STRING", frequency),
+        ])
+        client.query(
+            f"DELETE FROM `{project}.market_data.bars` "
+            "WHERE event_timestamp >= @target_start AND event_timestamp < @target_end "
+            "AND venue = @venue AND instrument = @instrument AND frequency = @frequency",
+            job_config=replace_config,
+        ).result()
         config = bigquery.QueryJobConfig(query_parameters=[
             bigquery.ScalarQueryParameter("source_start", "TIMESTAMP", target - timedelta(hours=1)),
             bigquery.ScalarQueryParameter("target_start", "TIMESTAMP", target),
@@ -50,10 +65,17 @@ def process_venue(target: datetime, *, venue: str, frequencies: tuple[str, ...],
 
 
 def process_hour(target: datetime, *, venues: tuple[str, ...], frequencies: tuple[str, ...], bucket: str, project: str, parallelism: int = 1) -> None:
-    """Land raw data and resample venues concurrently up to the quota limit."""
+    """Land and replace raw data serially before resampling one UTC hour.
+
+    BigQuery serializes concurrent DML against the canonical raw tables.  A
+    venue worker pool therefore causes retries, partial landing-table cleanup,
+    and ultimately missing primitive bars rather than increasing throughput.
+    """
     if parallelism < 1:
         raise ValueError("parallelism must be positive")
-    with ThreadPoolExecutor(max_workers=parallelism) as pool:
+    if parallelism != 1:
+        print("serializing raw BigQuery writes; ignoring requested parallelism", flush=True)
+    with ThreadPoolExecutor(max_workers=1) as pool:
         futures = [pool.submit(process_venue, target, venue=venue, frequencies=frequencies, bucket=bucket, project=project) for venue in venues]
         for future in futures:
             future.result()

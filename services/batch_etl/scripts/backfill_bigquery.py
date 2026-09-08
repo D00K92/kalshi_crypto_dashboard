@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
 import os
 import subprocess
@@ -68,6 +69,8 @@ def main() -> None:
     parser.add_argument("--hour-parallelism", type=int, default=int(os.getenv("BATCH_ETL_HOUR_PARALLELISM", "2")),
                         help="maximum number of independent UTC hours per phase")
     parser.add_argument("--state-file", type=Path, default=Path(os.getenv("BATCH_ETL_BACKFILL_STATE", "backfill_bigquery_state.json")))
+    parser.add_argument("--lock-file", type=Path, default=Path(os.getenv("BATCH_ETL_BACKFILL_LOCK", "/tmp/kalshi-bigquery-resample.lock")),
+                        help="exclusive local lock preventing duplicate backfill writers")
     parser.add_argument("--resume", action="store_true", help="skip phases already marked complete in --state-file")
     parser.add_argument("--retries", type=int, default=2, help="retries per failed hourly phase")
     phases = parser.add_mutually_exclusive_group()
@@ -79,6 +82,13 @@ def main() -> None:
         parser.error("end-hour must not precede start-hour")
     if args.parallelism < 1 or args.hour_parallelism < 1 or args.retries < 0:
         parser.error("parallelism values must be positive and retries must not be negative")
+
+    args.lock_file.parent.mkdir(parents=True, exist_ok=True)
+    lock_handle = args.lock_file.open("w")
+    try:
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError as exc:
+        raise SystemExit(f"another BigQuery backfill is already active ({args.lock_file})") from exc
 
     state = _load_state(args.state_file) if args.resume else {"hours": {}}
     failures: list[tuple[str, str, str]] = []
@@ -122,7 +132,11 @@ def main() -> None:
                 continue
             pending.append((stamp, [sys.executable, str(script), *base_command, "--target-hour", stamp]))
 
-        with ThreadPoolExecutor(max_workers=args.hour_parallelism) as pool:
+        # Raw tables are shared across every venue and hour.  Serialize this
+        # phase to avoid BigQuery DML serialization conflicts. Downstream
+        # feature/target phases retain their caller-configured concurrency.
+        workers = 1 if phase == "resample" else args.hour_parallelism
+        with ThreadPoolExecutor(max_workers=workers) as pool:
             futures = {pool.submit(_run_phase, command, retries=args.retries): stamp for stamp, command in pending}
             for future in as_completed(futures):
                 stamp = futures[future]

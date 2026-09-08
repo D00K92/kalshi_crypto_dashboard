@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 from datetime import datetime, timezone
 import json
+from uuid import uuid4
 import pandas as pd
 from google.cloud import bigquery, storage
 
@@ -68,10 +69,14 @@ def main():
     ap=argparse.ArgumentParser(); ap.add_argument("--date",required=True); ap.add_argument("--hour",required=True); ap.add_argument("--venue",required=True); ap.add_argument("--instrument"); ap.add_argument("--bucket",default="kalshi-crypto-tick-data"); ap.add_argument("--project",default="kalshi-crypto-506614"); ap.add_argument("--types",default="trades,books"); a=ap.parse_args()
     target=datetime.fromisoformat(f"{a.date}T{a.hour}:00:00+00:00"); end=target.replace(minute=0)+__import__('datetime').timedelta(hours=1); instrument=a.instrument or INSTRUMENTS.get(a.venue,"BTCUSD")
     c=bigquery.Client(project=a.project,location="asia-northeast3"); kinds={x.strip() for x in a.types.split(",")}
+    # Retries or an accidentally duplicated invocation must never share a
+    # mutable landing table. A unique table also makes cleanup by one worker
+    # unable to delete another worker's in-flight destination.
+    run_suffix = f"{a.date.replace('-', '')}_{a.hour}_{uuid4().hex}"
     for kind in kinds:
         uris=_uris(a.bucket,"ticks" if kind=="trades" else "books",a.venue,instrument,a.date,a.hour,a.project)
         if not uris: print(f"{kind} source_files=0 rows=0",flush=True); continue
-        landing=f"{a.project}.market_data._landing_{kind}_{a.venue.replace('.','_').replace('-','_')}"; n=_load(c,uris,landing)
+        landing=f"{a.project}.market_data._landing_{kind}_{a.venue.replace('.','_').replace('-','_')}_{run_suffix}"; n=_load(c,uris,landing)
         if kind=="trades": _replace_trades(c,landing,f"{a.project}.market_data.raw_trades",a.venue,instrument,target,end)
         else: _replace_books(c,landing,f"{a.project}.market_data.raw_book_levels",a.venue,instrument,target,end)
         c.delete_table(landing,not_found_ok=True); print(f"{kind} source_files={n} loaded=1",flush=True)
