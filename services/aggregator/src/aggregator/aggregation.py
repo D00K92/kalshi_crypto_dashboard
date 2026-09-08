@@ -253,6 +253,40 @@ class MarketAggregator:
                     output.append(payload)
         return output
 
+    def primitive_bars_for_bucket(self, instrument: str, start: int) -> list[dict[str, Any]]:
+        """Build only one closed canonical 10s bucket (the live hot path)."""
+        state = self.trade_buckets.get(start)
+        if state is None:
+            return []
+        end = start + CANDLE_INTERVAL_MS
+        output = []
+        for venue in sorted(self.venues or set(self.latest_trades)):
+            part = state["venues"].get(venue)
+            if not part or not part.get("trade_count"):
+                continue
+            count = part["trade_count"]
+            payload = {
+                "schema_version": 1, "primitive_schema_version": 2, "event_type": "primitive_bar",
+                "instrument": instrument, "venue": venue, "frequency": "10s", "interval_ms": CANDLE_INTERVAL_MS,
+                "bucket_start_ts_ms": start, "bucket_end_ts_ms": end,
+                "p_open": self._fmt(part["open"]), "p_high": self._fmt(part["high"]), "p_low": self._fmt(part["low"]),
+                "p_trade": self._fmt(part["close"]), "p_close": self._fmt(part["close"]),
+                "p_trade_mean": self._fmt(part["price_sum"] / count), "v_trade": self._fmt(part["volume"]),
+                "v_buy": self._fmt(part["buy_volume"]), "v_sell": self._fmt(part["sell_volume"]), "cnt_trade": count,
+            }
+            intervals = part["fill_intervals"]
+            payload.update({"dt_fill_mean_ms": self._fmt(sum(intervals, Decimal("0")) / len(intervals)) if intervals else None,
+                            "dt_fill_max_ms": self._fmt(max(intervals)) if intervals else None,
+                            "dt_fill_min_ms": self._fmt(min(intervals)) if intervals else None})
+            book = self.books.get(venue)
+            for level in range(1, 11):
+                bid = book.bids[level - 1] if book and len(book.bids) >= level else (None, None)
+                ask = book.asks[level - 1] if book and len(book.asks) >= level else (None, None)
+                payload.update({f"p_bid_{level}": self._fmt(bid[0]), f"q_bid_{level}": self._fmt(bid[1]), f"p_ask_{level}": self._fmt(ask[0]), f"q_ask_{level}": self._fmt(ask[1])})
+            payload["book_available_ts_ms"] = book.received_ts_ms if book else None
+            output.append(payload)
+        return output
+
     def _book_at_or_before(self, venue: str, end_ts_ms: int) -> VenueBook | None:
         candidates = [bucket for bucket, books in self.book_buckets.items() if bucket < end_ts_ms and venue in books]
         return self.book_buckets[max(candidates)][venue] if candidates else None

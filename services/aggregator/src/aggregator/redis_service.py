@@ -106,26 +106,9 @@ class AggregatorService:
         pipe.publish(f"{prefix}:aggregated_spot", encoded)
         bucket = spot["bucket_start_ts_ms"]
         if bucket != self._last_candle_publish_bucket:
-            frequencies = dict(getattr(self.settings, "bar_frequencies", (("10s", 10_000),)))
-            published_bars = getattr(self, "_published_bars", None)
-            if published_bars is None:
-                published_bars = self._published_bars = set()
-            for bar in self.state.resampled_bars("BTCUSDT", frequencies):
-                key = (bar["frequency"], bar["bucket_start_ts_ms"])
-                if key in published_bars:
-                    continue
-                encoded_bar = orjson.dumps(bar)
-                pipe.xadd(getattr(self.settings, "bars_stream", "stream:bars:v1"), {"payload": encoded_bar}, maxlen=getattr(self.settings, "bars_maxlen", 50_000), approximate=True)
-                pipe.set(f"{prefix}:bars:BTCUSDT:{bar['frequency']}:latest", encoded_bar)
-                published_bars.add(key)
-            published_primitives = getattr(self, "_published_primitives", None)
-            if published_primitives is None:
-                published_primitives = self._published_primitives = set()
-            for primitive in self.state.primitive_bars("BTCUSDT", frequencies):
-                key = (primitive["venue"], primitive["frequency"], primitive["bucket_start_ts_ms"])
-                if key in published_primitives:
-                    continue
-                published_primitives.add(key)
+            # Never rescan two hours of history in the trade hot path.  A new
+            # bucket closes exactly one prior 10s interval.
+            for primitive in self.state.primitive_bars_for_bucket("BTCUSDT", bucket - 10_000):
                 encoded_primitive = orjson.dumps(primitive)
                 pipe.xadd(getattr(self.settings, "primitive_stream", "stream:primitives:v1"), {"payload": encoded_primitive}, maxlen=getattr(self.settings, "primitive_maxlen", 50_000), approximate=True)
                 pipe.set(f"{prefix}:primitive:{primitive['venue']}:{primitive['frequency']}:latest", encoded_primitive)
