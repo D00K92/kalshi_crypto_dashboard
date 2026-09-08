@@ -141,6 +141,25 @@ def test_primitive_book_snapshot_is_per_venue_and_not_aggregated():
     assert payload["asks"] == [{"price": "101", "quantity": "3"}]
 
 
+def test_primitive_bars_are_per_venue_and_forward_fill_empty_intervals():
+    agg = MarketAggregator()
+    agg.apply_book({"event_type": "book_snapshot", "venue": "binance", "instrument": "BTCUSDT", "exchange_ts_ms": 60_000, "received_ts_ms": 60_000, "bids": [{"price": "99", "quantity": "2"}], "asks": [{"price": "101", "quantity": "3"}]})
+    one = trade("binance", 100, 2, "buy", ts=60_000)
+    one["event_id"] = "primitive-bar-one"
+    boundary = trade("binance", 100, 1, "buy", ts=180_000)
+    boundary["event_id"] = "primitive-bar-boundary"
+    agg.apply_trade(one)
+    agg.apply_trade(boundary)
+
+    rows = [row for row in agg.primitive_bars("BTCUSDT", {"1m": 60_000}) if row["venue"] == "binance"]
+    assert [row["bucket_start_ts_ms"] for row in rows] == [60_000, 120_000]
+    assert rows[0]["cnt_trade"] == 1
+    assert rows[1]["cnt_trade"] == 0
+    assert rows[1]["p_trade"] == "100"
+    assert rows[0]["p_bid_1"] == "99"
+    assert rows[0]["q_ask_1"] == "3"
+
+
 def test_price_bucketing_is_side_aware():
     agg = MarketAggregator(price_tick="1", depth=10)
     now = int(time.time() * 1000)

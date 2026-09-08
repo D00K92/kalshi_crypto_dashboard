@@ -11,6 +11,13 @@ does not compute ML feature rows; `live_feature_service` consumes
 `stream:bars:v1` and `stream:orderbook:v1`, computes features/EWMA state, and
 publishes the Feast-compatible feature stream.
 
+The canonical per-venue primitive dataset is published on
+`stream:primitives:v1`. Each `primitive_bar` row uses the offline field names,
+one venue/frequency/time bucket, zero-fills flow for empty buckets, forward
+fills the last trade state, and carries the latest order-book levels available
+at the bucket boundary. Configure the stream with `PRIMITIVE_STREAM` and
+`PRIMITIVE_STREAM_MAXLEN`.
+
 `stream:orderbook:v1` is an event-driven primitive stream: one per-venue
 `market_book` record is emitted for each accepted input order-book snapshot.
 Its cadence depends on the venue feeds and ingestion rate. The `500ms`

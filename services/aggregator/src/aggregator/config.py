@@ -37,6 +37,8 @@ class Settings:
     output_prefix: str
     bars_stream: str
     bars_maxlen: int
+    primitive_stream: str
+    primitive_maxlen: int
     orderbook_stream: str
     orderbook_maxlen: int
     bar_frequencies: tuple[tuple[str, int], ...]
@@ -72,6 +74,8 @@ class Settings:
             output_prefix=os.getenv("AGGREGATOR_OUTPUT_PREFIX", "market"),
             bars_stream=os.getenv("AGGREGATED_BARS_STREAM", "stream:bars:v1"),
             bars_maxlen=_int("AGGREGATED_BARS_MAXLEN", 50_000),
+            primitive_stream=os.getenv("PRIMITIVE_STREAM", "stream:primitives:v1"),
+            primitive_maxlen=_int("PRIMITIVE_STREAM_MAXLEN", 50_000),
             orderbook_stream=os.getenv("AGGREGATED_ORDERBOOK_STREAM", "stream:orderbook:v1"),
             orderbook_maxlen=_int("AGGREGATED_ORDERBOOK_MAXLEN", 10_000),
             bar_frequencies=tuple(

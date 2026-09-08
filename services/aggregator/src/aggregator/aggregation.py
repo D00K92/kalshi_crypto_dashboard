@@ -56,6 +56,7 @@ class MarketAggregator:
         self.venues = {venue.lower() for venue in venues} if venues is not None else None
         self.taker_fees = {str(venue).lower(): self._fee(value) for venue, value in (taker_fees or {}).items()}
         self.books: dict[str, VenueBook] = {}
+        self.book_buckets: dict[int, dict[str, VenueBook]] = {}
         self.trade_buckets: dict[int, dict[str, Any]] = {}
         self.latest_trades: dict[str, dict[str, Any]] = {}
         self._last_trade_ts_ms: dict[str, int] = {}
@@ -76,6 +77,9 @@ class MarketAggregator:
             asks=self._levels(event.get("asks", []), reverse=False),
             received_ts_ms=received,
         )
+        book_bucket = _bucket(int(event.get("exchange_ts_ms") or received))
+        self.book_buckets.setdefault(book_bucket, {})[venue] = self.books[venue]
+        self._trim_buckets(book_bucket)
         return self.book_snapshot(int(time.time() * 1000), str(event.get("instrument", "BTCUSDT")).upper())
 
     def apply_trade(self, event: dict[str, Any]) -> dict[str, Any] | None:
@@ -192,6 +196,63 @@ class MarketAggregator:
             "venues": venues, "used_venues": sorted(venues), "stale_venues": stale,
             "log_return": self._fmt(log_return), "venue_count": len(prices),
         }
+
+    def primitive_bars(self, instrument: str, frequencies_ms: Mapping[str, int] | None = None) -> list[dict[str, Any]]:
+        """Return per-venue canonical bars with time-bucketed book state."""
+        frequencies_ms = frequencies_ms or DEFAULT_BAR_FREQUENCIES_MS
+        current_bucket = max(self.trade_buckets, default=0)
+        venues = sorted({venue for state in self.trade_buckets.values() for venue in state["venues"]})
+        output: list[dict[str, Any]] = []
+        for frequency, interval in frequencies_ms.items():
+            if not venues or not current_bucket:
+                continue
+            starts = range((min(self.trade_buckets) // interval) * interval, current_bucket, interval)
+            for venue in venues:
+                previous: dict[str, Any] | None = None
+                for start in starts:
+                    end = start + interval
+                    if end > current_bucket:
+                        break
+                    parts = [state["venues"][venue] | {"start": bucket} for bucket, state in self.trade_buckets.items() if start <= bucket < end and venue in state["venues"]]
+                    parts.sort(key=lambda part: part["start"])
+                    if parts:
+                        count = sum(part["trade_count"] for part in parts)
+                        volume = sum((part["volume"] for part in parts), Decimal("0"))
+                        buy = sum((part["buy_volume"] for part in parts), Decimal("0"))
+                        sell = sum((part["sell_volume"] for part in parts), Decimal("0"))
+                        prices = sum((part["price_sum"] for part in parts), Decimal("0"))
+                        intervals = [value for part in parts for value in part["fill_intervals"]]
+                        row = {
+                            "p_open": parts[0]["open"], "p_high": max(part["high"] for part in parts), "p_low": min(part["low"] for part in parts), "p_trade": parts[-1]["close"], "p_close": parts[-1]["close"], "p_trade_mean": prices / count, "v_trade": volume, "v_buy": buy, "v_sell": sell, "cnt_trade": count,
+                            "dt_fill_mean_ms": sum(intervals, Decimal("0")) / len(intervals) if intervals else None, "dt_fill_max_ms": max(intervals) if intervals else None, "dt_fill_min_ms": min(intervals) if intervals else None,
+                        }
+                        previous = row
+                    elif previous is None:
+                        continue
+                    else:
+                        row = {**previous, "v_trade": Decimal("0"), "v_buy": Decimal("0"), "v_sell": Decimal("0"), "cnt_trade": 0, "dt_fill_mean_ms": None, "dt_fill_max_ms": None, "dt_fill_min_ms": None}
+                    book = self._book_at_or_before(venue, end)
+                    payload = {key: self._fmt(value) if isinstance(value, Decimal) else value for key, value in row.items()}
+                    payload.update({"schema_version": 1, "primitive_schema_version": 2, "event_type": "primitive_bar", "instrument": instrument, "venue": venue, "frequency": frequency, "interval_ms": interval, "bucket_start_ts_ms": start, "bucket_end_ts_ms": end})
+                    if book:
+                        for level in range(1, 11):
+                            bid = book.bids[level - 1] if len(book.bids) >= level else (None, None)
+                            ask = book.asks[level - 1] if len(book.asks) >= level else (None, None)
+                            payload[f"p_bid_{level}"] = self._fmt(bid[0])
+                            payload[f"q_bid_{level}"] = self._fmt(bid[1])
+                            payload[f"p_ask_{level}"] = self._fmt(ask[0])
+                            payload[f"q_ask_{level}"] = self._fmt(ask[1])
+                        payload["book_available_ts_ms"] = book.received_ts_ms
+                    else:
+                        for level in range(1, 11):
+                            payload.update({f"p_bid_{level}": None, f"q_bid_{level}": None, f"p_ask_{level}": None, f"q_ask_{level}": None})
+                        payload["book_available_ts_ms"] = None
+                    output.append(payload)
+        return output
+
+    def _book_at_or_before(self, venue: str, end_ts_ms: int) -> VenueBook | None:
+        candidates = [bucket for bucket, books in self.book_buckets.items() if bucket < end_ts_ms and venue in books]
+        return self.book_buckets[max(candidates)][venue] if candidates else None
 
     def candle_snapshot(self, instrument: str) -> list[dict[str, Any]]:
         return [{"instrument": instrument, "bucket_start_ts_ms": start, "open": self._fmt(s["open"]), "high": self._fmt(s["high"]), "low": self._fmt(s["low"]), "close": self._fmt(s["close"]), "volume": self._fmt(s["volume"]), "vwap": self._fmt(s["notional"] / s["volume"])} for start, s in sorted(self.trade_buckets.items()) if s["volume"] > 0]
