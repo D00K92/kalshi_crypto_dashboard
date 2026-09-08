@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import math
 import os
 import time
 from typing import Any, Callable
@@ -141,7 +142,7 @@ class StagingProbe:
             raise AssertionError(f"recovered feature did not advance: {feature}")
         self._assert_feature(
             feature, timestamp_ms=base + 30_000, synthetic_price=105.0,
-            log_return=0.0, venue_count=2,
+            log_return=math.log(105.0 / 100.0), venue_count=2,
         )
         features = await self._stream_payloads(self.feature_stream)
         timestamps = [row["event_timestamp_ms"] for row in features]
