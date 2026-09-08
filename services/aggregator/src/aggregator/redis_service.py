@@ -103,20 +103,20 @@ class AggregatorService:
         pipe = pipeline or self.client.pipeline(transaction=False)
         pipe.set(f"{prefix}:spot:BTCUSDT:latest", encoded)
         pipe.publish(f"{prefix}:aggregated_spot", encoded)
-        frequencies = dict(getattr(self.settings, "bar_frequencies", (("1m", 60_000), ("5m", 300_000), ("10m", 600_000), ("15m", 900_000), ("30m", 1_800_000), ("1h", 3_600_000))))
-        published_bars = getattr(self, "_published_bars", None)
-        if published_bars is None:
-            published_bars = self._published_bars = set()
-        for bar in self.state.resampled_bars("BTCUSDT", frequencies):
-            key = (bar["frequency"], bar["bucket_start_ts_ms"])
-            if key in published_bars:
-                continue
-            encoded_bar = orjson.dumps(bar)
-            pipe.xadd(getattr(self.settings, "bars_stream", "stream:bars:v1"), {"payload": encoded_bar}, maxlen=getattr(self.settings, "bars_maxlen", 50_000), approximate=True)
-            pipe.set(f"{prefix}:bars:BTCUSDT:{bar['frequency']}:latest", encoded_bar)
-            published_bars.add(key)
         bucket = spot["bucket_start_ts_ms"]
         if bucket != self._last_candle_publish_bucket:
+            frequencies = dict(getattr(self.settings, "bar_frequencies", (("1m", 60_000), ("5m", 300_000), ("10m", 600_000), ("15m", 900_000), ("30m", 1_800_000), ("1h", 3_600_000))))
+            published_bars = getattr(self, "_published_bars", None)
+            if published_bars is None:
+                published_bars = self._published_bars = set()
+            for bar in self.state.resampled_bars("BTCUSDT", frequencies):
+                key = (bar["frequency"], bar["bucket_start_ts_ms"])
+                if key in published_bars:
+                    continue
+                encoded_bar = orjson.dumps(bar)
+                pipe.xadd(getattr(self.settings, "bars_stream", "stream:bars:v1"), {"payload": encoded_bar}, maxlen=getattr(self.settings, "bars_maxlen", 50_000), approximate=True)
+                pipe.set(f"{prefix}:bars:BTCUSDT:{bar['frequency']}:latest", encoded_bar)
+                published_bars.add(key)
             candles = orjson.dumps(self.state.candle_snapshot("BTCUSDT"))
             pipe.set(f"{prefix}:candle_state:BTCUSDT:30s", orjson.dumps(self.state.export_candle_state()))
             pipe.set(f"{prefix}:candles:BTCUSDT:30s", candles)
@@ -147,5 +147,10 @@ class AggregatorService:
                     await self.client.set(state_key, orjson.dumps(self.state.export_candle_state()))
             if loaded:
                 LOGGER.info("candles_restored", extra={"buckets": loaded})
+                frequencies = dict(getattr(self.settings, "bar_frequencies", (("1m", 60_000), ("5m", 300_000), ("10m", 600_000), ("15m", 900_000), ("30m", 1_800_000), ("1h", 3_600_000))))
+                self._published_bars.update(
+                    (bar["frequency"], bar["bucket_start_ts_ms"])
+                    for bar in self.state.resampled_bars("BTCUSDT", frequencies)
+                )
         except (ValueError, TypeError, KeyError, orjson.JSONDecodeError) as exc:
             LOGGER.warning("candle_state_restore_failed", extra={"error": str(exc)})

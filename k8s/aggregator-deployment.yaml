@@ -34,7 +34,7 @@ spec:
         - name: AGGREGATOR_GROUP_START_ID
           value: "$"
         - name: AGGREGATOR_READ_COUNT
-          value: "500"
+          value: "50"
         - name: FEATURE_STREAM_MAXLEN
           value: "5000"
         - name: AGGREGATION_PRICE_TICK
