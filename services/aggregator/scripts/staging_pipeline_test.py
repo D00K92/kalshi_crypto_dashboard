@@ -64,8 +64,7 @@ class StagingProbe:
         )
         rows = await self._stream_payloads(self.primitive_stream)
         self._assert_primitives(rows, [base, base, base + 10_000, base + 10_000])
-        if feature["values"]["synthetic_price"] != 105.0:
-            raise AssertionError(f"late data corrupted baseline feature: {feature}")
+        self._assert_feature(feature, timestamp_ms=base, synthetic_price=105.0, log_return=None, venue_count=2)
         if feature.get("feature_set") != "market_features" or feature.get("feature_version") != "v2_10s":
             raise AssertionError(f"unexpected live feature contract: {feature}")
         progress = orjson.loads(
@@ -91,8 +90,10 @@ class StagingProbe:
             rows,
             [base, base, base + 10_000, base + 10_000, base + 20_000],
         )
-        if feature["values"]["synthetic_price"] != 105.0:
-            raise AssertionError(f"restart changed pending feature state: {feature}")
+        self._assert_feature(
+            feature, timestamp_ms=base + 10_000, synthetic_price=105.0,
+            log_return=0.0, venue_count=2,
+        )
         print("staging restart passed: checkpoint continued without duplicate output")
 
     async def stage_pending(self) -> None:
@@ -138,8 +139,10 @@ class StagingProbe:
             raise AssertionError("live-feature XAUTOCLAIM did not drain pending entries")
         if not feature or feature.get("event_timestamp_ms") != base + 30_000:
             raise AssertionError(f"recovered feature did not advance: {feature}")
-        if feature["values"]["synthetic_price"] != 105.0:
-            raise AssertionError(f"recovered feature is corrupt: {feature}")
+        self._assert_feature(
+            feature, timestamp_ms=base + 30_000, synthetic_price=105.0,
+            log_return=0.0, venue_count=2,
+        )
         features = await self._stream_payloads(self.feature_stream)
         timestamps = [row["event_timestamp_ms"] for row in features]
         if timestamps != sorted(set(timestamps)):
@@ -205,6 +208,20 @@ class StagingProbe:
             raise AssertionError(f"duplicate primitive identities: {identities}")
         if any(row.get("p_trade_mean") == "999999" for row in rows):
             raise AssertionError("late corrupting trade reached the primitive stream")
+
+    @staticmethod
+    def _assert_feature(
+        feature: dict[str, Any], *, timestamp_ms: int, synthetic_price: float,
+        log_return: float | None, venue_count: int,
+    ) -> None:
+        values = feature.get("values", {})
+        actual = (
+            feature.get("event_timestamp_ms"), values.get("synthetic_price"),
+            values.get("log_return"), values.get("venue_count"),
+        )
+        expected = (timestamp_ms, synthetic_price, log_return, venue_count)
+        if actual != expected:
+            raise AssertionError(f"offline-equivalent feature mismatch: expected={expected} actual={actual}")
 
     @staticmethod
     def _trade(venue: str, price: str, event_id: str, timestamp: int) -> dict[str, Any]:

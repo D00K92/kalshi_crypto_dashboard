@@ -22,6 +22,18 @@ outside Feast. The online store uses the private Memorystore endpoint. The
 Kubernetes DNS address currently in `feature_store.yaml` is not valid from
 Cloud Run and must be replaced during deployment.
 
+## Offline/online parity gate
+
+`python -m jobs.parity` compares recent eligible BigQuery v2_10s rows with the
+same timestamps retained in `stream:features:v2_10s`. It checks
+`synthetic_price`, `log_return`, and `venue_count`, plus online and offline
+freshness. The command emits one JSON object: exit code 0 means parity, 1 means
+drift or missing rows, and 2 means the check could not run.
+
+Production runs it every 15 minutes through the `feature-parity-v2-10s`
+CronJob. CD also starts an immediate parity job and stops the deployment when
+the result does not pass.
+
 ## Layout
 
 ```text

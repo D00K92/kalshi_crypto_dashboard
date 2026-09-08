@@ -45,6 +45,9 @@ jobs:
           - service: model-serving
             path: services/model_serving
             python_version: "3.12"
+          - service: feast-store
+            path: services/feast_store
+            python_version: "3.12"
     defaults:
       run:
         working-directory: ${{ matrix.path }}
@@ -102,6 +105,8 @@ jobs:
             context: services/live_feature_service
           - service: model-serving
             context: services/model_serving
+          - service: feast-store
+            context: services/feast_store
     steps:
       - name: Check out repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1

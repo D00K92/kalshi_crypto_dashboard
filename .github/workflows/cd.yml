@@ -206,6 +206,9 @@ jobs:
         envsubst '${FEAST_STORE_IMAGE}' \
           < k8s/feast-server-deployment.yaml \
           | kubectl apply -f -
+        envsubst '${FEAST_STORE_IMAGE} ${REDIS_HOST}' \
+          < k8s/feature-parity-cronjob.yaml \
+          | kubectl apply -f -
         envsubst '${DASHBOARD_IMAGE} ${REDIS_HOST} ${REDIS_PORT}' \
           < k8s/dashboard-deployment.yaml \
           | kubectl apply -f -
@@ -246,7 +249,20 @@ jobs:
           exit 1
         fi
         kubectl get cronjob/batch-etl
-        kubectl get cronjob/batch-etl-features cronjob/batch-etl-targets
+        kubectl get cronjob/batch-etl-features cronjob/batch-etl-targets cronjob/feature-parity-v2-10s
+
+    - name: Gate deployment on offline-online feature parity
+      env:
+        PARITY_JOB: feature-parity-deploy-${{ github.run_id }}-${{ github.run_attempt }}
+      run: |
+        set -euo pipefail
+        kubectl create job "${PARITY_JOB}" --from=cronjob/feature-parity-v2-10s
+        if ! kubectl wait --for=condition=complete "job/${PARITY_JOB}" --timeout=5m; then
+          kubectl logs "job/${PARITY_JOB}" --all-containers=true || true
+          exit 1
+        fi
+        kubectl logs "job/${PARITY_JOB}" --all-containers=true
+        kubectl delete "job/${PARITY_JOB}" --wait=false
 
     - name: Smoke check analytics outputs
       run: |

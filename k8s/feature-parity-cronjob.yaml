@@ -1,0 +1,50 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: feature-parity-v2-10s
+  labels:
+    app: feature-parity-v2-10s
+spec:
+  schedule: "*/15 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 4
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      ttlSecondsAfterFinished: 86400
+      template:
+        metadata:
+          labels:
+            app: feature-parity-v2-10s
+        spec:
+          restartPolicy: Never
+          serviceAccountName: batch-etl
+          containers:
+          - name: parity
+            image: "${FEAST_STORE_IMAGE}"
+            imagePullPolicy: IfNotPresent
+            command: ["python", "-m", "jobs.parity"]
+            args:
+            - "--sample-size=30"
+            - "--minimum-matches=12"
+            - "--lookback-hours=6"
+            - "--search-count=5000"
+            - "--max-online-age-seconds=180"
+            - "--max-offline-age-seconds=10800"
+            env:
+            - name: GCP_PROJECT_ID
+              value: "kalshi-crypto-506614"
+            - name: GCP_REGION
+              value: "asia-northeast3"
+            - name: FEAST_REPO_PATH
+              value: "/app/feast_store"
+            - name: REDIS_URL
+              value: "redis://${REDIS_HOST}:6379/0"
+            - name: FEATURE_STREAM
+              value: "stream:features:v2_10s"
+            - name: FEATURE_KEY
+              value: "market:features:v2_10s:BTCUSD:latest"
+            resources:
+              requests: {cpu: "100m", memory: "256Mi"}
+              limits: {cpu: "500m", memory: "512Mi"}
