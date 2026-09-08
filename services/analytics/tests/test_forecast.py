@@ -103,6 +103,30 @@ async def test_http_provider_maps_and_validates_complete_response():
     assert calls[1][2]["source_timestamps_ms"] == {"features": 100}
 
 
+async def test_http_provider_sends_availability_and_validates_both_timestamps():
+    calls = []
+
+    def transport(method, url, payload, timeout):
+        calls.append(payload)
+        if method == "GET":
+            return {"status": "ready"}
+        return {
+            "annualized_volatility": {horizon: 0.2 for horizon in HORIZONS},
+            "feature_asof_ts_ms": 100,
+            "feature_available_ts_ms": 160,
+            "generated_ts_ms": 170,
+            "model_resources": {horizon: f"ewma/v1/{horizon}" for horizon in HORIZONS},
+            "model_version": "v1",
+        }
+
+    provider = HttpForecastProvider(base_url="http://model-serving:8080", timeout_ms=500, transport=transport)
+    await provider.load()
+    snapshot = await provider.forecast(FeatureObservation({"log_return": 0.0}, 100, 160), 170)
+    assert calls[1]["available_timestamp_ms"] == 160
+    assert calls[1]["source_timestamps_ms"] == {"features": 160}
+    assert snapshot.feature_available_ts_ms == 160
+
+
 async def test_http_provider_fails_closed_on_incomplete_response():
     def transport(method, url, payload, timeout):
         return {"status": "ready"} if method == "GET" else {"annualized_volatility": {"1m": 0.2}}

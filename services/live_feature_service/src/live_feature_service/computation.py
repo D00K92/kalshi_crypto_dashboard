@@ -13,6 +13,7 @@ SUPPORTED_FREQUENCY = "1m"
 class FeatureRow:
     asset: str
     event_timestamp_ms: int
+    available_timestamp_ms: int
     created_timestamp_ms: int
     synthetic_price: float
     log_return: float | None
@@ -35,6 +36,8 @@ class FeatureRow:
             "asset": self.asset,
             "event_timestamp": datetime.fromtimestamp(self.event_timestamp_ms / 1000, tz=timezone.utc).isoformat(),
             "event_timestamp_ms": self.event_timestamp_ms,
+            "available_timestamp": datetime.fromtimestamp(self.available_timestamp_ms / 1000, tz=timezone.utc).isoformat(),
+            "available_timestamp_ms": self.available_timestamp_ms,
             "created_timestamp": datetime.fromtimestamp(self.created_timestamp_ms / 1000, tz=timezone.utc).isoformat(),
             "values": values,
         }
@@ -113,7 +116,7 @@ class V1FeatureComputer:
             )
         self._last_timestamp_ms = timestamp
         self._last_price = synthetic
-        return FeatureRow(self.asset, timestamp, now_ms, synthetic, log_return, len(prices), forecast_variance)
+        return FeatureRow(self.asset, timestamp, bucket_end, now_ms, synthetic, log_return, len(prices), forecast_variance)
 
     def snapshot(self) -> dict[str, Any]:
         return {

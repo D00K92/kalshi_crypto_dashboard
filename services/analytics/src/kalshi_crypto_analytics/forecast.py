@@ -112,7 +112,14 @@ class ConfiguredForecastProvider:
                     raise
         except Exception as exc:
             raise PricingUnavailable(UnavailableReason.MODEL_INFERENCE_FAILED) from exc
-        return VolatilitySnapshot(outputs, observation.event_timestamp_ms, now_ms, dict(self.resources), self.model_version)
+        return VolatilitySnapshot(
+            outputs,
+            observation.event_timestamp_ms,
+            now_ms,
+            dict(self.resources),
+            self.model_version,
+            observation.available_timestamp_ms,
+        )
 
 
 class HttpForecastProvider:
@@ -150,8 +157,9 @@ class HttpForecastProvider:
             "feature_set": observation.feature_set,
             "feature_version": observation.feature_version,
             "event_timestamp_ms": observation.event_timestamp_ms,
+            "available_timestamp_ms": observation.available_timestamp_ms or observation.event_timestamp_ms,
             "values": observation.values,
-            "source_timestamps_ms": {"features": observation.event_timestamp_ms},
+            "source_timestamps_ms": {"features": observation.available_timestamp_ms or observation.event_timestamp_ms},
         }
         try:
             payload = await asyncio.to_thread(self._transport, "POST", f"{self.base_url}/v1/forecast", request, self.timeout_seconds)
@@ -163,12 +171,15 @@ class HttpForecastProvider:
                 raise ValueError("model-serving returned invalid volatility")
             if int(payload.get("feature_asof_ts_ms")) != observation.event_timestamp_ms:
                 raise ValueError("model-serving feature timestamp mismatch")
+            available_timestamp_ms = observation.available_timestamp_ms or observation.event_timestamp_ms
+            if int(payload.get("feature_available_ts_ms", available_timestamp_ms)) != available_timestamp_ms:
+                raise ValueError("model-serving feature availability timestamp mismatch")
             if payload.get("model_version") != self.model_version:
                 raise ValueError("model-serving version mismatch")
             resources = payload.get("model_resources")
             if not isinstance(resources, dict) or set(resources) != set(HORIZONS):
                 raise ValueError("model-serving returned invalid model resources")
-            return VolatilitySnapshot(values, observation.event_timestamp_ms, int(payload["generated_ts_ms"]), resources, self.model_version)
+            return VolatilitySnapshot(values, observation.event_timestamp_ms, int(payload["generated_ts_ms"]), resources, self.model_version, available_timestamp_ms)
         except Exception as exc:
             LOGGER.exception("model_inference_failed via model-serving: %s", exc)
             raise PricingUnavailable(UnavailableReason.MODEL_INFERENCE_FAILED) from exc

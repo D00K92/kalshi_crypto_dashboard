@@ -39,6 +39,7 @@ class Spot:
 class FeatureObservation:
     values: dict[str, Any]
     event_timestamp_ms: int
+    available_timestamp_ms: int | None = None
     feature_set: str = "market_features"
     feature_version: str = "v1"
 
@@ -70,6 +71,7 @@ class VolatilitySnapshot:
     generated_ts_ms: int
     model_resources: dict[str, str]
     model_version: str = "v1"
+    feature_available_ts_ms: int | None = None
 
     def payload(self) -> dict[str, Any]:
         return {
@@ -77,6 +79,7 @@ class VolatilitySnapshot:
             "asset": "BTCUSD", "model_version": self.model_version,
             "model_resources": self.model_resources,
             "feature_asof_ts_ms": self.feature_asof_ts_ms,
+            "feature_available_ts_ms": self.feature_available_ts_ms or self.feature_asof_ts_ms,
             "generated_ts_ms": self.generated_ts_ms,
             "annualized_volatility": self.annualized_volatility,
         }

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from dataclasses import replace
 from collections.abc import Callable
 
 from .core import (
@@ -44,6 +45,8 @@ class AnalyticsService:
         self.feature_max_age_ms, self.volatility_max_age_ms, self.future_skew_ms = feature_max_age_ms, volatility_max_age_ms, future_skew_ms
         self.tickers: dict[str, Ticker] = {}
         self.ready = False
+        self._last_forecast_available_ts_ms: int | None = None
+        self._cached_volatility: VolatilitySnapshot | None = None
 
     async def start(self) -> None:
         await self.market_data.ensure_group()
@@ -58,8 +61,14 @@ class AnalyticsService:
             spot = await self.market_data.read_spot()
             validate_fresh(spot.generated_ts_ms, now_ms, self.spot_max_age_ms, UnavailableReason.STALE_SPOT, self.future_skew_ms)
             features = await self.market_data.read_features()
-            validate_fresh(features.event_timestamp_ms, now_ms, self.feature_max_age_ms, UnavailableReason.STALE_FEATURES, self.future_skew_ms)
-            volatility = await self.forecasts.forecast(features, now_ms)
+            available_timestamp_ms = features.available_timestamp_ms or features.event_timestamp_ms
+            validate_fresh(available_timestamp_ms, now_ms, self.feature_max_age_ms, UnavailableReason.STALE_FEATURES, self.future_skew_ms)
+            if self._last_forecast_available_ts_ms == available_timestamp_ms and self._cached_volatility is not None:
+                volatility = replace(self._cached_volatility, generated_ts_ms=now_ms)
+            else:
+                volatility = await self.forecasts.forecast(features, now_ms)
+                self._last_forecast_available_ts_ms = available_timestamp_ms
+                self._cached_volatility = volatility
             validate_term_structure(volatility.annualized_volatility)
             validate_fresh(volatility.generated_ts_ms, now_ms, self.volatility_max_age_ms, UnavailableReason.STALE_VOLATILITY, self.future_skew_ms)
             await self.publisher.publish_volatility(volatility)
@@ -117,6 +126,8 @@ class AnalyticsService:
             "expiry_ts_ms": metadata.expiry_ts_ms, "pricing_asof_ts_ms": spot.generated_ts_ms,
             "time_to_expiry_seconds": tau, "annualized_volatility": sigma, "volatility_bracket": list(bracket),
             "volatility_generated_ts_ms": volatility.generated_ts_ms, "interpolation_method": INTERPOLATION_METHOD,
+            "feature_event_timestamp_ms": volatility.feature_asof_ts_ms,
+            "inference_asof_timestamp_ms": volatility.feature_available_ts_ms or volatility.feature_asof_ts_ms,
             "distribution_model": DISTRIBUTION_MODEL, "model_probability": probability,
             "model_value_dollars": probability, "model_value_cents": 100 * probability, **edges,
             "model_version": volatility.model_version, "generated_ts_ms": now_ms,

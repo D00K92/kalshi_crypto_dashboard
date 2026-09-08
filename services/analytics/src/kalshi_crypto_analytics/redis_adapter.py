@@ -69,7 +69,9 @@ class RedisMarketData:
             values = payload["values"]
             if not isinstance(values, dict):
                 raise TypeError("feature values must be an object")
-            return FeatureObservation(values, int(payload["event_timestamp_ms"]))
+            event_timestamp_ms = int(payload["event_timestamp_ms"])
+            available_timestamp_ms = int(payload.get("available_timestamp_ms", event_timestamp_ms))
+            return FeatureObservation(values, event_timestamp_ms, available_timestamp_ms)
         except (TypeError, ValueError, KeyError, json.JSONDecodeError) as exc:
             raise PricingUnavailable(UnavailableReason.STALE_FEATURES) from exc
 

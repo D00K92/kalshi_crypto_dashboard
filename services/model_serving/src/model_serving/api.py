@@ -15,6 +15,7 @@ class ForecastPayload(BaseModel):
     feature_set: str
     feature_version: str
     event_timestamp_ms: int = Field(gt=0)
+    available_timestamp_ms: int | None = Field(default=None, gt=0)
     values: dict[str, Any]
     source_timestamps_ms: dict[str, int]
 
@@ -42,6 +43,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             feature_set=payload.feature_set,
             feature_version=payload.feature_version,
             event_timestamp_ms=payload.event_timestamp_ms,
+            available_timestamp_ms=payload.available_timestamp_ms or payload.event_timestamp_ms,
             values=payload.values,
             source_timestamps_ms=payload.source_timestamps_ms,
         )
@@ -59,6 +61,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {
             "annualized_volatility": result.annualized_volatility,
             "feature_asof_ts_ms": result.feature_asof_ts_ms,
+            "feature_available_ts_ms": result.feature_available_ts_ms,
             "generated_ts_ms": result.generated_ts_ms,
             "model_resources": result.model_resources,
             "model_version": result.model_version,

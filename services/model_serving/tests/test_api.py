@@ -34,6 +34,7 @@ def test_forecast_returns_complete_term_structure():
     assert set(body["annualized_volatility"]) == {"1m", "5m", "15m", "30m", "1h"}
     assert len(set(body["annualized_volatility"].values())) == 1
     assert body["model_version"] == "v1"
+    assert body["feature_available_ts_ms"] == body["feature_asof_ts_ms"]
 
 
 def test_forecast_rejects_missing_ewma_state():
@@ -53,6 +54,16 @@ def test_forecast_rejects_stale_features():
     old = int(time.time() * 1000) - 100
     response = client.post("/v1/forecast", json=payload(event_timestamp_ms=old))
     assert response.status_code == 422
+
+
+def test_forecast_uses_availability_timestamp_for_freshness():
+    client = TestClient(create_app(Settings(max_feature_age_ms=10)))
+    now = int(time.time() * 1000)
+    response = client.post(
+        "/v1/forecast",
+        json=payload(event_timestamp_ms=now - 100_000, available_timestamp_ms=now),
+    )
+    assert response.status_code == 200
 
 
 def test_forecast_rejects_non_finite_variance():

@@ -14,6 +14,7 @@ class ForecastRequest:
     feature_set: str
     feature_version: str
     event_timestamp_ms: int
+    available_timestamp_ms: int
     values: dict[str, object]
     source_timestamps_ms: dict[str, int]
 
@@ -25,6 +26,7 @@ class ForecastResponse:
     generated_ts_ms: int
     model_resources: dict[str, str]
     model_version: str
+    feature_available_ts_ms: int
 
 
 class EWMAProvider:
@@ -51,8 +53,10 @@ class EWMAProvider:
             raise ValueError("invalid market feature values") from exc
         if request.event_timestamp_ms > now_ms + future_skew_ms:
             raise ValueError("feature timestamp is in the future")
-        if now_ms - request.event_timestamp_ms > max_age_ms:
-            raise ValueError("feature timestamp is stale")
+        if request.available_timestamp_ms > now_ms + future_skew_ms:
+            raise ValueError("feature availability timestamp is in the future")
+        if now_ms - request.available_timestamp_ms > max_age_ms:
+            raise ValueError("feature availability timestamp is stale")
         state = request.values.get("ewma_state")
         if not isinstance(state, dict):
             raise ValueError("ewma_state is required")
@@ -82,4 +86,4 @@ class EWMAProvider:
             raise ValueError("EWMA forecast is invalid")
         outputs = {horizon: annualized for horizon in HORIZONS}
         resources = {horizon: f"ewma/{self.model_version}/{horizon}" for horizon in HORIZONS}
-        return ForecastResponse(outputs, request.event_timestamp_ms, now_ms, resources, self.model_version)
+        return ForecastResponse(outputs, request.event_timestamp_ms, now_ms, resources, self.model_version, request.available_timestamp_ms)

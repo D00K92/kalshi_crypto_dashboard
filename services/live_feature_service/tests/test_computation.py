@@ -16,6 +16,7 @@ def test_matches_offline_synthetic_and_log_return_formula():
     first = computer.compute(bar(60_000, {"a": 100, "b": 102}), now_ms=61_000)
     second = computer.compute(bar(120_000, {"a": 101, "b": 103}), now_ms=121_000)
     assert first.synthetic_price == 101
+    assert first.available_timestamp_ms == 120_000
     assert first.log_return is None
     assert first.venue_count == 2
     assert second.synthetic_price == 102

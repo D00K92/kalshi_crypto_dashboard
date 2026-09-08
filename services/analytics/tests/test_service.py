@@ -37,6 +37,13 @@ class Forecast:
     async def forecast(self, observation, now): return VolatilitySnapshot(VOLS, observation.event_timestamp_ms, now, {h: h for h in VOLS})
 
 
+class CountingForecast(Forecast):
+    def __init__(self): self.calls = 0
+    async def forecast(self, observation, now):
+        self.calls += 1
+        return await super().forecast(observation, now)
+
+
 class Publisher:
     def __init__(self): self.prices, self.unavailable_reasons, self.active = [], [], None
     async def publish_volatility(self, snapshot): self.vol = snapshot
@@ -54,6 +61,32 @@ async def test_restart_bootstrap_and_missed_pubsub_recovery_prices_market():
     await service.start(); await service.cycle()
     assert service.ready is True
     assert out.prices[0]["model_probability"] > .5
+
+
+async def test_forecast_runs_once_per_feature_availability_timestamp():
+    item = ticker()
+    data, out, forecasts = Data(bootstrap=[item]), Publisher(), CountingForecast()
+    metadata = {item.market_ticker: MarketMetadata(item.market_ticker, item.event_ticker, 100, NOW + 300_000, "open")}
+    service = AnalyticsService(data, Meta(metadata), forecasts, out, clock_ms=lambda: NOW)
+    await service.start()
+    await service.cycle()
+    await service.cycle()
+    assert forecasts.calls == 1
+
+
+async def test_feature_freshness_uses_completion_timestamp_not_event_start():
+    item = ticker()
+    data, out = Data(bootstrap=[item]), Publisher()
+
+    async def read_features():
+        return FeatureObservation({"x": 1}, NOW - 100_000, NOW)
+
+    data.read_features = read_features
+    metadata = {item.market_ticker: MarketMetadata(item.market_ticker, item.event_ticker, 100, NOW + 300_000, "open")}
+    service = AnalyticsService(data, Meta(metadata), Forecast(), out, clock_ms=lambda: NOW, feature_max_age_ms=10)
+    await service.start()
+    await service.cycle()
+    assert service.ready is True
 
 
 @pytest.mark.parametrize(("delta", "reason"), [(-60_001, "stale_ticker"), (2_001, "stale_ticker")])
