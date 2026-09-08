@@ -6,7 +6,7 @@ from dataclasses import dataclass
 HORIZONS = ("1m", "5m", "15m", "30m", "1h")
 HORIZON_SECONDS = {"1m": 60, "5m": 300, "15m": 900, "30m": 1_800, "1h": 3_600}
 SECONDS_PER_YEAR = 365 * 24 * 60 * 60
-SUPPORTED_FREQUENCIES = {"1s": 1, "5s": 5, "1m": 60, "5m": 300, "10m": 600, "15m": 900, "30m": 1_800, "1h": 3_600}
+SUPPORTED_FREQUENCIES = {"10s": 10, "1s": 1, "5s": 5, "1m": 60, "5m": 300, "10m": 600, "15m": 900, "30m": 1_800, "1h": 3_600}
 
 
 @dataclass(frozen=True, slots=True)

@@ -32,7 +32,7 @@ spec:
         - name: REDIS_URL
           value: "redis://${REDIS_HOST}:${REDIS_PORT}/0"
         - name: BARS_STREAM
-          value: "stream:bars:v1"
+          value: "stream:primitives:v1"
         - name: FEATURE_STREAM
           value: "stream:features:v1"
         - name: FEATURE_KEY
@@ -45,6 +45,12 @@ spec:
           value: "0.96"
         - name: MAX_BAR_AGE_MS
           value: "120000"
+        - name: HISTORY_BARS
+          value: "450"
+        - name: REPLAY_COUNT
+          value: "5000"
+        - name: PRIMITIVE_STREAM_MAXLEN
+          value: "100000"
         - name: HEALTH_PORT
           value: "8080"
         ports:

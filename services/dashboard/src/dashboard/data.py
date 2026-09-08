@@ -95,22 +95,17 @@ class RedisReader:
         }
 
     def read_fast_market_data(self) -> dict[str, Any]:
-        """Read the high-frequency book and spot keys."""
+        """Read the high-frequency spot key used by dashboard panels."""
         try:
-            values = self.client.mget(
-                f"{self.prefix}:book:{self.instrument}:latest",
-                f"{self.prefix}:spot:{self.instrument}:latest",
-            )
+            values = self.client.mget(f"{self.prefix}:spot:{self.instrument}:latest")
         except redis.RedisError as exc:
             return {
-                "book": {"bids": [], "asks": [], "venues": [], "stale_venues": []},
                 "spot": {"price": None},
                 "redis_ok": False,
                 "redis_error": type(exc).__name__,
             }
         return {
-            "book": decode(values[0], {"bids": [], "asks": [], "venues": [], "stale_venues": []}),
-            "spot": decode(values[1], {"price": None}),
+            "spot": decode(values[0], {"price": None}),
             "redis_ok": True,
             "redis_error": None,
         }

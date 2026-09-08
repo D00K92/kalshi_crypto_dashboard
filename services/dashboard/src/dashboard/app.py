@@ -9,7 +9,6 @@ from dash import Dash, Input, Output, State, dcc, html
 from dashboard.data import RedisReader, redis_client_from_env
 from dashboard.kalshi_contracts import contract_table
 from dashboard.kalshi_monitor import kalshi_monitor
-from dashboard.orderbook import orderbook_ladder
 from dashboard.plots import candle_figure, volume_figure
 
 REDIS_PREFIX = os.getenv("AGGREGATOR_OUTPUT_PREFIX", "market")
@@ -25,14 +24,12 @@ def layout() -> html.Div:
         dcc.Interval(id="market-refresh", interval=250, n_intervals=0),
         dcc.Interval(id="candle-refresh", interval=500, n_intervals=0),
         dcc.Interval(id="kalshi-refresh", interval=1000, n_intervals=0),
-        dcc.Store(id="book-data"),
         dcc.Store(id="spot-data"),
         dcc.Store(id="candle-data"),
         dcc.Store(id="status-data"),
         dcc.Store(id="kalshi-data"),
         html.Div([
             html.Div([html.H3("BTCUSDT", className="panel-title"), dcc.Graph(id="candles", config={"displayModeBar": False}), dcc.Graph(id="volume", config={"displayModeBar": False})], style=CARD),
-            html.Div([html.Div(id="orderbook")], style={"minWidth": 0}),
             html.Div([html.H3("Kalshi contract monitor", className="panel-title"), html.Div(id="kalshi-chain")], style=CARD),
         ], className="top-grid"),
         html.Div([html.H3("Active KXBTCD contracts", className="panel-title"), html.Div(id="kalshi-contracts")], style={**CARD, "marginTop": "14px"}),
@@ -59,14 +56,13 @@ def readyz():
 
 
 @app.callback(
-    Output("book-data", "data"),
     Output("spot-data", "data"),
     Output("status-data", "data"),
     Input("market-refresh", "n_intervals"),
 )
 def refresh_market_data(_: int):
     data = reader.read_fast_market_data()
-    return data["book"], data["spot"], {"redis_ok": data["redis_ok"], "redis_error": data["redis_error"]}
+    return data["spot"], {"redis_ok": data["redis_ok"], "redis_error": data["redis_error"]}
 
 
 @app.callback(Output("candle-data", "data"), Input("candle-refresh", "n_intervals"))
@@ -91,11 +87,6 @@ def refresh_candles(candles: list[dict] | None, spot: dict | None):
 @app.callback(Output("volume", "figure"), Input("candle-data", "data"))
 def refresh_volume(candles: list[dict] | None):
     return volume_figure(candles or [])
-
-
-@app.callback(Output("orderbook", "children"), Input("book-data", "data"))
-def refresh_orderbook(book: dict | None):
-    return orderbook_ladder(book or {"bids": [], "asks": [], "venues": [], "stale_venues": []})
 
 
 @app.callback(Output("kalshi-chain", "children"), Input("kalshi-data", "data"))
