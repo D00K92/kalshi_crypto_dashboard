@@ -62,7 +62,7 @@ def main() -> None:
         parser.error("--parallelism must be between 1 and 4")
     sql = SQL_PATH.read_text().replace("${project}", args.project)
     dates = [args.start_date + timedelta(days=i) for i in range((args.end_date - args.start_date).days)]
-    action = "validate" if args.dry_run else "backfill"
+    action = "validated" if args.dry_run else "backfilled"
     total_bytes = 0
     total_rows = 0
     with ThreadPoolExecutor(max_workers=args.parallelism) as pool:
@@ -83,12 +83,12 @@ def main() -> None:
             total_bytes += bytes_processed
             total_rows += rows
             print(
-                f"{action}d {target_date.isoformat()} "
+                f"{action} {target_date.isoformat()} "
                 f"bytes={bytes_processed:,} rows={rows:,}",
                 flush=True,
             )
     print(
-        f"{action}d {len(dates)} UTC days; bytes={total_bytes:,}; rows={total_rows:,}; "
+        f"{action} {len(dates)} UTC days; bytes={total_bytes:,}; rows={total_rows:,}; "
         f"parallelism={args.parallelism}",
         flush=True,
     )
