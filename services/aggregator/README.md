@@ -11,10 +11,20 @@ does not compute ML feature rows; `live_feature_service` consumes
 `stream:bars:v1` and `stream:orderbook:v1`, computes features/EWMA state, and
 publishes the Feast-compatible feature stream.
 
-`stream:orderbook:v1` is event-driven rather than fixed-frequency: one record
-is emitted for each accepted input order-book snapshot. Its cadence depends on
-the venue feeds and ingestion rate. The `500ms` freshness setting controls
-which venue books are included; it does not throttle publication.
+`stream:orderbook:v1` is an event-driven primitive stream: one per-venue
+`market_book` record is emitted for each accepted input order-book snapshot.
+Its cadence depends on the venue feeds and ingestion rate. The `500ms`
+freshness setting is retained for internal state quality and does not throttle
+publication. The old cross-venue `aggregated_orderbook` publication is no
+longer emitted.
+
+Completed records on `stream:bars:v1` retain the existing bar fields and also
+expose additive canonical trade primitives used by the offline resampler
+(`primitive_schema_version=2`): `p_open`, `p_high`, `p_low`, `p_trade`,
+`p_close`, `p_trade_mean`, `v_trade`, `v_buy`, `v_sell`, `cnt_trade`, and
+fill-time statistics. Order-book primitives remain on `stream:orderbook:v1`;
+time-bucketed per-venue book columns are the next compatibility-safe
+expansion.
 
 Run locally with Redis available:
 

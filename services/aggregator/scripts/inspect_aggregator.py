@@ -82,7 +82,7 @@ async def inspect(seconds: int) -> None:
         if seconds <= 0:
             return
         pubsub = client.pubsub()
-        await pubsub.subscribe("pub:aggregated_orderbook", "pub:aggregated_spot", "pub:aggregated_candles")
+        await pubsub.subscribe("pub:aggregated_spot", "pub:aggregated_candles")
         print(f"\nWatching aggregated updates for {seconds}s...")
         deadline = time.monotonic() + seconds
         while time.monotonic() < deadline:
@@ -91,9 +91,7 @@ async def inspect(seconds: int) -> None:
                 continue
             channel = message["channel"].decode() if isinstance(message["channel"], bytes) else message["channel"]
             payload = orjson.loads(message["data"])
-            if channel == "pub:aggregated_orderbook":
-                print(f"update orderbook age_ms={age_ms(payload)} venues={payload.get('venues')} stale={payload.get('stale_venues')}")
-            elif channel == "pub:aggregated_spot":
+            if channel == "pub:aggregated_spot":
                 print(f"update spot price={payload.get('price')} volume={payload.get('total_volume')} used={payload.get('used_venues')}")
             else:
                 print(f"update {channel} rows={len(payload)}")

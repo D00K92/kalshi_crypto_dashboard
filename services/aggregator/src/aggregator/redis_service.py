@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 
 import orjson
 import redis.asyncio as redis
@@ -79,15 +80,14 @@ class AggregatorService:
     async def _handle_book(self, event: dict, published_ts_ms: int | None = None, pipeline=None) -> bool:
         if event.get("event_type") != "book_snapshot":
             return False
-        snapshot = self.state.apply_book(event, published_ts_ms=published_ts_ms)
-        if snapshot is None:
+        if self.state.apply_book(event, published_ts_ms=published_ts_ms) is None:
             return False
+        snapshot = self.state.primitive_book_snapshot(event, published_ts_ms or int(time.time() * 1000))
         encoded = orjson.dumps(snapshot)
         prefix = self.settings.output_prefix
         pipe = pipeline or self.client.pipeline(transaction=False)
         pipe.set(f"{prefix}:book:BTCUSDT:latest", encoded)
         pipe.xadd(getattr(self.settings, "orderbook_stream", "stream:orderbook:v1"), {"payload": encoded}, maxlen=getattr(self.settings, "orderbook_maxlen", 10_000), approximate=True)
-        pipe.publish(f"{prefix}:aggregated_orderbook", encoded)
         if pipeline is None:
             await pipe.execute()
         return True

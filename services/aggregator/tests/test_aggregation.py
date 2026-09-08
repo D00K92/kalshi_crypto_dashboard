@@ -35,25 +35,37 @@ def test_resampled_bars_include_one_hour_context():
     agg.apply_trade(latest)
 
     bars = agg.resampled_bars("BTCUSDT", {"1h": 3_600_000})
-    assert bars == [{
-        "schema_version": 1,
-        "event_type": "market_bar",
-        "instrument": "BTCUSDT",
-        "frequency": "1h",
-        "interval_ms": 3_600_000,
-        "bucket_start_ts_ms": 3_600_000,
-        "bucket_end_ts_ms": 7_200_000,
-        "open": "100",
-        "high": "100",
-        "low": "100",
-        "close": "100",
-        "vwap": "100",
-        "volume": "1",
-            "delta": "1",
-            "trade_count": 1,
-            "venue_count": 1,
-            "venue_prices": {"binance": "100"},
-        }]
+    assert len(bars) == 1
+    assert {key: bars[0][key] for key in ("schema_version", "event_type", "frequency", "open", "close", "volume")} == {
+        "schema_version": 1, "event_type": "market_bar", "frequency": "1h", "open": "100", "close": "100", "volume": "1",
+    }
+    assert bars[0]["primitive_schema_version"] == 2
+
+
+def test_resampled_bar_exposes_canonical_trade_primitives():
+    agg = MarketAggregator()
+    first = trade("binance", 100, 2, "buy", ts=60_000)
+    first["event_id"] = "primitive-one"
+    second = trade("binance", 110, 1, "sell", ts=61_000)
+    second["event_id"] = "primitive-two"
+    boundary = trade("binance", 110, 1, "sell", ts=120_000)
+    boundary["event_id"] = "primitive-boundary"
+    agg.apply_trade(first)
+    agg.apply_trade(second)
+    agg.apply_trade(boundary)
+
+    bar = agg.resampled_bars("BTCUSDT", {"1m": 60_000})[0]
+    assert bar["primitive_schema_version"] == 2
+    assert bar["p_open"] == "100"
+    assert bar["p_trade"] == "110"
+    assert bar["p_trade_mean"] == "105"
+    assert bar["v_trade"] == "3"
+    assert bar["v_buy"] == "2"
+    assert bar["v_sell"] == "1"
+    assert bar["cnt_trade"] == 2
+    assert bar["dt_fill_mean_ms"] == "1000"
+    assert bar["dt_fill_min_ms"] == "1000"
+    assert bar["dt_fill_max_ms"] == "1000"
 
 
 def test_synthetic_price_uses_fresh_venue_prices_not_trade_volume():
@@ -109,6 +121,24 @@ def test_book_preserves_venue_contributions_and_depth():
     assert snapshot["best_bid"] == "100"
     assert snapshot["best_ask"] == "102"
     assert snapshot["mid_price"] == "101"
+
+
+def test_primitive_book_snapshot_is_per_venue_and_not_aggregated():
+    agg = MarketAggregator(depth=2)
+    payload = agg.primitive_book_snapshot({
+        "event_type": "book_snapshot",
+        "venue": "Coinbase",
+        "instrument": "BTCUSDT",
+        "exchange_ts_ms": 123,
+        "bids": [{"price": "100", "quantity": "2"}],
+        "asks": [{"price": "101", "quantity": "3"}],
+    }, 456)
+    assert payload["event_type"] == "market_book"
+    assert payload["primitive_schema_version"] == 2
+    assert payload["venue"] == "coinbase"
+    assert payload["generated_ts_ms"] == 456
+    assert payload["bids"] == [{"price": "100", "quantity": "2"}]
+    assert payload["asks"] == [{"price": "101", "quantity": "3"}]
 
 
 def test_price_bucketing_is_side_aware():

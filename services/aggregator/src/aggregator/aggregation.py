@@ -58,6 +58,7 @@ class MarketAggregator:
         self.books: dict[str, VenueBook] = {}
         self.trade_buckets: dict[int, dict[str, Any]] = {}
         self.latest_trades: dict[str, dict[str, Any]] = {}
+        self._last_trade_ts_ms: dict[str, int] = {}
         self._last_synthetic_price: Decimal | None = None
         self._seen_events: set[str] = set()
 
@@ -86,9 +87,13 @@ class MarketAggregator:
         ts = int(event.get("exchange_ts_ms") or event.get("received_ts_ms") or time.time() * 1000)
         received = int(event.get("received_ts_ms") or time.time() * 1000)
         bucket = _bucket(ts)
-        state = self.trade_buckets.setdefault(bucket, {"notional": Decimal("0"), "volume": Decimal("0"), "price_sum": Decimal("0"), "trade_count": 0, "open": None, "high": None, "low": None, "close": None, "delta": Decimal("0"), "venues": defaultdict(lambda: {"notional": Decimal("0"), "volume": Decimal("0"), "price_sum": Decimal("0"), "trade_count": 0})})
+        state = self.trade_buckets.setdefault(bucket, {"notional": Decimal("0"), "volume": Decimal("0"), "buy_volume": Decimal("0"), "sell_volume": Decimal("0"), "price_sum": Decimal("0"), "trade_count": 0, "open": None, "high": None, "low": None, "close": None, "delta": Decimal("0"), "fill_intervals": [], "venues": defaultdict(lambda: {"notional": Decimal("0"), "volume": Decimal("0"), "buy_volume": Decimal("0"), "sell_volume": Decimal("0"), "price_sum": Decimal("0"), "trade_count": 0, "open": None, "high": None, "low": None, "close": None, "fill_intervals": []})})
         state["notional"] += price * quantity
         state["volume"] += quantity
+        if event.get("taker_side") == "buy":
+            state["buy_volume"] += quantity
+        elif event.get("taker_side") == "sell":
+            state["sell_volume"] += quantity
         state["price_sum"] += price
         state["trade_count"] += 1
         state["open"] = price if state["open"] is None else state["open"]
@@ -96,11 +101,26 @@ class MarketAggregator:
         state["low"] = price if state["low"] is None else min(state["low"], price)
         state["close"] = price
         state["delta"] += quantity if event.get("taker_side") == "buy" else -quantity
+        previous_trade_ts = self._last_trade_ts_ms.get(venue)
+        if previous_trade_ts is not None and ts >= previous_trade_ts:
+            interval = Decimal(ts - previous_trade_ts)
+            state["fill_intervals"].append(interval)
+        self._last_trade_ts_ms[venue] = ts
         venue_state = state["venues"][venue]
         venue_state["notional"] += price * quantity
         venue_state["volume"] += quantity
+        if event.get("taker_side") == "buy":
+            venue_state["buy_volume"] += quantity
+        elif event.get("taker_side") == "sell":
+            venue_state["sell_volume"] += quantity
         venue_state["price_sum"] += price
         venue_state["trade_count"] += 1
+        venue_state["open"] = price if venue_state["open"] is None else venue_state["open"]
+        venue_state["high"] = price if venue_state["high"] is None else max(venue_state["high"], price)
+        venue_state["low"] = price if venue_state["low"] is None else min(venue_state["low"], price)
+        venue_state["close"] = price
+        if previous_trade_ts is not None and ts >= previous_trade_ts:
+            venue_state["fill_intervals"].append(Decimal(ts - previous_trade_ts))
         self.latest_trades[venue] = {"price": price, "received_ts_ms": received}
         self._trim_buckets(bucket)
         return self.spot_snapshot(bucket, str(event.get("instrument", "BTCUSDT")).upper(), state)
@@ -122,6 +142,25 @@ class MarketAggregator:
         ask_depth = sum((Decimal(level["total_quantity"]) for level in asks), Decimal("0"))
         imbalance = (bid_depth - ask_depth) / (bid_depth + ask_depth) if bid_depth + ask_depth else None
         return {"schema_version": 1, "event_type": "aggregated_book", "instrument": instrument, "generated_ts_ms": now_ms, "depth": self.depth, "price_tick": str(tick), "bucket_method": "effective_price_bid_floor_ask_ceiling_uncrossed", "taker_fees": {venue: self._fmt(fee) for venue, fee in sorted(self.taker_fees.items())}, "venues": sorted(active), "stale_venues": stale, "bids": bids, "asks": asks, "best_bid": self._fmt(best_bid), "best_ask": self._fmt(best_ask), "mid_price": self._fmt(mid), "spread": self._fmt(spread), "bid_depth": self._fmt(bid_depth), "ask_depth": self._fmt(ask_depth), "imbalance": self._fmt(imbalance)}
+
+    def primitive_book_snapshot(self, event: dict[str, Any], generated_ts_ms: int) -> dict[str, Any]:
+        """Return one venue's canonical book state without cross-venue aggregation."""
+        venue = str(event["venue"]).lower()
+        instrument = str(event.get("instrument", "BTCUSDT")).upper()
+        bids = self._levels(event.get("bids", []), reverse=True)[: self.depth]
+        asks = self._levels(event.get("asks", []), reverse=False)[: self.depth]
+        return {
+            "schema_version": 1,
+            "primitive_schema_version": 2,
+            "event_type": "market_book",
+            "instrument": instrument,
+            "venue": venue,
+            "generated_ts_ms": generated_ts_ms,
+            "exchange_ts_ms": event.get("exchange_ts_ms"),
+            "depth": self.depth,
+            "bids": [{"price": self._fmt(price), "quantity": self._fmt(quantity)} for price, quantity in bids],
+            "asks": [{"price": self._fmt(price), "quantity": self._fmt(quantity)} for price, quantity in asks],
+        }
 
     def spot_snapshot(self, bucket: int, instrument: str, state: dict[str, Any]) -> dict[str, Any]:
         now_ms = int(time.time() * 1000)
@@ -184,7 +223,11 @@ class MarketAggregator:
                     }
                     if venue_state["trade_count"]:
                         venue_prices[venue] = self._fmt(venue_state["price_sum"] / venue_state["trade_count"])
-                bars.append({"schema_version": 1, "event_type": "market_bar", "instrument": instrument, "frequency": frequency, "interval_ms": interval, "bucket_start_ts_ms": start, "bucket_end_ts_ms": end, "open": self._fmt(parts[0]["open"]), "high": self._fmt(max(part["high"] for part in parts)), "low": self._fmt(min(part["low"] for part in parts)), "close": self._fmt(parts[-1]["close"]), "vwap": self._fmt(notional / volume), "volume": self._fmt(volume), "delta": self._fmt(delta), "trade_count": sum(part["trade_count"] for part in parts), "venue_count": len(venue_prices), "venue_prices": venue_prices})
+                trade_count = sum(part["trade_count"] for part in parts)
+                buy_volume = sum((part["buy_volume"] for part in parts), Decimal("0"))
+                sell_volume = sum((part["sell_volume"] for part in parts), Decimal("0"))
+                fill_intervals = [value for part in parts for value in part["fill_intervals"]]
+                bars.append({"schema_version": 1, "primitive_schema_version": 2, "event_type": "market_bar", "instrument": instrument, "frequency": frequency, "interval_ms": interval, "bucket_start_ts_ms": start, "bucket_end_ts_ms": end, "open": self._fmt(parts[0]["open"]), "high": self._fmt(max(part["high"] for part in parts)), "low": self._fmt(min(part["low"] for part in parts)), "close": self._fmt(parts[-1]["close"]), "vwap": self._fmt(notional / volume), "volume": self._fmt(volume), "delta": self._fmt(delta), "trade_count": trade_count, "p_open": self._fmt(parts[0]["open"]), "p_high": self._fmt(max(part["high"] for part in parts)), "p_low": self._fmt(min(part["low"] for part in parts)), "p_trade": self._fmt(parts[-1]["close"]), "p_close": self._fmt(parts[-1]["close"]), "p_trade_mean": self._fmt(sum((part["price_sum"] for part in parts), Decimal("0")) / trade_count), "v_trade": self._fmt(volume), "v_buy": self._fmt(buy_volume), "v_sell": self._fmt(sell_volume), "cnt_trade": trade_count, "dt_fill_mean_ms": self._fmt(sum(fill_intervals, Decimal("0")) / len(fill_intervals)) if fill_intervals else None, "dt_fill_max_ms": self._fmt(max(fill_intervals)) if fill_intervals else None, "dt_fill_min_ms": self._fmt(min(fill_intervals)) if fill_intervals else None, "venue_count": len(venue_prices), "venue_prices": venue_prices})
         return bars
 
     def export_candle_state(self) -> dict[str, Any]:
@@ -195,6 +238,8 @@ class MarketAggregator:
                 "start": start,
                 "notional": self._fmt(state["notional"]),
                 "volume": self._fmt(state["volume"]),
+                "buy_volume": self._fmt(state.get("buy_volume", Decimal("0"))),
+                "sell_volume": self._fmt(state.get("sell_volume", Decimal("0"))),
                 "price_sum": self._fmt(state["price_sum"]),
                 "trade_count": state["trade_count"],
                 "open": self._fmt(state["open"]),
@@ -202,12 +247,20 @@ class MarketAggregator:
                 "low": self._fmt(state["low"]),
                 "close": self._fmt(state["close"]),
                 "delta": self._fmt(state["delta"]),
+                "fill_intervals": [self._fmt(value) for value in state.get("fill_intervals", [])],
                 "venues": {
                     venue: {
                         "notional": self._fmt(values["notional"]),
                         "volume": self._fmt(values["volume"]),
+                        "buy_volume": self._fmt(values.get("buy_volume", Decimal("0"))),
+                        "sell_volume": self._fmt(values.get("sell_volume", Decimal("0"))),
                         "price_sum": self._fmt(values["price_sum"]),
                         "trade_count": values["trade_count"],
+                        "open": self._fmt(values.get("open")),
+                        "high": self._fmt(values.get("high")),
+                        "low": self._fmt(values.get("low")),
+                        "close": self._fmt(values.get("close")),
+                        "fill_intervals": [self._fmt(value) for value in values.get("fill_intervals", [])],
                     }
                     for venue, values in sorted(state["venues"].items())
                 },
@@ -223,18 +276,26 @@ class MarketAggregator:
             start = int(raw["start"])
             state = {
                 "notional": _dec(raw["notional"]), "volume": _dec(raw["volume"]),
+                "buy_volume": _dec(raw.get("buy_volume", "0")), "sell_volume": _dec(raw.get("sell_volume", "0")),
                 "price_sum": _dec(raw["price_sum"]), "trade_count": int(raw["trade_count"]),
                 "open": _dec(raw["open"]) if raw.get("open") is not None else None,
                 "high": _dec(raw["high"]) if raw.get("high") is not None else None,
                 "low": _dec(raw["low"]) if raw.get("low") is not None else None,
                 "close": _dec(raw["close"]) if raw.get("close") is not None else None,
                 "delta": _signed_dec(raw["delta"]) if raw.get("delta") is not None else Decimal("0"),
-                "venues": defaultdict(lambda: {"notional": Decimal("0"), "volume": Decimal("0"), "price_sum": Decimal("0"), "trade_count": 0}),
+                "fill_intervals": [_dec(value) for value in raw.get("fill_intervals", [])],
+                "venues": defaultdict(lambda: {"notional": Decimal("0"), "volume": Decimal("0"), "buy_volume": Decimal("0"), "sell_volume": Decimal("0"), "price_sum": Decimal("0"), "trade_count": 0, "open": None, "high": None, "low": None, "close": None, "fill_intervals": []}),
             }
             for venue, values in raw.get("venues", {}).items():
                 state["venues"][venue] = {
                     "notional": _dec(values["notional"]), "volume": _dec(values["volume"]),
+                    "buy_volume": _dec(values.get("buy_volume", "0")), "sell_volume": _dec(values.get("sell_volume", "0")),
                     "price_sum": _dec(values["price_sum"]), "trade_count": int(values["trade_count"]),
+                    "open": _dec(values["open"]) if values.get("open") is not None else None,
+                    "high": _dec(values["high"]) if values.get("high") is not None else None,
+                    "low": _dec(values["low"]) if values.get("low") is not None else None,
+                    "close": _dec(values["close"]) if values.get("close") is not None else None,
+                    "fill_intervals": [_dec(value) for value in values.get("fill_intervals", [])],
                 }
             restored[start] = state
         self.trade_buckets = restored
