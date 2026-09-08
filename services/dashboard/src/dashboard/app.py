@@ -26,6 +26,7 @@ def layout() -> html.Div:
         dcc.Interval(id="kalshi-refresh", interval=1000, n_intervals=0),
         dcc.Store(id="spot-data"),
         dcc.Store(id="candle-data"),
+        dcc.Store(id="forming-candle"),
         dcc.Store(id="status-data"),
         dcc.Store(id="kalshi-data"),
         html.Div([
@@ -70,6 +71,31 @@ def refresh_candle_data(_: int):
     return reader.read_candle_data()["candles"]
 
 
+@app.callback(
+    Output("forming-candle", "data"),
+    Input("spot-data", "data"), Input("candle-data", "data"),
+    State("forming-candle", "data"),
+)
+def update_forming_candle(spot: dict | None, candles: list[dict] | None, previous: dict | None):
+    """Keep the display-only candle moving between canonical bar publications."""
+    try:
+        price = float((spot or {})["price"])
+        timestamp = int((spot or {}).get("generated_ts_ms") or 0)
+    except (KeyError, TypeError, ValueError):
+        return previous
+    interval = 30_000
+    start = (timestamp // interval) * interval
+    if not previous or previous.get("bucket_start_ts_ms") != start:
+        base = next((row for row in reversed(candles or []) if row.get("bucket_start_ts_ms") == start), None)
+        opening = float(base["open"]) if base else price
+        return {"bucket_start_ts_ms": start, "open": opening, "high": max(opening, price), "low": min(opening, price), "close": price, "volume": (base or {}).get("volume", "0")}
+    previous = dict(previous)
+    previous["high"] = max(float(previous["high"]), price)
+    previous["low"] = min(float(previous["low"]), price)
+    previous["close"] = price
+    return previous
+
+
 @app.callback(Output("kalshi-data", "data"), Input("kalshi-refresh", "n_intervals"), State("spot-data", "data"))
 def refresh_kalshi_data(_: int, spot_payload: dict | None):
     return reader.read_kalshi_data((spot_payload or {}).get("price"))
@@ -79,9 +105,9 @@ def _kalshi_snapshot(payload: dict | None) -> dict:
     return payload or {"contracts": [], "spot": None, "redis_ok": False, "redis_error": "no data"}
 
 
-@app.callback(Output("candles", "figure"), Input("candle-data", "data"), Input("spot-data", "data"))
-def refresh_candles(candles: list[dict] | None, spot: dict | None):
-    return candle_figure(candles or [], (spot or {}).get("price"))
+@app.callback(Output("candles", "figure"), Input("candle-data", "data"), Input("spot-data", "data"), Input("forming-candle", "data"))
+def refresh_candles(candles: list[dict] | None, spot: dict | None, forming: dict | None):
+    return candle_figure(candles or [], (spot or {}).get("price"), forming)
 
 
 @app.callback(Output("volume", "figure"), Input("candle-data", "data"))

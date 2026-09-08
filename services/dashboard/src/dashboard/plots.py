@@ -17,9 +17,13 @@ def _figure(**kwargs: Any) -> go.Figure:
     return fig
 
 
-def candle_figure(rows: list[dict[str, Any]], synthetic_price: Any = None) -> go.Figure:
+def candle_figure(rows: list[dict[str, Any]], synthetic_price: Any = None, forming: dict[str, Any] | None = None) -> go.Figure:
     # The aggregator retains an hour; the dashboard shows the latest 60 candles.
     rows = rows[-60:]
+    if forming:
+        start = forming.get("bucket_start_ts_ms")
+        rows = [row for row in rows if row.get("bucket_start_ts_ms") != start] + [forming]
+        rows = rows[-60:]
     x = [datetime.fromtimestamp(int(row["bucket_start_ts_ms"]) / 1000, tz=timezone.utc) for row in rows]
     fig = _figure()
     fig.add_trace(go.Candlestick(x=x, open=[row["open"] for row in rows], high=[row["high"] for row in rows], low=[row["low"] for row in rows], close=[row["close"] for row in rows], name="BTCUSDT", increasing_line_color="#19c37d", decreasing_line_color="#ef5350"))

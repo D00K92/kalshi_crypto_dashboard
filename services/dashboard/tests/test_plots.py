@@ -28,6 +28,13 @@ def test_candle_figure_places_synthetic_price_inside_chart():
     assert figure.layout.shapes[0].y0 == 1.234
 
 
+def test_candle_figure_replaces_current_bar_with_forming_candle():
+    rows = [{"bucket_start_ts_ms": 0, "open": "1", "high": "2", "low": "0", "close": "1", "volume": "3"}]
+    figure = candle_figure(rows, forming={"bucket_start_ts_ms": 0, "open": 1, "high": 3, "low": 1, "close": 3, "volume": "3"})
+    assert list(figure.data[0].high) == [3]
+    assert list(figure.data[0].close) == [3]
+
+
 def test_orderbook_preserves_venue_stacking():
     figure = orderbook_figure({"venues": ["binance"], "bids": [{"price": "100", "venues": {"binance": "2"}}], "asks": []})
     assert figure.data[0].name == "binance"
