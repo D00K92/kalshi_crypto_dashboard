@@ -16,7 +16,7 @@ Create a Korean four-page Data Scientist portfolio PDF and preserve an implement
 - Implement the model-serving API only when the user explicitly resumes implementation, following `docs/MODEL_SERVING_API_IMPLEMENTATION_PLAN.md`.
 
 ## Context
-- The v1 live model contract intentionally uses only `log_return` and `venue_count`; broader microstructure features are offline-only until serving parity is established.
+- The v2_10s live model contract intentionally uses only `log_return` and `venue_count`; broader microstructure features are offline-only until serving parity is established.
 - Feast owns versioned feature definitions, BigQuery point-in-time historical retrieval, and Redis online materialization. Analytics reads the latest Redis feature envelope directly on the critical inference path.
 - A brief model-serving implementation attempt was fully reverted at the user's request; no model-serving code or deployment files remain in the repository.
 - Cite `ARCHITECTURE.md`, `services/ml_pipeline/src/common/modeling.py`, `services/ml_pipeline/src/common/data_io.py`, `services/analytics/src/kalshi_crypto_analytics/core.py`, `.github/workflows/ci.yml`, and `.github/workflows/cd.yml` for implementation claims.

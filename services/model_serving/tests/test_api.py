@@ -11,7 +11,7 @@ from model_serving.config import Settings
 def payload(**overrides):
     value = {
         "feature_set": "market_features",
-        "feature_version": "v1",
+        "feature_version": "v2_10s",
         "event_timestamp_ms": int(time.time() * 1000),
         "values": {"synthetic_price": 70_000.0, "venue_count": 6, "ewma_state": {"frequency": "1m", "variance": 1e-6}},
         "source_timestamps_ms": {"bar_1m": int(time.time() * 1000)},
@@ -33,7 +33,7 @@ def test_forecast_returns_complete_term_structure():
     body = response.json()
     assert set(body["annualized_volatility"]) == {"1m", "5m", "15m", "30m", "1h"}
     assert len(set(body["annualized_volatility"].values())) == 1
-    assert body["model_version"] == "v1"
+    assert body["model_version"] == "v2_10s"
     assert body["feature_available_ts_ms"] == body["feature_asof_ts_ms"]
 
 
@@ -69,4 +69,10 @@ def test_forecast_uses_availability_timestamp_for_freshness():
 def test_forecast_rejects_non_finite_variance():
     client = TestClient(create_app(Settings()))
     response = client.post("/v1/forecast", json=payload(values={"ewma_state": {"frequency": "1m", "variance": "nan"}}))
+    assert response.status_code == 422
+
+
+def test_forecast_rejects_legacy_feature_contract():
+    client = TestClient(create_app(Settings()))
+    response = client.post("/v1/forecast", json=payload(feature_version="v1"))
     assert response.status_code == 422

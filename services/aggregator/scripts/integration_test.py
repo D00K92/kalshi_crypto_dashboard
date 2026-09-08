@@ -28,13 +28,14 @@ async def main(wait_seconds: int) -> None:
     await client.ping()
     now = int(time.time() * 1000)
     books = [event_book("binance", "100", "101", "book-binance", now), event_book("coinbase", "100", "101", "book-coinbase", now)]
-    # A later bucket closes the first completed 10-second primitive bar.
+    # Advancing five seconds into the next bucket moves the event-time
+    # watermark past the first completed 10-second primitive bar.
     now = (now // 10_000) * 10_000
     trades = [
         event_trade("binance", "100", "1", "buy", "trade-binance", now),
         event_trade("coinbase", "110", "3", "sell", "trade-coinbase", now),
-        event_trade("binance", "100", "1", "buy", "trade-binance-boundary", now + 10_000),
-        event_trade("coinbase", "110", "3", "sell", "trade-coinbase-boundary", now + 10_000),
+        event_trade("binance", "100", "1", "buy", "trade-binance-boundary", now + 15_000),
+        event_trade("coinbase", "110", "3", "sell", "trade-coinbase-boundary", now + 15_000),
     ]
     for stream, events in ((book_stream, books), (trade_stream, trades)):
         for event in events:

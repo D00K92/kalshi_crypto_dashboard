@@ -32,14 +32,14 @@ class ForecastResponse:
 class EWMAProvider:
     """Deterministic champion provider using the live EWMA variance state."""
 
-    def __init__(self, *, model_version: str = "v1", decay: float = 0.96) -> None:
+    def __init__(self, *, model_version: str = "v2_10s", feature_version: str = "v2_10s", decay: float = 0.96) -> None:
         if not 0.0 < decay < 1.0:
             raise ValueError("EWMA decay must be between zero and one")
-        self.model_version = model_version
+        self.model_version, self.feature_version = model_version, feature_version
         self.decay = decay
 
     def forecast(self, request: ForecastRequest, now_ms: int, *, max_age_ms: int, future_skew_ms: int) -> ForecastResponse:
-        if request.feature_set != "market_features" or request.feature_version != "v1":
+        if request.feature_set != "market_features" or request.feature_version != self.feature_version:
             raise ValueError("unsupported feature contract")
         for field in ("synthetic_price", "venue_count"):
             if field not in request.values or request.values[field] is None:

@@ -32,7 +32,7 @@ ingestion (unchanged) ---> Redis trade/book streams
       |                              v
       |                    aggregator (unchanged)
       |                       |                 |
-      |                       |                 +--> stream:features:v1
+                      |                       |                 +--> stream:features:v2_10s
       |                       |                          |
       |                       |                          v
       |                       |                 Feast live bridge/server
@@ -41,14 +41,14 @@ ingestion (unchanged) ---> Redis trade/book streams
       |                       |                     available to other clients)
       |                       v
       |              market:spot:BTCUSDT:latest
-      |              market:features:BTCUSD:latest
+      |              market:features:v2_10s:BTCUSD:latest
       |                       |
       +--> stream:kalshi_tickers
       |              |
       v              v
 Kalshi REST ----> analytics <---- configured Vertex model artifacts
                       |
-                      +--> market:volatility:v1:BTCUSD:latest
+                      +--> market:volatility:v2_10s:BTCUSD:latest
                       +--> market:pricing:v1:<market_ticker>
                       +--> stream:pricing:v1
                       +--> pub:pricing:v1
@@ -63,19 +63,19 @@ existing services. Each dependency has a narrow purpose:
 | Dependency | Existing interface used by analytics | Purpose | Required upstream change |
 |---|---|---|---|
 | Aggregator | `GET market:spot:BTCUSDT:latest` | Synthetic spot and spot timestamp | None |
-| Live feature service | `GET market:features:BTCUSD:latest` | One timestamped v1 model-feature observation | None |
+| Live feature service | `GET market:features:v2_10s:BTCUSD:latest` | One timestamped v2_10s model-feature observation | None |
 | Aggregator | `SUBSCRIBE market:aggregated_spot` | Low-latency wake-up only | None |
 | Ingestion | `stream:kalshi_tickers` | Bid, ask, ticker freshness, event and market identifiers | None |
 | Kalshi REST | Existing authenticated event/market endpoints | Authoritative market definition, strike, settlement/expiry time, and status | None |
 | Vertex AI Model Registry/GCS | Five configured model resource names and their artifact URIs | Load the approved horizon models and `metadata.json` | None |
 | Dashboard | Existing Redis connection; optional read of analytics-owned keys | Display model value and edge later | None |
 
-The v1 analytics path reads the aggregator's existing timestamped latest-feature
+The v2_10s analytics path reads the versioned timestamped latest-feature
 envelope directly. This guarantees that all five local model calls use exactly
 one observation and lets analytics validate its age. The existing Feast live
 bridge and `feast-server:6566` continue unchanged for their current consumers;
 analytics does not need to put the Feast server on its critical path merely to
-reread the same v1 row. A future `ForecastProvider` may use Feast without
+reread the same v2_10s row. A future `ForecastProvider` may use Feast without
 changing the pricing core or any producer.
 
 Pub/Sub is never the source of truth. A spot notification only tells analytics
@@ -133,7 +133,7 @@ horizons:
 1m, 5m, 15m, 30m, 1h
 ```
 
-Analytics reads one `market:features:BTCUSD:latest` envelope and forwards its
+Analytics reads one `market:features:v2_10s:BTCUSD:latest` envelope and forwards its
 feature contract, timestamp, and values to `/v1/forecast`. It rejects timeouts,
 malformed responses, version mismatches, incomplete horizons, invalid values,
 or timestamp mismatches. Set `FORECAST_PROVIDER=direct` only for rollback or
@@ -144,7 +144,7 @@ successfully. Partial results are not published. The assembled snapshot is
 written by analytics, not by the ML pipeline:
 
 ```text
-market:volatility:v1:BTCUSD:latest
+market:volatility:v2_10s:BTCUSD:latest
 ```
 
 Example:
@@ -154,7 +154,7 @@ Example:
   "schema_version": 1,
   "event_type": "volatility_term_structure",
   "asset": "BTCUSD",
-  "model_version": "v1",
+  "model_version": "v2_10s",
   "model_resources": {
     "1m": "projects/.../models/...",
     "5m": "projects/.../models/...",
@@ -367,7 +367,7 @@ Latest-state payload:
   "edge_vs_mid_probability": 0.02,
   "buy_yes_edge_probability": 0.01,
   "sell_yes_edge_probability": -0.03,
-  "model_version": "v1",
+  "model_version": "v2_10s",
   "generated_ts_ms": 1788593790200
 }
 ```

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import defaultdict, deque
 from dataclasses import dataclass
 from decimal import Decimal, ROUND_CEILING, ROUND_DOWN
 import time
@@ -59,7 +59,9 @@ class MarketAggregator:
         self.latest_trades: dict[str, dict[str, Any]] = {}
         self._last_trade_ts_ms: dict[str, int] = {}
         self._last_synthetic_price: Decimal | None = None
+        self._finalized_last_trade_ts_ms: dict[str, int] = {}
         self._seen_events: set[str] = set()
+        self._seen_event_order: deque[str] = deque()
 
     def apply_book(self, event: dict[str, Any], published_ts_ms: int | None = None) -> dict[str, Any] | None:
         venue = str(event["venue"]).lower()
@@ -89,7 +91,7 @@ class MarketAggregator:
         ts = int(event.get("exchange_ts_ms") or event.get("received_ts_ms") or time.time() * 1000)
         received = int(event.get("received_ts_ms") or time.time() * 1000)
         bucket = _bucket(ts)
-        state = self.trade_buckets.setdefault(bucket, {"notional": Decimal("0"), "volume": Decimal("0"), "buy_volume": Decimal("0"), "sell_volume": Decimal("0"), "price_sum": Decimal("0"), "trade_count": 0, "open": None, "high": None, "low": None, "close": None, "delta": Decimal("0"), "fill_intervals": [], "venues": defaultdict(lambda: {"notional": Decimal("0"), "volume": Decimal("0"), "buy_volume": Decimal("0"), "sell_volume": Decimal("0"), "price_sum": Decimal("0"), "trade_count": 0, "open": None, "high": None, "low": None, "close": None, "fill_intervals": []})})
+        state = self.trade_buckets.setdefault(bucket, {"notional": Decimal("0"), "volume": Decimal("0"), "buy_volume": Decimal("0"), "sell_volume": Decimal("0"), "price_sum": Decimal("0"), "trade_count": 0, "open": None, "high": None, "low": None, "close": None, "open_ts_ms": None, "close_ts_ms": None, "delta": Decimal("0"), "fill_intervals": [], "venues": defaultdict(lambda: {"notional": Decimal("0"), "volume": Decimal("0"), "buy_volume": Decimal("0"), "sell_volume": Decimal("0"), "price_sum": Decimal("0"), "trade_count": 0, "open": None, "high": None, "low": None, "close": None, "open_ts_ms": None, "close_ts_ms": None, "trade_timestamps_ms": [], "fill_intervals": []})})
         state["notional"] += price * quantity
         state["volume"] += quantity
         if event.get("taker_side") == "buy":
@@ -98,16 +100,19 @@ class MarketAggregator:
             state["sell_volume"] += quantity
         state["price_sum"] += price
         state["trade_count"] += 1
-        state["open"] = price if state["open"] is None else state["open"]
+        if state["open_ts_ms"] is None or ts < state["open_ts_ms"]:
+            state["open"], state["open_ts_ms"] = price, ts
         state["high"] = price if state["high"] is None else max(state["high"], price)
         state["low"] = price if state["low"] is None else min(state["low"], price)
-        state["close"] = price
+        if state["close_ts_ms"] is None or ts >= state["close_ts_ms"]:
+            state["close"], state["close_ts_ms"] = price, ts
         state["delta"] += quantity if event.get("taker_side") == "buy" else -quantity
         previous_trade_ts = self._last_trade_ts_ms.get(venue)
         if previous_trade_ts is not None and ts >= previous_trade_ts:
             interval = Decimal(ts - previous_trade_ts)
             state["fill_intervals"].append(interval)
-        self._last_trade_ts_ms[venue] = ts
+        if previous_trade_ts is None or ts >= previous_trade_ts:
+            self._last_trade_ts_ms[venue] = ts
         venue_state = state["venues"][venue]
         venue_state["notional"] += price * quantity
         venue_state["volume"] += quantity
@@ -117,10 +122,13 @@ class MarketAggregator:
             venue_state["sell_volume"] += quantity
         venue_state["price_sum"] += price
         venue_state["trade_count"] += 1
-        venue_state["open"] = price if venue_state["open"] is None else venue_state["open"]
+        if venue_state["open_ts_ms"] is None or ts < venue_state["open_ts_ms"]:
+            venue_state["open"], venue_state["open_ts_ms"] = price, ts
         venue_state["high"] = price if venue_state["high"] is None else max(venue_state["high"], price)
         venue_state["low"] = price if venue_state["low"] is None else min(venue_state["low"], price)
-        venue_state["close"] = price
+        if venue_state["close_ts_ms"] is None or ts >= venue_state["close_ts_ms"]:
+            venue_state["close"], venue_state["close_ts_ms"] = price, ts
+        venue_state["trade_timestamps_ms"].append(ts)
         if previous_trade_ts is not None and ts >= previous_trade_ts:
             venue_state["fill_intervals"].append(Decimal(ts - previous_trade_ts))
         self.latest_trades[venue] = {"price": price, "received_ts_ms": received}
@@ -274,11 +282,14 @@ class MarketAggregator:
                 "p_trade_mean": self._fmt(part["price_sum"] / count), "v_trade": self._fmt(part["volume"]),
                 "v_buy": self._fmt(part["buy_volume"]), "v_sell": self._fmt(part["sell_volume"]), "cnt_trade": count,
             }
-            intervals = part["fill_intervals"]
+            intervals = self._venue_fill_intervals_for_bucket(venue, start, part)
             payload.update({"dt_fill_mean_ms": self._fmt(sum(intervals, Decimal("0")) / len(intervals)) if intervals else None,
                             "dt_fill_max_ms": self._fmt(max(intervals)) if intervals else None,
                             "dt_fill_min_ms": self._fmt(min(intervals)) if intervals else None})
-            book = self.books.get(venue)
+            # A primitive must only contain information available by the end
+            # of its event-time bucket. Using the latest book here leaks a
+            # future snapshot when a trade bucket is finalized late.
+            book = self._book_at_or_before(venue, end)
             for level in range(1, 11):
                 bid = book.bids[level - 1] if book and len(book.bids) >= level else (None, None)
                 ask = book.asks[level - 1] if book and len(book.asks) >= level else (None, None)
@@ -290,6 +301,38 @@ class MarketAggregator:
     def _book_at_or_before(self, venue: str, end_ts_ms: int) -> VenueBook | None:
         candidates = [bucket for bucket, books in self.book_buckets.items() if bucket < end_ts_ms and venue in books]
         return self.book_buckets[max(candidates)][venue] if candidates else None
+
+    def _venue_fill_intervals_for_bucket(
+        self, venue: str, start: int, part: dict[str, Any]
+    ) -> list[Decimal]:
+        timestamps = sorted(int(value) for value in part.get("trade_timestamps_ms", []))
+        if not timestamps:
+            return list(part.get("fill_intervals", []))
+        previous = self._finalized_last_trade_ts_ms.get(venue)
+        for prior_start in sorted((key for key in self.trade_buckets if key < start), reverse=True):
+            prior_part = self.trade_buckets[prior_start]["venues"].get(venue)
+            prior_timestamps = prior_part and prior_part.get("trade_timestamps_ms")
+            if prior_timestamps:
+                previous = max(int(value) for value in prior_timestamps)
+                break
+        intervals: list[Decimal] = []
+        if previous is not None:
+            intervals.append(Decimal(timestamps[0] - previous))
+        intervals.extend(Decimal(current - prior) for prior, current in zip(timestamps, timestamps[1:]))
+        return intervals
+
+    def mark_primitive_bucket_finalized(self, start: int) -> None:
+        """Compact event-time detail after its primitive has been emitted."""
+        state = self.trade_buckets.get(start)
+        if state is None:
+            return
+        for venue, part in state["venues"].items():
+            timestamps = part.get("trade_timestamps_ms", [])
+            if not timestamps:
+                continue
+            part["fill_intervals"] = self._venue_fill_intervals_for_bucket(venue, start, part)
+            self._finalized_last_trade_ts_ms[venue] = max(int(value) for value in timestamps)
+            part["trade_timestamps_ms"] = []
 
     def candle_snapshot(self, instrument: str, interval_ms: int = CANDLE_INTERVAL_MS) -> list[dict[str, Any]]:
         """Return dashboard candles resampled from canonical 10-second buckets."""
@@ -364,6 +407,8 @@ class MarketAggregator:
                 "high": self._fmt(state["high"]),
                 "low": self._fmt(state["low"]),
                 "close": self._fmt(state["close"]),
+                "open_ts_ms": state.get("open_ts_ms"),
+                "close_ts_ms": state.get("close_ts_ms"),
                 "delta": self._fmt(state["delta"]),
                 "fill_intervals": [self._fmt(value) for value in state.get("fill_intervals", [])],
                 "venues": {
@@ -378,12 +423,16 @@ class MarketAggregator:
                         "high": self._fmt(values.get("high")),
                         "low": self._fmt(values.get("low")),
                         "close": self._fmt(values.get("close")),
+                        "open_ts_ms": values.get("open_ts_ms"),
+                        "close_ts_ms": values.get("close_ts_ms"),
+                        "trade_timestamps_ms": values.get("trade_timestamps_ms", []),
                         "fill_intervals": [self._fmt(value) for value in values.get("fill_intervals", [])],
                     }
                     for venue, values in sorted(state["venues"].items())
                 },
             })
-        return {"schema_version": 1, "interval_ms": CANDLE_INTERVAL_MS, "buckets": buckets}
+        return {"schema_version": 1, "interval_ms": CANDLE_INTERVAL_MS, "buckets": buckets,
+                "finalized_last_trade_ts_ms": self._finalized_last_trade_ts_ms}
 
     def restore_candle_state(self, payload: dict[str, Any]) -> int:
         """Restore persisted buckets and return the number loaded."""
@@ -400,9 +449,11 @@ class MarketAggregator:
                 "high": _dec(raw["high"]) if raw.get("high") is not None else None,
                 "low": _dec(raw["low"]) if raw.get("low") is not None else None,
                 "close": _dec(raw["close"]) if raw.get("close") is not None else None,
+                "open_ts_ms": int(raw.get("open_ts_ms", start)),
+                "close_ts_ms": int(raw.get("close_ts_ms", start)),
                 "delta": _signed_dec(raw["delta"]) if raw.get("delta") is not None else Decimal("0"),
                 "fill_intervals": [_dec(value) for value in raw.get("fill_intervals", [])],
-                "venues": defaultdict(lambda: {"notional": Decimal("0"), "volume": Decimal("0"), "buy_volume": Decimal("0"), "sell_volume": Decimal("0"), "price_sum": Decimal("0"), "trade_count": 0, "open": None, "high": None, "low": None, "close": None, "fill_intervals": []}),
+                "venues": defaultdict(lambda: {"notional": Decimal("0"), "volume": Decimal("0"), "buy_volume": Decimal("0"), "sell_volume": Decimal("0"), "price_sum": Decimal("0"), "trade_count": 0, "open": None, "high": None, "low": None, "close": None, "open_ts_ms": None, "close_ts_ms": None, "trade_timestamps_ms": [], "fill_intervals": []}),
             }
             for venue, values in raw.get("venues", {}).items():
                 state["venues"][venue] = {
@@ -413,10 +464,17 @@ class MarketAggregator:
                     "high": _dec(values["high"]) if values.get("high") is not None else None,
                     "low": _dec(values["low"]) if values.get("low") is not None else None,
                     "close": _dec(values["close"]) if values.get("close") is not None else None,
+                    "open_ts_ms": int(values.get("open_ts_ms", start)),
+                    "close_ts_ms": int(values.get("close_ts_ms", start)),
+                    "trade_timestamps_ms": [int(value) for value in values.get("trade_timestamps_ms", [])],
                     "fill_intervals": [_dec(value) for value in values.get("fill_intervals", [])],
                 }
             restored[start] = state
         self.trade_buckets = restored
+        self._finalized_last_trade_ts_ms = {
+            str(venue): int(timestamp)
+            for venue, timestamp in (payload.get("finalized_last_trade_ts_ms") or {}).items()
+        }
         return len(restored)
 
     def restore_candle_snapshot(self, rows: list[dict[str, Any]]) -> int:
@@ -510,11 +568,13 @@ class MarketAggregator:
         event_id = event.get("event_id")
         if event_id is None:
             return
-        if event_id in self._seen_events:
+        event_key = str(event_id)
+        if event_key in self._seen_events:
             raise ValueError(f"duplicate event_id {event_id}")
-        self._seen_events.add(str(event_id))
+        self._seen_events.add(event_key)
+        self._seen_event_order.append(event_key)
         if len(self._seen_events) > 100_000:
-            self._seen_events.clear()
+            self._seen_events.discard(self._seen_event_order.popleft())
 
     @staticmethod
     def _fmt(value: Decimal | None) -> str | None:

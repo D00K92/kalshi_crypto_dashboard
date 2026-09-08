@@ -19,7 +19,9 @@ LOGGER = logging.getLogger(__name__)
 async def _run() -> None:
     settings = Settings.from_env()
     client = redis.Redis.from_url(settings.redis_url, decode_responses=False, health_check_interval=30)
-    market_data = RedisMarketData(client, consumer=settings.consumer_name)
+    market_data = RedisMarketData(
+        client, consumer=settings.consumer_name, feature_version=settings.feature_version,
+    )
     publisher = RedisPricingPublisher(client)
     metadata = CachedMetadataProvider(
         KalshiRestClient(settings.kalshi_rest_url, settings.kalshi_api_key, settings.kalshi_private_key),
@@ -28,11 +30,13 @@ async def _run() -> None:
     if settings.forecast_provider == "http":
         forecasts = HttpForecastProvider(base_url=settings.model_serving_url,
                                          timeout_ms=settings.model_serving_timeout_ms,
-                                         model_version=settings.model_version)
+                                         model_version=settings.model_version,
+                                         feature_version=settings.feature_version)
     else:
         forecasts = ConfiguredForecastProvider(settings.model_resources,
                                                VertexGCSResolver(project=settings.gcp_project, location=settings.gcp_region),
-                                               model_version=settings.model_version)
+                                               model_version=settings.model_version,
+                                               feature_version=settings.feature_version)
     service = AnalyticsService(
         market_data, metadata, forecasts, publisher,
         spot_max_age_ms=settings.spot_max_age_ms, ticker_max_age_ms=settings.ticker_max_age_ms,

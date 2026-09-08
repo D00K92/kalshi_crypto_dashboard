@@ -8,7 +8,7 @@ generation, Feast definitions, and online-store materialization belong to
 ## Inputs
 
 Training labels are read from BigQuery
-`training_labels.future_realized_volatility_v1`. Point-in-time features are
+`training_labels.future_realized_volatility_v2_10s`. Point-in-time features are
 retrieved through the Feast repository in `services/feast_store`, whose
 offline source is BigQuery and whose online store is Redis.
 

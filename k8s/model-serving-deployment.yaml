@@ -30,7 +30,9 @@ spec:
             drop: ["ALL"]
         env:
         - name: MODEL_VERSION
-          value: "v1"
+          value: "v2_10s"
+        - name: FEATURE_VERSION
+          value: "v2_10s"
         - name: MODEL_MAX_FEATURE_AGE_MS
           value: "90000"
         - name: MODEL_ALLOWED_FUTURE_SKEW_MS

@@ -33,7 +33,7 @@ def payload_to_frame(payload: dict, *, spec=None) -> pd.DataFrame:
     """Convert a versioned feature envelope into a Feast push dataframe."""
     spec = spec or resolve_feature_spec(
         payload.get("feature_set", "market_features"),
-        payload.get("feature_version", "v1"),
+        payload.get("feature_version", "v2_10s"),
     )
     values = payload.get("values", payload)
     if not isinstance(values, dict):
@@ -93,7 +93,7 @@ async def _process_entries(client, store, stream: str, group: str, entries) -> N
             payload = json.loads(raw)
             spec = resolve_feature_spec(
                 payload.get("feature_set", "market_features"),
-                payload.get("feature_version", "v1"),
+                payload.get("feature_version", "v2_10s"),
             )
             frame = payload_to_frame(payload, spec=spec)
             await asyncio.to_thread(
@@ -117,7 +117,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo-path", default=os.getenv("FEAST_REPO_PATH", "/app/feast_store"))
     parser.add_argument("--redis-url", default=os.getenv("REDIS_URL", "redis://127.0.0.1:6379/0"))
-    parser.add_argument("--stream", default=os.getenv("FEATURE_STREAM", "stream:features:v1"))
+    parser.add_argument("--stream", default=os.getenv("FEATURE_STREAM", "stream:features:v2_10s"))
     parser.add_argument("--group", default=os.getenv("FEAST_LIVE_GROUP", "feast-live-features"))
     parser.add_argument("--consumer", default=os.getenv("HOSTNAME", "feast-live-1"))
     parser.add_argument("--pending-idle-ms", type=int, default=int(os.getenv("FEAST_PENDING_IDLE_MS", "120000")))

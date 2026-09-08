@@ -16,21 +16,25 @@ REGISTER_IMAGE = f"{REGISTRY}/ml-register:{IMAGE_TAG}"
 @dsl.container_component
 def load_container(
     feast_repo: str, target_table: str, start_date: str, end_date: str,
-    project: str, output_dataset: Output[Dataset],
+    project: str, feature_version: str, output_dataset: Output[Dataset],
 ):
     return dsl.ContainerSpec(
         image=LOAD_IMAGE, command=["python", "/app/main.py"],
         args=["--feast-repo", feast_repo, "--target-table", target_table,
               "--start-date", start_date, "--end-date", end_date,
-              "--project", project, "--output", output_dataset.path],
+              "--project", project, "--feature-version", feature_version,
+              "--output", output_dataset.path],
     )
 
 
 @dsl.container_component
-def train_container(dataset: Input[Dataset], horizon: str, model: Output[Model]):
+def train_container(
+    dataset: Input[Dataset], horizon: str, feature_version: str, model: Output[Model]
+):
     return dsl.ContainerSpec(
         image=TRAIN_IMAGE, command=["python", "/app/main.py"],
-        args=["--dataset", dataset.path, "--horizon", horizon, "--output", model.path],
+        args=["--dataset", dataset.path, "--horizon", horizon,
+              "--feature-version", feature_version, "--output", model.path],
     )
 
 
@@ -50,11 +54,12 @@ def evaluate_container(
 @dsl.container_component
 def register_container(
     model: Input[Model], promote: Input[Dataset], project: str, location: str,
-    bucket: str, model_version: str, horizon: str,
+    bucket: str, model_version: str, feature_version: str, horizon: str,
 ):
     return dsl.ContainerSpec(
         image=REGISTER_IMAGE, command=["python", "/app/main.py"],
         args=["--artifact-uri", model.uri, "--promote-file", promote.path,
               "--project", project, "--location", location, "--bucket", bucket,
-              "--model-version", model_version, "--horizon", horizon],
+              "--model-version", model_version, "--feature-version", feature_version,
+              "--horizon", horizon],
     )

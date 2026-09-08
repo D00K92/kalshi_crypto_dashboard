@@ -7,19 +7,28 @@ import pandas as pd
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from xgboost import XGBRegressor
 
-LIVE_FEATURE_COLUMNS = ("log_return", "venue_count")
+from src.common.contracts import CURRENT_CONTRACT_VERSION, resolve_contract
+
+LIVE_FEATURE_COLUMNS = resolve_contract().feature_columns
 
 
-def train_horizon(table: pd.DataFrame, horizon: str, seed: int = 42) -> tuple[XGBRegressor, dict]:
+def train_horizon(
+    table: pd.DataFrame,
+    horizon: str,
+    seed: int = 42,
+    *,
+    feature_version: str = CURRENT_CONTRACT_VERSION,
+) -> tuple[XGBRegressor, dict]:
     """Train against the exact feature contract available to live analytics."""
+    contract = resolve_contract(feature_version)
     target = f"target_rv_{horizon}"
     if target not in table:
         raise ValueError(f"missing target column: {target}")
 
-    missing_features = [column for column in LIVE_FEATURE_COLUMNS if column not in table]
+    missing_features = [column for column in contract.feature_columns if column not in table]
     if missing_features:
         raise ValueError(f"training data missing live features: {missing_features}")
-    columns = list(LIVE_FEATURE_COLUMNS)
+    columns = list(contract.feature_columns)
     usable = table.dropna(subset=[target, *columns]).sort_values("timestamp").reset_index(drop=True)
 
     n = len(usable)
@@ -44,6 +53,12 @@ def train_horizon(table: pd.DataFrame, horizon: str, seed: int = 42) -> tuple[XG
     
     metadata = {
         "horizon": horizon, "target": target, "feature_columns": columns,
+        "feature_set": contract.feature_set,
+        "feature_version": contract.feature_version,
+        "feature_view": contract.feature_view,
+        "feature_service": contract.feature_service,
+        "label_version": contract.label_version,
+        "entity": "BTCUSD",
         "rows": {"total": n, "train": train_end, "validation": valid_end - train_end,
                  "test": n - valid_end}, "prediction_floor": 0.0,
         "metrics": {

@@ -11,6 +11,13 @@ def _int(name: str, default: int) -> int:
     return value
 
 
+def _non_negative_int(name: str, default: int) -> int:
+    value = int(os.getenv(name, str(default)))
+    if value < 0:
+        raise ValueError(f"{name} must be non-negative")
+    return value
+
+
 def _redis_url() -> str:
     # Keep the old variable as a rollout-safe fallback for existing secrets and
     # manifests. New deployments should set AGGREGATOR_REDIS_URL.
@@ -34,6 +41,8 @@ class Settings:
     freshness_ms: int
     read_count: int
     read_block_ms: int
+    allowed_lateness_ms: int
+    pending_idle_ms: int
     output_prefix: str
     bars_stream: str
     bars_maxlen: int
@@ -71,6 +80,8 @@ class Settings:
             freshness_ms=_int("AGGREGATION_FRESHNESS_MS", 500),
             read_count=_int("AGGREGATOR_READ_COUNT", 200),
             read_block_ms=_int("AGGREGATOR_READ_BLOCK_MS", 1000),
+            allowed_lateness_ms=_non_negative_int("AGGREGATOR_ALLOWED_LATENESS_MS", 5_000),
+            pending_idle_ms=_int("AGGREGATOR_PENDING_IDLE_MS", 60_000),
             output_prefix=os.getenv("AGGREGATOR_OUTPUT_PREFIX", "market"),
             bars_stream=os.getenv("AGGREGATED_BARS_STREAM", "stream:bars:v1"),
             bars_maxlen=_int("AGGREGATED_BARS_MAXLEN", 50_000),

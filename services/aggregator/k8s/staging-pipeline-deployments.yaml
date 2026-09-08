@@ -1,0 +1,155 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: "${AGGREGATOR_DEPLOYMENT}"
+  namespace: "${NAMESPACE}"
+  labels:
+    app: "${AGGREGATOR_DEPLOYMENT}"
+    component: aggregator
+    staging-run: "${RUN_LABEL}"
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: "${AGGREGATOR_DEPLOYMENT}"
+  template:
+    metadata:
+      labels:
+        app: "${AGGREGATOR_DEPLOYMENT}"
+        component: aggregator
+        staging-run: "${RUN_LABEL}"
+    spec:
+      containers:
+      - name: aggregator
+        image: "${AGGREGATOR_IMAGE}"
+        imagePullPolicy: Always
+        env:
+        - name: AGGREGATOR_REDIS_URL
+          value: "${REDIS_URL}"
+        - name: BOOK_STREAM
+          value: "${BOOK_STREAM}"
+        - name: TRADE_STREAM
+          value: "${TRADE_STREAM}"
+        - name: BOOK_CONSUMER_GROUP
+          value: "${BOOK_GROUP}"
+        - name: TRADE_CONSUMER_GROUP
+          value: "${TRADE_GROUP}"
+        - name: AGGREGATOR_GROUP_START_ID
+          value: "$"
+        - name: AGGREGATOR_OUTPUT_PREFIX
+          value: "${OUTPUT_PREFIX}"
+        - name: AGGREGATED_BARS_STREAM
+          value: "${BARS_STREAM}"
+        - name: PRIMITIVE_STREAM
+          value: "${PRIMITIVE_STREAM}"
+        - name: AGGREGATED_ORDERBOOK_STREAM
+          value: "${ORDERBOOK_STREAM}"
+        - name: AGGREGATOR_ALLOWED_LATENESS_MS
+          value: "5000"
+        - name: AGGREGATOR_PENDING_IDLE_MS
+          value: "1000"
+        - name: AGGREGATOR_READ_COUNT
+          value: "50"
+        - name: AGGREGATION_HISTORY_MS
+          value: "7200000"
+        - name: AGGREGATION_VENUES
+          value: "binance,coinbase"
+        - name: AGGREGATION_TAKER_FEES
+          value: "binance=0,coinbase=0"
+        - name: HEALTH_PORT
+          value: "8080"
+        ports:
+        - name: health
+          containerPort: 8080
+        startupProbe:
+          httpGet:
+            path: /healthz
+            port: health
+          failureThreshold: 30
+          periodSeconds: 2
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: health
+          periodSeconds: 2
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: "${FEATURE_DEPLOYMENT}"
+  namespace: "${NAMESPACE}"
+  labels:
+    app: "${FEATURE_DEPLOYMENT}"
+    component: live-feature-service
+    staging-run: "${RUN_LABEL}"
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: "${FEATURE_DEPLOYMENT}"
+  template:
+    metadata:
+      labels:
+        app: "${FEATURE_DEPLOYMENT}"
+        component: live-feature-service
+        staging-run: "${RUN_LABEL}"
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: live-feature-service
+        image: "${FEATURE_IMAGE}"
+        imagePullPolicy: Always
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+        env:
+        - name: REDIS_URL
+          value: "${REDIS_URL}"
+        - name: BARS_STREAM
+          value: "${PRIMITIVE_STREAM}"
+        - name: FEATURE_STREAM
+          value: "${FEATURE_STREAM}"
+        - name: FEATURE_KEY
+          value: "${FEATURE_KEY}"
+        - name: FEATURE_STATE_KEY
+          value: "${FEATURE_STATE_KEY}"
+        - name: LIVE_FEATURE_GROUP
+          value: "${FEATURE_GROUP}"
+        - name: LIVE_FEATURE_PENDING_IDLE_MS
+          value: "1000"
+        - name: EWMA_DECAY
+          value: "0.96"
+        - name: MAX_BAR_AGE_MS
+          # Recovery phases restart and scale pods around one synthetic event
+          # timeline; allow that controlled test data to remain admissible.
+          value: "600000"
+        - name: HISTORY_BARS
+          value: "450"
+        - name: REPLAY_COUNT
+          value: "5000"
+        - name: PRIMITIVE_STREAM_MAXLEN
+          value: "100000"
+        - name: HEALTH_PORT
+          value: "8080"
+        ports:
+        - name: health
+          containerPort: 8080
+        startupProbe:
+          httpGet:
+            path: /healthz
+            port: health
+          failureThreshold: 30
+          periodSeconds: 2
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: health
+          periodSeconds: 2

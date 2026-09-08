@@ -8,10 +8,10 @@ from dataclasses import dataclass
 class Settings:
     redis_url: str = "redis://127.0.0.1:6379/0"
     bars_stream: str = "stream:primitives:v1"
-    feature_stream: str = "stream:features:v1"
-    feature_key: str = "market:features:BTCUSD:latest"
-    state_key: str = "market:features:BTCUSD:state:v1"
-    consumer_group: str = "live-features-v1"
+    feature_stream: str = "stream:features:v2_10s"
+    feature_key: str = "market:features:v2_10s:BTCUSD:latest"
+    state_key: str = "market:features:BTCUSD:state:v2_10s"
+    consumer_group: str = "live-features-v2-10s"
     consumer_name: str = "live-features-1"
     health_port: int = 8080
     ewma_decay: float = 0.96
@@ -19,16 +19,17 @@ class Settings:
     history_bars: int = 450
     replay_count: int = 5_000
     primitive_maxlen: int = 100_000
+    pending_idle_ms: int = 60_000
 
     @classmethod
     def from_env(cls) -> "Settings":
         return cls(
             redis_url=os.getenv("REDIS_URL", "redis://127.0.0.1:6379/0"),
             bars_stream=os.getenv("BARS_STREAM", "stream:primitives:v1"),
-            feature_stream=os.getenv("FEATURE_STREAM", "stream:features:v1"),
-            feature_key=os.getenv("FEATURE_KEY", "market:features:BTCUSD:latest"),
-            state_key=os.getenv("FEATURE_STATE_KEY", "market:features:BTCUSD:state:v1"),
-            consumer_group=os.getenv("LIVE_FEATURE_GROUP", "live-features-v1"),
+            feature_stream=os.getenv("FEATURE_STREAM", "stream:features:v2_10s"),
+            feature_key=os.getenv("FEATURE_KEY", "market:features:v2_10s:BTCUSD:latest"),
+            state_key=os.getenv("FEATURE_STATE_KEY", "market:features:BTCUSD:state:v2_10s"),
+            consumer_group=os.getenv("LIVE_FEATURE_GROUP", "live-features-v2-10s"),
             consumer_name=os.getenv("HOSTNAME", "live-features-1"),
             health_port=int(os.getenv("HEALTH_PORT", "8080")),
             ewma_decay=float(os.getenv("EWMA_DECAY", "0.96")),
@@ -36,4 +37,5 @@ class Settings:
             history_bars=int(os.getenv("HISTORY_BARS", "450")),
             replay_count=int(os.getenv("REPLAY_COUNT", "5000")),
             primitive_maxlen=int(os.getenv("PRIMITIVE_STREAM_MAXLEN", "100000")),
+            pending_idle_ms=int(os.getenv("LIVE_FEATURE_PENDING_IDLE_MS", "60000")),
         )

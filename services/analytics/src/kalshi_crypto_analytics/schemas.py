@@ -41,7 +41,7 @@ class FeatureObservation:
     event_timestamp_ms: int
     available_timestamp_ms: int | None = None
     feature_set: str = "market_features"
-    feature_version: str = "v1"
+    feature_version: str = "v2_10s"
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,7 +70,7 @@ class VolatilitySnapshot:
     feature_asof_ts_ms: int
     generated_ts_ms: int
     model_resources: dict[str, str]
-    model_version: str = "v1"
+    model_version: str = "v2_10s"
     feature_available_ts_ms: int | None = None
 
     def payload(self) -> dict[str, Any]:

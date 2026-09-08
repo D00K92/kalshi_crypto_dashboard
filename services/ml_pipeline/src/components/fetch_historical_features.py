@@ -4,7 +4,9 @@ from __future__ import annotations
 import pandas as pd
 
 
-def fetch_historical_features(repo_path: str, entities: pd.DataFrame) -> pd.DataFrame:
+def fetch_historical_features(
+    repo_path: str, entities: pd.DataFrame, feature_version: str = "v2_10s"
+) -> pd.DataFrame:
     """Retrieve features without future leakage.
 
     ``entities`` must contain ``asset``, ``frequency``, and ``event_timestamp``.
@@ -18,5 +20,5 @@ def fetch_historical_features(repo_path: str, entities: pd.DataFrame) -> pd.Data
     store = FeatureStore(repo_path=repo_path)
     return store.get_historical_features(
         entity_df=entities[["asset", "frequency", "event_timestamp"]].sort_values("event_timestamp"),
-        features=["v1_market_features"],
+        features=[f"{feature_version}_market_features"],
     ).to_df()

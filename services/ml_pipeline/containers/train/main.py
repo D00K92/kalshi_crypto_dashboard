@@ -8,6 +8,7 @@ from pathlib import Path
 import joblib
 import pandas as pd
 
+from src.common.contracts import CURRENT_CONTRACT_VERSION
 from src.common.modeling import train_horizon
 
 
@@ -16,8 +17,11 @@ def main() -> None:
     p.add_argument("--dataset", required=True)
     p.add_argument("--horizon", required=True)
     p.add_argument("--output", required=True)
+    p.add_argument("--feature-version", default=CURRENT_CONTRACT_VERSION)
     a = p.parse_args()
-    model, metadata = train_horizon(pd.read_parquet(a.dataset), a.horizon)
+    model, metadata = train_horizon(
+        pd.read_parquet(a.dataset), a.horizon, feature_version=a.feature_version
+    )
     root = Path(a.output)
     root.mkdir(parents=True, exist_ok=True)
     joblib.dump(model, root / "model.joblib")

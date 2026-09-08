@@ -14,7 +14,8 @@ def main() -> None:
     parser.add_argument("--service-account")
     parser.add_argument("--start-date", required=True)
     parser.add_argument("--end-date", required=True)
-    parser.add_argument("--model-version", default="v1")
+    parser.add_argument("--model-version", default="v2_10s")
+    parser.add_argument("--feature-version", default="v2_10s")
     args = parser.parse_args()
     aiplatform.init(project=args.project, location=args.location)
     job = aiplatform.PipelineJob(
@@ -23,7 +24,8 @@ def main() -> None:
         pipeline_root=args.pipeline_root,
         parameter_values={"project": args.project, "location": args.location,
                           "start_date": args.start_date, "end_date": args.end_date,
-                          "model_version": args.model_version},
+                          "model_version": args.model_version,
+                          "feature_version": args.feature_version},
         enable_caching=False,
     )
     # `run(sync=False)` submits from a background thread, so its resource name

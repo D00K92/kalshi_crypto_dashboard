@@ -2,7 +2,7 @@ name: Deploy Services
 
 on:
   workflow_run:
-    workflows: [CI]
+    workflows: [Staging Integration]
     types: [completed]
     branches: [main]
   workflow_dispatch:
@@ -31,6 +31,7 @@ jobs:
       (github.event.workflow_run.conclusion == 'success' &&
        github.event.workflow_run.head_branch == 'main')
     runs-on: ubuntu-latest
+    environment: production
     timeout-minutes: 30
     steps:
     - name: Check out tested commit
@@ -155,6 +156,18 @@ jobs:
         fi
         echo "host=${redis_host}" >> "${GITHUB_OUTPUT}"
 
+    - name: Apply Feast v2_10s registry
+      env:
+        FEAST_STORE_IMAGE: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/feast-store:${{ github.event.workflow_run.head_sha || github.sha }}
+        FEAST_APPLY_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+      run: |
+        set -euo pipefail
+        envsubst '${FEAST_STORE_IMAGE} ${FEAST_APPLY_ID}' \
+          < k8s/feast-apply-job.yaml \
+          | kubectl apply -f -
+        kubectl wait --for=condition=complete \
+          "job/feast-apply-${FEAST_APPLY_ID}" --timeout=10m
+
     - name: Apply Kubernetes manifests
       env:
         GCS_EXPORTER_IMAGE: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/${{ env.IMAGE_NAME }}:${{ github.event.workflow_run.head_sha || github.sha }}
@@ -246,9 +259,10 @@ jobs:
                 assert response.status == 200, "analytics /readyz failed"
             client = redis.Redis(host=os.environ["REDIS_HOST"], port=int(os.environ["REDIS_PORT"]))
             now = int(time.time() * 1000)
-            volatility_raw = await client.get("market:volatility:v1:BTCUSD:latest")
+            volatility_raw = await client.get("market:volatility:v2_10s:BTCUSD:latest")
             assert volatility_raw, "missing fresh volatility snapshot (check model IDs, model IAM, and live features)"
             volatility = json.loads(volatility_raw)
+            assert volatility["model_version"] == "v2_10s", "wrong model contract"
             assert now - volatility["generated_ts_ms"] <= 60_000, "stale volatility snapshot"
             keys = [key async for key in client.scan_iter(match="market:pricing:v1:KXBTCD-*")]
             fresh = []

@@ -7,10 +7,12 @@ from datetime import date, datetime, timedelta, timezone
 
 import pandas as pd
 
-DEFAULT_TARGET_TABLE = "kalshi-crypto-506614.training_labels.future_realized_volatility_v1"
+from src.common.contracts import CURRENT_CONTRACT_VERSION, resolve_contract
+
+DEFAULT_TARGET_TABLE = "kalshi-crypto-506614.training_labels.future_realized_volatility_v2_10s"
 
 REQUIRED_FREQUENCIES = {"10s"}
-REQUIRED_TARGETS = {"target_rv_5m", "target_rv_15m", "target_rv_30m", "target_rv_1h"}
+REQUIRED_TARGETS = {"target_rv_1m", "target_rv_5m", "target_rv_15m", "target_rv_30m", "target_rv_1h"}
 
 
 def dates(start: date, end: date) -> Iterable[date]:
@@ -79,6 +81,7 @@ def load_training_table(fs, feature_root: str, target_root: str,
 def load_training_table_from_feast(
     *, project: str, feast_repo: str, start: date, end: date,
     target_table: str = DEFAULT_TARGET_TABLE,
+    feature_version: str = CURRENT_CONTRACT_VERSION,
 ) -> pd.DataFrame:
     """Load BigQuery labels and attach point-in-time Feast features.
 
@@ -92,19 +95,22 @@ def load_training_table_from_feast(
     from google.cloud import bigquery
     from feast import FeatureStore
 
+    contract = resolve_contract(feature_version)
+
     client = bigquery.Client(project=project, location="asia-northeast3")
     query = f"""
       SELECT market_id, prediction_timestamp, label_window_end,
-             target_rv_5m, target_rv_15m,
+             target_rv_1m, target_rv_5m, target_rv_15m,
              target_rv_30m, target_rv_1h, label_version
       FROM `{target_table}`
       WHERE DATE(prediction_timestamp) BETWEEN @start_date AND @end_date
         AND target_rv_1h IS NOT NULL
-        AND label_version = 'v2_10s'
+        AND label_version = @label_version
     """
     config = bigquery.QueryJobConfig(query_parameters=[
         bigquery.ScalarQueryParameter("start_date", "DATE", start),
         bigquery.ScalarQueryParameter("end_date", "DATE", end),
+        bigquery.ScalarQueryParameter("label_version", "STRING", contract.label_version),
     ])
     labels = client.query(query, job_config=config).to_dataframe()
     if labels.empty:
@@ -116,9 +122,8 @@ def load_training_table_from_feast(
     features = FeatureStore(repo_path=feast_repo).get_historical_features(
         entity_df=entities.sort_values("event_timestamp"),
         features=[
-            "v1_market_features:synthetic_price",
-            "v1_market_features:log_return",
-            "v1_market_features:venue_count",
+            f"{contract.feature_view}:synthetic_price",
+            *(f"{contract.feature_view}:{name}" for name in contract.feature_columns),
         ],
     ).to_df()
     features["event_timestamp"] = pd.to_datetime(features["event_timestamp"], utc=True)
@@ -130,6 +135,7 @@ def load_training_table_from_feast(
         raise ValueError("Feast historical retrieval produced no label/feature matches")
     joined["frequency"] = "10s"
     joined["timestamp"] = joined["event_timestamp"]
+    joined.attrs["feature_contract"] = contract.feature_version
     joined.attrs["training_cutoff"] = end.isoformat()
     validate_training_table(
         joined,

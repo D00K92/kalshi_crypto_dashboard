@@ -35,6 +35,10 @@ spec:
           value: "$"
         - name: AGGREGATOR_READ_COUNT
           value: "50"
+        - name: AGGREGATOR_ALLOWED_LATENESS_MS
+          value: "5000"
+        - name: AGGREGATOR_PENDING_IDLE_MS
+          value: "60000"
         - name: AGGREGATED_BARS_STREAM
           value: "stream:bars:v1"
         - name: AGGREGATED_ORDERBOOK_STREAM

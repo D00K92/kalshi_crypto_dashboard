@@ -10,7 +10,7 @@ class FeastSettings:
 
     repo_path: str = "."
     project: str = "kalshi_crypto"
-    feature_version: str = "v1"
+    feature_version: str = "v2_10s"
     gcs_bucket: str = "kalshi-crypto-tick-data"
     redis_url: str | None = None
 
@@ -20,7 +20,7 @@ def load_settings() -> FeastSettings:
     repo_path = os.getenv("FEAST_REPO_PATH", ".")
     if not (Path(repo_path) / "feature_store.yaml").is_file():
         raise ValueError(f"FEAST_REPO_PATH must contain feature_store.yaml: {repo_path}")
-    feature_version = os.getenv("FEATURE_VERSION", "v1")
+    feature_version = os.getenv("FEATURE_VERSION", "v2_10s")
     if not feature_version:
         raise ValueError("FEATURE_VERSION must not be empty")
     return FeastSettings(

@@ -22,7 +22,11 @@ class ForecastPayload(BaseModel):
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings.from_env()
-    provider = EWMAProvider(model_version=settings.model_version, decay=settings.ewma_decay)
+    provider = EWMAProvider(
+        model_version=settings.model_version,
+        feature_version=settings.feature_version,
+        decay=settings.ewma_decay,
+    )
     app = FastAPI(title="Kalshi Crypto Model Serving", version="1")
     app.state.ready = True
 

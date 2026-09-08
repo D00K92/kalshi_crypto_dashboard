@@ -40,8 +40,10 @@ def _ticker(fields: dict[Any, Any]) -> Ticker:
 
 
 class RedisMarketData:
-    def __init__(self, client: Any, *, stream: str = "stream:kalshi_tickers", group: str = "analytics-pricing-v1", consumer: str = "analytics-1", bootstrap_count: int = 1000) -> None:
+    def __init__(self, client: Any, *, stream: str = "stream:kalshi_tickers", group: str = "analytics-pricing-v1", consumer: str = "analytics-1", bootstrap_count: int = 1000, feature_version: str = "v2_10s", feature_key: str | None = None) -> None:
         self.client, self.stream, self.group, self.consumer = client, stream, group, consumer
+        self.feature_version = feature_version
+        self.feature_key = feature_key or f"market:features:{feature_version}:BTCUSD:latest"
         self.bootstrap_count = bootstrap_count
 
     async def ensure_group(self) -> None:
@@ -60,18 +62,16 @@ class RedisMarketData:
 
     async def read_features(self) -> FeatureObservation:
         try:
-            raw = await self.client.get("market:features:BTCUSD:latest")
-            if raw is None:
-                raw = await self.client.get("market:features:v1:BTCUSD:latest")
+            raw = await self.client.get(self.feature_key)
             payload = _decode(raw)
-            if payload.get("feature_set") != "market_features" or payload.get("feature_version") != "v1":
+            if payload.get("feature_set") != "market_features" or payload.get("feature_version") != self.feature_version:
                 raise ValueError("unexpected feature schema")
             values = payload["values"]
             if not isinstance(values, dict):
                 raise TypeError("feature values must be an object")
             event_timestamp_ms = int(payload["event_timestamp_ms"])
             available_timestamp_ms = int(payload.get("available_timestamp_ms", event_timestamp_ms))
-            return FeatureObservation(values, event_timestamp_ms, available_timestamp_ms)
+            return FeatureObservation(values, event_timestamp_ms, available_timestamp_ms, "market_features", self.feature_version)
         except (TypeError, ValueError, KeyError, json.JSONDecodeError) as exc:
             raise PricingUnavailable(UnavailableReason.STALE_FEATURES) from exc
 
@@ -114,7 +114,7 @@ class RedisPricingPublisher:
         self.client, self.ttl_seconds, self.status_ttl_seconds = client, ttl_seconds, status_ttl_seconds
 
     async def publish_volatility(self, snapshot: VolatilitySnapshot) -> None:
-        await self.client.set("market:volatility:v1:BTCUSD:latest", json.dumps(snapshot.payload(), separators=(",", ":")), ex=self.ttl_seconds)
+        await self.client.set("market:volatility:v2_10s:BTCUSD:latest", json.dumps(snapshot.payload(), separators=(",", ":")), ex=self.ttl_seconds)
 
     async def publish_price(self, market_ticker: str, payload: dict[str, Any]) -> None:
         encoded = json.dumps(payload, separators=(",", ":"), allow_nan=False)

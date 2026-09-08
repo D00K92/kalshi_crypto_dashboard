@@ -39,27 +39,27 @@ def resources(): return {h: f"resource-{h}" for h in HORIZONS}
 
 async def test_metadata_feature_order_and_atomic_five_horizon_inference():
     resolver = Resolver()
-    provider = ConfiguredForecastProvider(resources(), resolver)
+    provider = ConfiguredForecastProvider(resources(), resolver, model_version="v1", feature_version="v1")
     await provider.load()
-    snapshot = await provider.forecast(FeatureObservation({"a": 1, "b": 2}, 100), 110)
+    snapshot = await provider.forecast(FeatureObservation({"a": 1, "b": 2}, 100, feature_version="v1"), 110)
     assert set(snapshot.annualized_volatility) == set(HORIZONS)
     assert all(bundle.model.rows == [[2, 1]] for bundle in resolver.bundles.values())
 
 
 async def test_live_string_feature_representation_is_cast_to_numeric():
     resolver = Resolver(columns=["log_return", "venue_count"])
-    provider = ConfiguredForecastProvider(resources(), resolver)
+    provider = ConfiguredForecastProvider(resources(), resolver, model_version="v1", feature_version="v1")
     await provider.load()
-    snapshot = await provider.forecast(FeatureObservation({"log_return": "0", "venue_count": 6}, 100), 110)
+    snapshot = await provider.forecast(FeatureObservation({"log_return": "0", "venue_count": 6}, 100, feature_version="v1"), 110)
     assert set(snapshot.annualized_volatility) == set(HORIZONS)
     assert all(bundle.model.rows == [[0.0, 6.0]] for bundle in resolver.bundles.values())
 
 
 async def test_partial_model_failure_publishes_no_snapshot():
-    provider = ConfiguredForecastProvider(resources(), Resolver("15m"))
+    provider = ConfiguredForecastProvider(resources(), Resolver("15m"), model_version="v1", feature_version="v1")
     await provider.load()
     with pytest.raises(PricingUnavailable) as exc:
-        await provider.forecast(FeatureObservation({"a": 1, "b": 2}, 100), 110)
+        await provider.forecast(FeatureObservation({"a": 1, "b": 2}, 100, feature_version="v1"), 110)
     assert exc.value.reason == UnavailableReason.MODEL_INFERENCE_FAILED
 
 
@@ -95,9 +95,9 @@ async def test_http_provider_maps_and_validates_complete_response():
             "model_version": "v1",
         }
 
-    provider = HttpForecastProvider(base_url="http://model-serving:8080/", timeout_ms=500, transport=transport)
+    provider = HttpForecastProvider(base_url="http://model-serving:8080/", timeout_ms=500, model_version="v1", feature_version="v1", transport=transport)
     await provider.load()
-    snapshot = await provider.forecast(FeatureObservation({"log_return": 0.0, "venue_count": 2}, 100), 110)
+    snapshot = await provider.forecast(FeatureObservation({"log_return": 0.0, "venue_count": 2}, 100, feature_version="v1"), 110)
     assert snapshot.annualized_volatility == {horizon: 0.2 for horizon in HORIZONS}
     assert calls[0][1] == "http://model-serving:8080/readyz"
     assert calls[1][2]["source_timestamps_ms"] == {"features": 100}
@@ -119,9 +119,9 @@ async def test_http_provider_sends_availability_and_validates_both_timestamps():
             "model_version": "v1",
         }
 
-    provider = HttpForecastProvider(base_url="http://model-serving:8080", timeout_ms=500, transport=transport)
+    provider = HttpForecastProvider(base_url="http://model-serving:8080", timeout_ms=500, model_version="v1", feature_version="v1", transport=transport)
     await provider.load()
-    snapshot = await provider.forecast(FeatureObservation({"log_return": 0.0}, 100, 160), 170)
+    snapshot = await provider.forecast(FeatureObservation({"log_return": 0.0}, 100, 160, feature_version="v1"), 170)
     assert calls[1]["available_timestamp_ms"] == 160
     assert calls[1]["source_timestamps_ms"] == {"features": 160}
     assert snapshot.feature_available_ts_ms == 160
@@ -131,8 +131,8 @@ async def test_http_provider_fails_closed_on_incomplete_response():
     def transport(method, url, payload, timeout):
         return {"status": "ready"} if method == "GET" else {"annualized_volatility": {"1m": 0.2}}
 
-    provider = HttpForecastProvider(base_url="http://model-serving:8080", timeout_ms=500, transport=transport)
+    provider = HttpForecastProvider(base_url="http://model-serving:8080", timeout_ms=500, model_version="v1", feature_version="v1", transport=transport)
     await provider.load()
     with pytest.raises(PricingUnavailable) as exc:
-        await provider.forecast(FeatureObservation({"log_return": 0.0, "venue_count": 2}, 100), 110)
+        await provider.forecast(FeatureObservation({"log_return": 0.0, "venue_count": 2}, 100, feature_version="v1"), 110)
     assert exc.value.reason == UnavailableReason.MODEL_INFERENCE_FAILED

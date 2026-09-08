@@ -8,6 +8,8 @@ from typing import Any
 
 INTERVAL_MS = 10_000
 SUPPORTED_FREQUENCY = "10s"
+FEATURE_SET = "market_features"
+FEATURE_VERSION = "v2_10s"
 DEFAULT_HISTORY_BARS = 450
 
 
@@ -27,7 +29,7 @@ class FeatureRow:
         if self.ewma_variance is not None:
             values["ewma_state"] = {"frequency": SUPPORTED_FREQUENCY, "variance": self.ewma_variance}
         return {
-            "schema_version": 1, "event_type": "market_features", "feature_set": "market_features", "feature_version": "v1",
+            "schema_version": 1, "event_type": "market_features", "feature_set": FEATURE_SET, "feature_version": FEATURE_VERSION,
             "asset": self.asset, "event_timestamp": datetime.fromtimestamp(self.event_timestamp_ms / 1000, tz=timezone.utc).isoformat(),
             "event_timestamp_ms": self.event_timestamp_ms,
             "available_timestamp": datetime.fromtimestamp(self.available_timestamp_ms / 1000, tz=timezone.utc).isoformat(),
@@ -37,8 +39,8 @@ class FeatureRow:
         }
 
 
-class V1FeatureComputer:
-    """Build live v1 features from per-venue completed 10s primitives."""
+class V2TenSecondFeatureComputer:
+    """Build the live half of market_features/v2_10s from completed primitives."""
 
     def __init__(self, *, asset: str = "BTCUSD", ewma_decay: float = 0.96,
                  max_bar_age_ms: int = 120_000, history_bars: int = DEFAULT_HISTORY_BARS) -> None:
@@ -75,6 +77,10 @@ class V1FeatureComputer:
             if timestamp == previous_seen:
                 return None
             raise ValueError("out-of-order feature bar")
+        if self._last_timestamp_ms is not None and timestamp <= self._last_timestamp_ms:
+            # A newly observed or lagging venue must not revise a feature row
+            # that has already advanced the global EWMA state.
+            raise ValueError("out-of-order feature bar")
         raw_price = bar.get("p_trade_mean", bar.get("p_trade", bar.get("p_close")))
         try:
             price = float(raw_price)
@@ -100,12 +106,13 @@ class V1FeatureComputer:
         return None if replay else output
 
     def snapshot(self) -> dict[str, Any]:
-        return {"schema_version": 2, "last_timestamp_ms": self._last_timestamp_ms, "last_price": self._last_price,
+        return {"schema_version": 3, "last_timestamp_ms": self._last_timestamp_ms, "last_price": self._last_price,
                 "ewma_variance": self._ewma_variance, "history": {venue: list(values) for venue, values in self._history.items()},
-                "last_seen_by_venue": self._last_seen_by_venue}
+                "last_seen_by_venue": dict(self._last_seen_by_venue),
+                "pending": {str(timestamp): dict(prices) for timestamp, prices in self._pending.items()}}
 
     def restore(self, state: dict[str, Any]) -> None:
-        if state.get("schema_version") not in (1, 2):
+        if state.get("schema_version") not in (1, 2, 3):
             raise ValueError("unsupported feature state")
         timestamp, price, variance = state.get("last_timestamp_ms"), state.get("last_price"), state.get("ewma_variance")
         timestamp = None if timestamp is None else int(timestamp)
@@ -114,7 +121,7 @@ class V1FeatureComputer:
             if not math.isfinite(price) or price <= 0: raise ValueError("invalid persisted feature price")
         if variance is not None:
             variance = float(variance)
-            if not math.isfinite(variance) or variance <= 0: raise ValueError("invalid persisted EWMA variance")
+            if not math.isfinite(variance) or variance < 0: raise ValueError("invalid persisted EWMA variance")
         self._last_timestamp_ms, self._last_price, self._ewma_variance = timestamp, price, variance
         self._history.clear()
         for venue, values in (state.get("history") or {}).items():
@@ -124,3 +131,20 @@ class V1FeatureComputer:
                 history.append((int(item[0]), float(item[1])))
             self._history[str(venue)] = history
         self._last_seen_by_venue = {str(k): int(v) for k, v in (state.get("last_seen_by_venue") or {}).items()}
+        pending = state.get("pending") or {}
+        if state.get("schema_version") in (1, 2):
+            # Older checkpoints omitted the in-flight bucket. Reconstruct it
+            # from accepted history entries newer than the last completed row.
+            reconstructed: dict[str, dict[str, float]] = {}
+            for venue, values in self._history.items():
+                for item_timestamp, item_price in values:
+                    if self._last_timestamp_ms is None or item_timestamp > self._last_timestamp_ms:
+                        reconstructed.setdefault(str(item_timestamp), {})[venue] = item_price
+            pending = reconstructed
+        self._pending = {}
+        for raw_timestamp, raw_prices in pending.items():
+            timestamp = int(raw_timestamp)
+            prices = {str(venue): float(value) for venue, value in raw_prices.items()}
+            if any(not math.isfinite(value) or value <= 0 for value in prices.values()):
+                raise ValueError("invalid persisted pending price")
+            self._pending[timestamp] = prices

@@ -16,8 +16,8 @@ contracts, Feast registration, materialization, and low-latency online writes.
 | Memorystore Redis | discovered by CI with `gcloud redis instances list` | Feast online store |
 
 GCS inputs are raw `ticks/` and `books/` partitions. Batch ETL writes canonical
-bars and v1 realized-volatility features to BigQuery; the active Feast source
-is `kalshi-crypto-506614.feature_store.realized_volatility_v1`. Targets remain
+bars and v2_10s realized-volatility features to BigQuery; the active Feast source
+is `kalshi-crypto-506614.feature_store.realized_volatility_v2_10s`. Targets remain
 outside Feast. The online store uses the private Memorystore endpoint. The
 Kubernetes DNS address currently in `feature_store.yaml` is not valid from
 Cloud Run and must be replaced during deployment.
@@ -35,7 +35,7 @@ feast_store/
 ```
 
 The low-latency bridge is `jobs/live_push.py`. It consumes the
-`stream:features:v1` stream emitted by `live_feature_service`, resolves the immutable
+`stream:features:v2_10s` stream emitted by `live_feature_service`, resolves the immutable
 `feature_set`/`feature_version` contract in `registry/feature_specs.py`, and
 pushes validated rows to the corresponding Feast PushSource. BigQuery remains
 the offline source; hourly materialization is retained for reconciliation and

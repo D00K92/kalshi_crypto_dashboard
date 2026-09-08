@@ -1,0 +1,43 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: "${PROBE_JOB}"
+  namespace: "${NAMESPACE}"
+  labels:
+    app: staging-pipeline-probe
+    staging-run: "${RUN_LABEL}"
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app: staging-pipeline-probe
+        staging-run: "${RUN_LABEL}"
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: probe
+        image: "${AGGREGATOR_IMAGE}"
+        imagePullPolicy: Always
+        env:
+        - name: STAGING_REDIS_URL
+          value: "${REDIS_URL}"
+        - name: STAGING_RUN_PREFIX
+          value: "${RUN_PREFIX}"
+        - name: STAGING_BOOK_STREAM
+          value: "${BOOK_STREAM}"
+        - name: STAGING_TRADE_STREAM
+          value: "${TRADE_STREAM}"
+        - name: STAGING_PRIMITIVE_STREAM
+          value: "${PRIMITIVE_STREAM}"
+        - name: STAGING_FEATURE_STREAM
+          value: "${FEATURE_STREAM}"
+        - name: STAGING_FEATURE_KEY
+          value: "${FEATURE_KEY}"
+        - name: STAGING_FEATURE_GROUP
+          value: "${FEATURE_GROUP}"
+        - name: STAGING_OUTPUT_PREFIX
+          value: "${OUTPUT_PREFIX}"
+        command: ["python", "scripts/staging_pipeline_test.py"]
+        args: ["--phase", "${PROBE_PHASE}"]

@@ -171,6 +171,65 @@ def test_default_primitive_frequency_is_ten_seconds():
     assert [(row["frequency"], row["interval_ms"], row["bucket_start_ts_ms"]) for row in rows] == [("10s", 10_000, 10_000)]
 
 
+def test_primitive_ohlc_and_fill_intervals_follow_event_time_not_arrival_order():
+    agg = MarketAggregator()
+    for event_id, timestamp, price in (
+        ("middle", 15_000, 105),
+        ("last", 19_000, 109),
+        ("first-late", 11_000, 101),
+    ):
+        event = trade("binance", price, 1, ts=timestamp)
+        event["event_id"] = event_id
+        agg.apply_trade(event)
+
+    row = agg.primitive_bars_for_bucket("BTCUSDT", 10_000)[0]
+    assert (row["p_open"], row["p_close"]) == ("101", "109")
+    assert row["dt_fill_mean_ms"] == "4000"
+    assert row["dt_fill_min_ms"] == "4000"
+    assert row["dt_fill_max_ms"] == "4000"
+
+
+def test_primitive_book_does_not_leak_snapshot_from_a_future_bucket():
+    agg = MarketAggregator()
+    for event_id, timestamp, bid in (
+        ("current-book", 15_000, "99"),
+        ("future-book", 25_000, "999"),
+    ):
+        agg.apply_book({
+            "event_id": event_id,
+            "event_type": "book_snapshot",
+            "venue": "binance",
+            "instrument": "BTCUSDT",
+            "exchange_ts_ms": timestamp,
+            "received_ts_ms": timestamp,
+            "bids": [{"price": bid, "quantity": "1"}],
+            "asks": [{"price": str(int(bid) + 2), "quantity": "1"}],
+        })
+    event = trade("binance", 100, 1, ts=15_000)
+    event["event_id"] = "bucket-trade"
+    agg.apply_trade(event)
+
+    row = agg.primitive_bars_for_bucket("BTCUSDT", 10_000)[0]
+    assert row["p_bid_1"] == "99"
+    assert row["book_available_ts_ms"] == 15_000
+
+
+def test_duplicate_trade_event_is_rejected_without_mutating_bucket():
+    agg = MarketAggregator()
+    event = trade("binance", 100, 1, ts=10_000)
+    event["event_id"] = "same"
+    agg.apply_trade(event)
+
+    try:
+        agg.apply_trade(event)
+    except ValueError as exc:
+        assert "duplicate event_id" in str(exc)
+    else:
+        raise AssertionError("duplicate event must be rejected")
+
+    assert agg.primitive_bars_for_bucket("BTCUSDT", 10_000)[0]["cnt_trade"] == 1
+
+
 def test_dashboard_thirty_second_candles_are_resampled_from_ten_second_state():
     agg = MarketAggregator()
     for timestamp, price in ((10_000, 100), (20_000, 110), (30_000, 120)):

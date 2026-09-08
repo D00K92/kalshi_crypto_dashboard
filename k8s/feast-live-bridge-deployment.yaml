@@ -26,9 +26,11 @@ spec:
         - name: FEAST_REPO_PATH
           value: "/app/feast_store"
         - name: FEATURE_STREAM
-          value: "stream:features:v1"
+          value: "stream:features:v2_10s"
+        - name: FEATURE_VERSION
+          value: "v2_10s"
         - name: FEAST_LIVE_GROUP
-          value: "feast-live-features-v1"
+          value: "feast-live-features-v2-10s"
         - name: FEAST_PENDING_IDLE_MS
           value: "120000"
         resources:

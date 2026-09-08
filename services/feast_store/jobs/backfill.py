@@ -36,7 +36,7 @@ def main() -> None:
     parser.add_argument("--repo-path", default=".")
     parser.add_argument("--start-time", required=True)
     parser.add_argument("--end-time", required=True)
-    parser.add_argument("--feature-version", default="v1")
+    parser.add_argument("--feature-version", default="v2_10s")
     args = parser.parse_args()
     backfill_features(
         repo_path=args.repo_path, start_time=_utc_time(args.start_time),

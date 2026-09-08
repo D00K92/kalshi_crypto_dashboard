@@ -30,6 +30,14 @@ FEATURE_REGISTRY: dict[tuple[str, str], FeatureSpec] = {
         fields=("synthetic_price", "log_return", "venue_count"),
         required_fields=("synthetic_price", "venue_count"),
     ),
+    ("market_features", "v2_10s"): FeatureSpec(
+        feature_set="market_features",
+        version="v2_10s",
+        feature_view="v2_10s_market_features",
+        push_source="v2_10s_market_features_push",
+        fields=("synthetic_price", "log_return", "venue_count"),
+        required_fields=("synthetic_price", "venue_count"),
+    ),
 }
 
 

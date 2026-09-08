@@ -8,9 +8,11 @@ When code is pushed to the `main` branch:
 
 1. GitHub Actions checks the code and runs tests.
 2. GitHub Actions builds Docker images for the services.
-3. If the checks pass, another GitHub Actions workflow deploys the images to Google Cloud.
-4. Kubernetes, running in Google Kubernetes Engine (GKE), replaces the old service containers with the new ones.
-5. The deployment workflow waits until the new containers are running successfully.
+3. An isolated staging pipeline deploys the real aggregator and live-feature
+   containers and exercises their Redis contracts, restarts, and recovery.
+4. Only after staging passes can the production deployment begin.
+5. Kubernetes, running in Google Kubernetes Engine (GKE), replaces the old
+   service containers with the new ones.
 
 The normal process is therefore:
 
@@ -19,6 +21,9 @@ git push main
         |
         v
 GitHub Actions: test and build
+        |
+        v
+GKE staging: isolated end-to-end and recovery gate
         |
         v
 GitHub Actions: deploy
@@ -32,7 +37,11 @@ GitHub Actions: deploy
 
 **CI** means Continuous Integration. It automatically checks new code when it is pushed. In this project, CI installs the locked dependencies, runs Python tests, and checks that Docker images can be built.
 
-**CD** means Continuous Delivery or Continuous Deployment. It automatically delivers code to the production environment. In this project, a successful CI run starts the `Deploy Services` workflow.
+**CD** means Continuous Delivery or Continuous Deployment. It delivers code to
+the production environment. In this project, successful CI starts the staging
+integration workflow; only a successful staging run starts `Deploy Services`.
+The production job uses the GitHub `production` environment so repository
+owners can require approval before deployment.
 
 GitHub Actions is the service that runs both CI and CD. Each workflow runs on a temporary GitHub-hosted VM. The VM is used for testing, building images, and running deployment commands. The application itself does not run permanently on that VM.
 
@@ -64,7 +73,7 @@ The deployment workflow is:
 
 [`.github/workflows/cd.yml`](../.github/workflows/cd.yml)
 
-It starts only after CI completes successfully on `main`.
+It starts only after the staging integration completes successfully on `main`.
 
 The workflow then:
 
@@ -132,11 +141,25 @@ The workflow uses the commit SHA as the image tag, so the Kubernetes deployment 
 
 ## Staging Integration Test
 
-After successful CI, a separate workflow runs an integration test in GKE:
+After successful CI, a required workflow runs an isolated integration test in GKE:
 
 [`.github/workflows/integration.yml`](../.github/workflows/integration.yml)
 
-This test builds a test version of the aggregator, starts an integration job in GKE, and checks behavior against the staging configuration. It is separate from the production rollout verification.
+For each run, staging builds the tested aggregator and live-feature images and
+creates separate Deployments in `quant-staging`. Every Redis stream, key,
+checkpoint, and consumer group has a run-specific `staging:<run>:<attempt>`
+prefix; no production or legacy state is read or overwritten.
+
+The staging gate verifies:
+
+1. Late and corrupting trades cannot create duplicate or regressing primitives.
+2. The live feature is computed from the expected cross-venue price.
+3. Both services restore their checkpoints after a Kubernetes restart.
+4. Entries abandoned by a simulated crashed consumer are recovered with
+   `XAUTOCLAIM` and published exactly once.
+
+Staging resources are deleted after the run, and its isolated Redis keys expire
+after one hour.
 
 ## How to Check a Deployment
 
@@ -146,7 +169,8 @@ In GitHub, open the repository's **Actions** tab. The relevant workflows are:
 - **Deploy Services**: production image deployment and Kubernetes rollout verification
 - **Staging Integration**: integration test in GKE
 
-A production deployment is complete when **Deploy Services** is successful. The staging integration result is useful additional evidence, but it is a separate workflow.
+A production deployment is complete only when **CI**, **Staging Integration**,
+and **Deploy Services** all succeed for the same commit SHA.
 
 ## Dashboard Access
 

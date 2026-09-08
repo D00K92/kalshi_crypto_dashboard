@@ -6,7 +6,8 @@ from datetime import date
 import logging
 from pathlib import Path
 
-from src.common.data_io import load_training_table, load_training_table_from_feast
+from src.common.contracts import CURRENT_CONTRACT_VERSION
+from src.common.data_io import DEFAULT_TARGET_TABLE, load_training_table, load_training_table_from_feast
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -18,6 +19,7 @@ def main() -> None:
     p.add_argument("--target-root")
     p.add_argument("--feast-repo")
     p.add_argument("--target-table")
+    p.add_argument("--feature-version", default=CURRENT_CONTRACT_VERSION)
     p.add_argument("--start-date", required=True, type=date.fromisoformat)
     p.add_argument("--end-date", required=True, type=date.fromisoformat)
     p.add_argument("--output", required=True)
@@ -29,7 +31,8 @@ def main() -> None:
         if a.feast_repo:
             table = load_training_table_from_feast(
                 project=a.project, feast_repo=a.feast_repo, start=a.start_date,
-                end=a.end_date, target_table=a.target_table or "kalshi-crypto-506614.training_labels.future_realized_volatility_v1",
+                end=a.end_date, target_table=a.target_table or DEFAULT_TARGET_TABLE,
+                feature_version=a.feature_version,
             )
         else:
             if not a.feature_root or not a.target_root:

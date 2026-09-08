@@ -51,6 +51,30 @@ class RecoveryRedis:
     async def xreadgroup(self, *args, **kwargs): return []
 
 
+class FeatureRedis:
+    def __init__(self, payload):
+        self.payload = payload
+
+    async def get(self, key):
+        self.key = key
+        return json.dumps(self.payload).encode()
+
+
+async def test_read_features_uses_the_v2_10s_key_and_contract():
+    source = RedisMarketData(FeatureRedis({
+        "feature_set": "market_features",
+        "feature_version": "v2_10s",
+        "event_timestamp_ms": 100,
+        "available_timestamp_ms": 110,
+        "values": {"synthetic_price": 100, "log_return": 0, "venue_count": 2},
+    }))
+
+    observation = await source.read_features()
+
+    assert source.client.key == "market:features:v2_10s:BTCUSD:latest"
+    assert observation.feature_version == "v2_10s"
+
+
 async def test_existing_group_bootstrap_and_pending_recovery():
     source = RedisMarketData(RecoveryRedis())
     await source.ensure_group()

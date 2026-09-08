@@ -23,6 +23,7 @@ class Settings:
     gcp_project: str
     gcp_region: str
     model_version: str
+    feature_version: str
     forecast_provider: str
     model_serving_url: str
     model_serving_timeout_ms: int
@@ -48,7 +49,8 @@ class Settings:
         return cls(redis_url, os.getenv("KALSHI_REST_URL", "https://external-api.kalshi.com"),
                    os.getenv("KALSHI_API_KEY", ""), os.getenv("KALSHI_PRIVATE_KEY", ""), resources,
                    os.environ["GCP_PROJECT_ID"], os.getenv("GCP_REGION", "asia-northeast3"),
-                   os.getenv("VOLATILITY_MODEL_VERSION", "v1"),
+                   os.getenv("VOLATILITY_MODEL_VERSION", "v2_10s"),
+                   os.getenv("FEATURE_VERSION", "v2_10s"),
                    forecast_provider, os.getenv("MODEL_SERVING_URL", "http://model-serving:8080").rstrip("/"),
                    _positive_int("MODEL_SERVING_TIMEOUT_MS", 1_000),
                    os.getenv("CONSUMER_NAME", f"analytics-{os.getenv('HOSTNAME', 'local')}"),

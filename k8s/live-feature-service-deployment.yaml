@@ -34,13 +34,13 @@ spec:
         - name: BARS_STREAM
           value: "stream:primitives:v1"
         - name: FEATURE_STREAM
-          value: "stream:features:v1"
+          value: "stream:features:v2_10s"
         - name: FEATURE_KEY
-          value: "market:features:BTCUSD:latest"
+          value: "market:features:v2_10s:BTCUSD:latest"
         - name: FEATURE_STATE_KEY
-          value: "market:features:BTCUSD:state:v1"
+          value: "market:features:BTCUSD:state:v2_10s"
         - name: LIVE_FEATURE_GROUP
-          value: "live-features-v1"
+          value: "live-features-v2-10s"
         - name: EWMA_DECAY
           value: "0.96"
         - name: MAX_BAR_AGE_MS
@@ -51,6 +51,8 @@ spec:
           value: "5000"
         - name: PRIMITIVE_STREAM_MAXLEN
           value: "100000"
+        - name: LIVE_FEATURE_PENDING_IDLE_MS
+          value: "60000"
         - name: HEALTH_PORT
           value: "8080"
         ports:
@@ -64,7 +66,7 @@ spec:
           periodSeconds: 2
         readinessProbe:
           httpGet:
-            path: /healthz
+            path: /readyz
             port: health
           periodSeconds: 5
           timeoutSeconds: 2

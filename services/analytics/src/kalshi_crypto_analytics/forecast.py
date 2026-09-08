@@ -60,10 +60,10 @@ class VertexGCSResolver:
 
 
 class ConfiguredForecastProvider:
-    def __init__(self, resources: dict[str, str], resolver: ArtifactResolver, *, model_version: str = "v1") -> None:
+    def __init__(self, resources: dict[str, str], resolver: ArtifactResolver, *, model_version: str = "v2_10s", feature_version: str = "v2_10s") -> None:
         if set(resources) != set(HORIZONS) or any(not value for value in resources.values()):
             raise ValueError("exactly five non-empty horizon model resources are required")
-        self.resources, self.resolver, self.model_version = resources, resolver, model_version
+        self.resources, self.resolver, self.model_version, self.feature_version = resources, resolver, model_version, feature_version
         self._bundles: dict[str, ArtifactBundle] = {}
 
     @property
@@ -86,12 +86,17 @@ class ConfiguredForecastProvider:
             columns = metadata.get("feature_columns")
             if not isinstance(columns, list) or not columns or not all(isinstance(column, str) for column in columns):
                 raise ValueError(f"invalid feature columns for {horizon}")
+            artifact_feature_version = metadata.get("feature_version")
+            if artifact_feature_version and artifact_feature_version != self.feature_version:
+                raise ValueError(f"artifact feature contract mismatch for {horizon}")
             bundles[horizon] = bundle
         self._bundles = bundles
 
     async def forecast(self, observation: FeatureObservation, now_ms: int) -> VolatilitySnapshot:
         if not self.ready:
             raise PricingUnavailable(UnavailableReason.MODEL_INFERENCE_FAILED, "models are not loaded")
+        if observation.feature_set != "market_features" or observation.feature_version != self.feature_version:
+            raise PricingUnavailable(UnavailableReason.UNSUPPORTED_CONTRACT)
         try:
             outputs: dict[str, float] = {}
             for horizon in HORIZONS:
@@ -125,14 +130,14 @@ class ConfiguredForecastProvider:
 class HttpForecastProvider:
     """Forecast provider backed by the internal model-serving API."""
 
-    def __init__(self, *, base_url: str, timeout_ms: int, model_version: str = "v1", transport=None) -> None:
+    def __init__(self, *, base_url: str, timeout_ms: int, model_version: str = "v2_10s", feature_version: str = "v2_10s", transport=None) -> None:
         if not base_url.strip():
             raise ValueError("model-serving URL must not be empty")
         if timeout_ms <= 0:
             raise ValueError("model-serving timeout must be positive")
         self.base_url = base_url.rstrip("/")
         self.timeout_seconds = timeout_ms / 1000
-        self.model_version = model_version
+        self.model_version, self.feature_version = model_version, feature_version
         self._transport = transport or _urlopen_json
         self._ready = False
 
@@ -153,6 +158,8 @@ class HttpForecastProvider:
     async def forecast(self, observation: FeatureObservation, now_ms: int) -> VolatilitySnapshot:
         if not self.ready:
             raise PricingUnavailable(UnavailableReason.MODEL_INFERENCE_FAILED, "model-serving is not ready")
+        if observation.feature_set != "market_features" or observation.feature_version != self.feature_version:
+            raise PricingUnavailable(UnavailableReason.UNSUPPORTED_CONTRACT)
         request = {
             "feature_set": observation.feature_set,
             "feature_version": observation.feature_version,

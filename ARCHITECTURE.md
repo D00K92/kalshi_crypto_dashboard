@@ -45,7 +45,7 @@ flowchart LR
     Exporter -->|Parquet archive| GCS
     GCS --> Batch
     Batch -->|bars, features, labels| BQ
-    Redis -->|stream:features:v1| FeastBridge
+    Redis -->|stream:features:v2_10s| FeastBridge
     FeastBridge -->|online feature writes| Redis
     BQ -->|offline feature source| FeastServer
     Redis -->|online feature store| FeastServer
@@ -113,7 +113,7 @@ group, so one consumer's ACK does not remove another consumer's work.
 | `stream:kalshi_tickers` | `ingestion` | `analytics` (`analytics-pricing-v1`); `gcs_exporter` (`gcs_kalshi_ticker_archiver_group`); `dashboard` via bounded reverse reads without a group | Normalized Kalshi ticker updates. |
 | `stream:kalshi_trades` | `ingestion` | `gcs_exporter` (`gcs_kalshi_trade_archiver_group`); `dashboard` via bounded reverse reads without a group | Normalized Kalshi trades. |
 | `stream:kalshi_orderbook` | `ingestion` | `gcs_exporter` (`gcs_kalshi_orderbook_archiver_group`) | Normalized Kalshi order-book snapshots/deltas. |
-| `stream:features:v1` | `aggregator` | `feast-live-bridge` (`feast-live-features-v1`) | Versioned live `market_features` envelope containing `synthetic_price`, `log_return`, and `venue_count`. |
+| `stream:features:v2_10s` | `aggregator` | `feast-live-bridge` (`feast-live-features-v2-10s`) | Versioned `market_features/v2_10s` envelope containing `synthetic_price`, `log_return`, and `venue_count`. |
 | `stream:pricing:v1` | `analytics` | No in-repository durable consumer currently | Audit/event stream of available analytics price publications. |
 
 The aggregator defaults still use the historical Redis group IDs
@@ -138,7 +138,7 @@ and `XAUTOCLAIM` for recovery.
 | `market:candle_state:BTCUSDT:10s` | JSON string, replaced in place | `aggregator` | `aggregator` restart recovery |
 | `market:candles:BTCUSDT:10s` | JSON array, replaced in place | `aggregator` | `dashboard`; aggregator fallback recovery |
 | `market:cvd:BTCUSDT:10s` | JSON array, replaced in place | `aggregator` | `dashboard` |
-| `market:features:v1:BTCUSD:latest` | Versioned JSON, 120-second TTL | `aggregator` | `analytics` |
+| `market:features:v2_10s:BTCUSD:latest` | Versioned JSON, 120-second TTL | `aggregator` | `analytics` |
 | Feast online-store keys | Feast-managed Redis representation | `feast-live-bridge`; Feast materialization jobs | `feast-server`; future Feast SDK clients |
 | `market:volatility:v1:BTCUSD:latest` | Versioned JSON, 60-second TTL | `analytics` | Operations/smoke checks; future consumers |
 | `market:pricing:v1:<market_ticker>` | Available-price JSON, 60-second TTL | `analytics` | `dashboard` |
@@ -198,8 +198,8 @@ latest-state keys.
 | `gs://<bucket>/feature_store/registry.db` | Feast apply job | `feast-live-bridge`, `feast-server`, `ml_pipeline` | Feast registry. |
 | Immutable model artifact prefixes containing `model.joblib` and `metadata.json` | `ml_pipeline` or approved bootstrap process | `analytics` | Exact model bytes and ordered feature metadata. |
 | `market_data.bars` | `batch_etl` | Feature/label SQL | Canonical multi-frequency BigQuery bars. |
-| `feature_store.realized_volatility_v1` | `batch_etl` | Feast offline store, `ml_pipeline` | Point-in-time historical BTC features. |
-| `training_labels.future_realized_volatility_v1` | `batch_etl` | `ml_pipeline` | Forward realized-volatility labels for 1m, 5m, 15m, 30m, and 1h horizons. |
+| `feature_store.realized_volatility_v2_10s` | `batch_etl` | Feast offline store, `ml_pipeline` | Point-in-time historical BTCUSD features for the v2_10s contract. |
+| `training_labels.future_realized_volatility_v2_10s` | `batch_etl` | `ml_pipeline` | Forward realized-volatility labels for the v2_10s contract. |
 | Vertex model resources | `ml_pipeline` registration stage/operator-approved bootstrap | `analytics` | Immutable model identity and artifact URI lookup. |
 
 ## End-to-end flows
@@ -251,15 +251,15 @@ latest-state keys.
 
 ### Feast offline and online paths
 
-- **Offline:** BigQuery `feature_store.realized_volatility_v1` is the Feast
+- **Offline:** BigQuery `feature_store.realized_volatility_v2_10s` is the Feast
   source used for historical point-in-time retrieval by `ml_pipeline`.
-- **Online:** `aggregator` emits `stream:features:v1`; the Feast live
+- **Online:** `aggregator` emits `stream:features:v2_10s`; the Feast live
   bridge validates its immutable feature contract and pushes it to the Feast
   Redis online store.
 - **Serving:** `feast-server:6566` exposes the online store through Feast's HTTP
   API. It is available but not used by the current analytics implementation.
 - **Analytics fast path:** analytics reads
-  `market:features:v1:BTCUSD:latest` directly. This is intentional and keeps the
+  `market:features:v2_10s:BTCUSD:latest` directly. This is intentional and keeps the
   pricing service compatible with the existing low-latency Redis architecture
   without forcing Feast or upstream producers to change.
 

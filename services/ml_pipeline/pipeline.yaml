@@ -1,15 +1,16 @@
 # PIPELINE DEFINITION
-# Name: crypto-volatility-training-v1
+# Name: crypto-volatility-training-v2-10s
 # Inputs:
 #    bucket: str [Default: 'kalshi-crypto-tick-data']
-#    champion_metrics_uri: str [Default: 'gs://kalshi-crypto-tick-data/models/v1/champion_metrics.json']
+#    champion_metrics_uri: str [Default: 'gs://kalshi-crypto-tick-data/models/v2_10s/champion_metrics.json']
 #    end_date: str [Default: '2026-09-02']
 #    feast_repo: str [Default: '/app/feast_store']
+#    feature_version: str [Default: 'v2_10s']
 #    location: str [Default: 'asia-northeast3']
-#    model_version: str [Default: 'v1']
+#    model_version: str [Default: 'v2_10s']
 #    project: str [Default: 'kalshi-crypto-506614']
 #    start_date: str [Default: '2026-08-31']
-#    target_table: str [Default: 'kalshi-crypto-506614.training_labels.future_realized_volatility_v1']
+#    target_table: str [Default: 'kalshi-crypto-506614.training_labels.future_realized_volatility_v2_10s']
 components:
   comp-evaluate-container:
     executorLabel: exec-evaluate-container
@@ -84,6 +85,8 @@ components:
             parameters:
               bucket:
                 componentInputParameter: pipelinechannel--bucket
+              feature_version:
+                componentInputParameter: pipelinechannel--feature_version
               horizon:
                 componentInputParameter: pipelinechannel--loop-item-param-1
               location:
@@ -104,6 +107,8 @@ components:
               dataset:
                 componentInputArtifact: pipelinechannel--load-container-output_dataset
             parameters:
+              feature_version:
+                componentInputParameter: pipelinechannel--feature_version
               horizon:
                 componentInputParameter: pipelinechannel--loop-item-param-1
           taskInfo:
@@ -118,6 +123,8 @@ components:
         pipelinechannel--bucket:
           parameterType: STRING
         pipelinechannel--champion_metrics_uri:
+          parameterType: STRING
+        pipelinechannel--feature_version:
           parameterType: STRING
         pipelinechannel--location:
           parameterType: STRING
@@ -134,6 +141,8 @@ components:
         end_date:
           parameterType: STRING
         feast_repo:
+          parameterType: STRING
+        feature_version:
           parameterType: STRING
         project:
           parameterType: STRING
@@ -162,6 +171,8 @@ components:
       parameters:
         bucket:
           parameterType: STRING
+        feature_version:
+          parameterType: STRING
         horizon:
           parameterType: STRING
         location:
@@ -179,6 +190,8 @@ components:
             schemaTitle: system.Dataset
             schemaVersion: 0.0.1
       parameters:
+        feature_version:
+          parameterType: STRING
         horizon:
           parameterType: STRING
     outputDefinitions:
@@ -221,6 +234,8 @@ deploymentSpec:
         - '{{$.inputs.parameters[''end_date'']}}'
         - --project
         - '{{$.inputs.parameters[''project'']}}'
+        - --feature-version
+        - '{{$.inputs.parameters[''feature_version'']}}'
         - --output
         - '{{$.outputs.artifacts[''output_dataset''].path}}'
         command:
@@ -242,6 +257,8 @@ deploymentSpec:
         - '{{$.inputs.parameters[''bucket'']}}'
         - --model-version
         - '{{$.inputs.parameters[''model_version'']}}'
+        - --feature-version
+        - '{{$.inputs.parameters[''feature_version'']}}'
         - --horizon
         - '{{$.inputs.parameters[''horizon'']}}'
         command:
@@ -255,6 +272,8 @@ deploymentSpec:
         - '{{$.inputs.artifacts[''dataset''].path}}'
         - --horizon
         - '{{$.inputs.parameters[''horizon'']}}'
+        - --feature-version
+        - '{{$.inputs.parameters[''feature_version'']}}'
         - --output
         - '{{$.outputs.artifacts[''model''].path}}'
         command:
@@ -262,7 +281,7 @@ deploymentSpec:
         - /app/main.py
         image: asia-northeast3-docker.pkg.dev/kalshi-crypto-506614/ml-pipeline/ml-train:v1
 pipelineInfo:
-  name: crypto-volatility-training-v1
+  name: crypto-volatility-training-v2-10s
 root:
   dag:
     tasks:
@@ -282,6 +301,8 @@ root:
               componentInputParameter: bucket
             pipelinechannel--champion_metrics_uri:
               componentInputParameter: champion_metrics_uri
+            pipelinechannel--feature_version:
+              componentInputParameter: feature_version
             pipelinechannel--location:
               componentInputParameter: location
             pipelinechannel--model_version:
@@ -293,7 +314,7 @@ root:
         parameterIterator:
           itemInput: pipelinechannel--loop-item-param-1
           items:
-            raw: '["5m", "15m", "30m", "1h"]'
+            raw: '["1m", "5m", "15m", "30m", "1h"]'
         taskInfo:
           name: for-loop-2
       load-container:
@@ -307,6 +328,8 @@ root:
               componentInputParameter: end_date
             feast_repo:
               componentInputParameter: feast_repo
+            feature_version:
+              componentInputParameter: feature_version
             project:
               componentInputParameter: project
             start_date:
@@ -322,7 +345,7 @@ root:
         isOptional: true
         parameterType: STRING
       champion_metrics_uri:
-        defaultValue: gs://kalshi-crypto-tick-data/models/v1/champion_metrics.json
+        defaultValue: gs://kalshi-crypto-tick-data/models/v2_10s/champion_metrics.json
         isOptional: true
         parameterType: STRING
       end_date:
@@ -333,12 +356,16 @@ root:
         defaultValue: /app/feast_store
         isOptional: true
         parameterType: STRING
+      feature_version:
+        defaultValue: v2_10s
+        isOptional: true
+        parameterType: STRING
       location:
         defaultValue: asia-northeast3
         isOptional: true
         parameterType: STRING
       model_version:
-        defaultValue: v1
+        defaultValue: v2_10s
         isOptional: true
         parameterType: STRING
       project:
@@ -350,7 +377,7 @@ root:
         isOptional: true
         parameterType: STRING
       target_table:
-        defaultValue: kalshi-crypto-506614.training_labels.future_realized_volatility_v1
+        defaultValue: kalshi-crypto-506614.training_labels.future_realized_volatility_v2_10s
         isOptional: true
         parameterType: STRING
 schemaVersion: 2.1.0

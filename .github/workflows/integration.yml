@@ -21,6 +21,10 @@ env:
   STAGING_NAMESPACE: quant-staging
   STAGING_REDIS_HOST: ${{ vars.STAGING_REDIS_HOST }}
 
+concurrency:
+  group: staging-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   integration:
     if: >-
@@ -30,7 +34,7 @@ jobs:
        github.event.workflow_run.head_branch == 'main')
     runs-on: ubuntu-latest
     environment: staging
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
     - name: Check out tested commit
       uses: actions/checkout@v4
@@ -38,7 +42,7 @@ jobs:
         ref: ${{ github.event.workflow_run.head_sha || github.sha }}
         persist-credentials: false
 
-    - name: Validate staging configuration
+    - name: Validate isolated staging configuration
       run: |
         set -euo pipefail
         test -n "${STAGING_REDIS_HOST}" || {
@@ -60,14 +64,17 @@ jobs:
     - name: Configure Docker authentication
       run: gcloud auth configure-docker "${GCP_REGION}-docker.pkg.dev" --quiet
 
-    - name: Build and push aggregator test image
+    - name: Build and push staging service images
       env:
-        IMAGE_URI: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/aggregator
         IMAGE_TAG: ${{ github.event.workflow_run.head_sha || github.sha }}
       run: |
         set -euo pipefail
-        docker build --platform linux/amd64 -t "${IMAGE_URI}:${IMAGE_TAG}" services/aggregator
-        docker push "${IMAGE_URI}:${IMAGE_TAG}"
+        aggregator_image="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${GAR_REPOSITORY}/aggregator:${IMAGE_TAG}"
+        feature_image="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${GAR_REPOSITORY}/live-feature-service:${IMAGE_TAG}"
+        docker build --platform linux/amd64 -t "${aggregator_image}" services/aggregator
+        docker push "${aggregator_image}"
+        docker build --platform linux/amd64 -t "${feature_image}" services/live_feature_service
+        docker push "${feature_image}"
 
     - name: Get GKE credentials
       uses: google-github-actions/get-gke-credentials@v3
@@ -76,49 +83,94 @@ jobs:
         location: ${{ env.GCP_REGION }}
         project_id: ${{ env.GCP_PROJECT_ID }}
 
-    - name: Run integration Job in GKE
+    - name: Deploy and verify isolated staging pipeline
       env:
-        JOB_NAME: "aggregator-it-${{ github.run_id }}"
         NAMESPACE: ${{ env.STAGING_NAMESPACE }}
+        RUN_LABEL: ${{ github.run_id }}-${{ github.run_attempt }}
+        RUN_PREFIX: staging:${{ github.run_id }}:${{ github.run_attempt }}
+        AGGREGATOR_DEPLOYMENT: staging-aggregator-${{ github.run_id }}-${{ github.run_attempt }}
+        FEATURE_DEPLOYMENT: staging-features-${{ github.run_id }}-${{ github.run_attempt }}
         AGGREGATOR_IMAGE: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/aggregator:${{ github.event.workflow_run.head_sha || github.sha }}
+        FEATURE_IMAGE: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/live-feature-service:${{ github.event.workflow_run.head_sha || github.sha }}
         REDIS_URL: redis://${{ env.STAGING_REDIS_HOST }}:6379/0
-        BOOK_STREAM: "ci:${{ github.run_id }}:orderbooks"
-        TRADE_STREAM: "ci:${{ github.run_id }}:trades"
-        OUTPUT_PREFIX: "ci:${{ github.run_id }}:market"
+        BOOK_STREAM: staging:${{ github.run_id }}:${{ github.run_attempt }}:input:books
+        TRADE_STREAM: staging:${{ github.run_id }}:${{ github.run_attempt }}:input:trades
+        BOOK_GROUP: staging:${{ github.run_id }}:${{ github.run_attempt }}:aggregator:books
+        TRADE_GROUP: staging:${{ github.run_id }}:${{ github.run_attempt }}:aggregator:trades
+        OUTPUT_PREFIX: staging:${{ github.run_id }}:${{ github.run_attempt }}:market
+        BARS_STREAM: staging:${{ github.run_id }}:${{ github.run_attempt }}:bars:v2
+        PRIMITIVE_STREAM: staging:${{ github.run_id }}:${{ github.run_attempt }}:primitives:v2
+        ORDERBOOK_STREAM: staging:${{ github.run_id }}:${{ github.run_attempt }}:orderbooks:v2
+        FEATURE_STREAM: staging:${{ github.run_id }}:${{ github.run_attempt }}:features:v2_10s
+        FEATURE_KEY: staging:${{ github.run_id }}:${{ github.run_attempt }}:features:v2_10s:BTCUSD:latest
+        FEATURE_STATE_KEY: staging:${{ github.run_id }}:${{ github.run_attempt }}:features:BTCUSD:state:v2_10s
+        FEATURE_GROUP: staging:${{ github.run_id }}:${{ github.run_attempt }}:features:group:v2-10s
       run: |
         set -euo pipefail
-        kubectl get namespace "${NAMESPACE}" >/dev/null
-        envsubst '${JOB_NAME} ${NAMESPACE} ${AGGREGATOR_IMAGE} ${REDIS_URL} ${BOOK_STREAM} ${TRADE_STREAM} ${OUTPUT_PREFIX}' \
-          < services/aggregator/k8s/integration-job.yaml \
-          | kubectl apply -f -
 
-        cleanup() {
-          kubectl delete "job/${JOB_NAME}" -n "${NAMESPACE}" --ignore-not-found --wait=false
-        }
         diagnostics() {
-          kubectl get "job/${JOB_NAME}" -n "${NAMESPACE}" -o wide || true
-          kubectl get pods -n "${NAMESPACE}" -l "job-name=${JOB_NAME}" -o wide || true
-          kubectl logs "job/${JOB_NAME}" -n "${NAMESPACE}" --all-containers=true || true
+          kubectl get pods -n "${NAMESPACE}" -l "staging-run=${RUN_LABEL}" -o wide || true
+          kubectl logs -n "${NAMESPACE}" -l "staging-run=${RUN_LABEL}" --all-containers --tail=150 || true
         }
-        trap cleanup EXIT
-
-        deadline=$((SECONDS + 300))
-        while (( SECONDS < deadline )); do
-          succeeded="$(kubectl get "job/${JOB_NAME}" -n "${NAMESPACE}" -o jsonpath='{.status.succeeded}')"
-          failed="$(kubectl get "job/${JOB_NAME}" -n "${NAMESPACE}" -o jsonpath='{.status.failed}')"
-          if [[ "${succeeded:-0}" -ge 1 ]]; then
-            break
+        cleanup() {
+          kubectl delete jobs -n "${NAMESPACE}" -l "staging-run=${RUN_LABEL}" --ignore-not-found --wait=false || true
+          kubectl delete deployment -n "${NAMESPACE}" "${AGGREGATOR_DEPLOYMENT}" "${FEATURE_DEPLOYMENT}" --ignore-not-found --wait=false || true
+        }
+        run_probe() {
+          local phase="$1"
+          export PROBE_PHASE="${phase}"
+          export PROBE_JOB="staging-probe-${RUN_LABEL}-${phase}"
+          envsubst '${PROBE_JOB} ${PROBE_PHASE} ${NAMESPACE} ${RUN_LABEL} ${AGGREGATOR_IMAGE} ${REDIS_URL} ${RUN_PREFIX} ${BOOK_STREAM} ${TRADE_STREAM} ${PRIMITIVE_STREAM} ${FEATURE_STREAM} ${FEATURE_KEY} ${FEATURE_GROUP} ${OUTPUT_PREFIX}' \
+            < services/aggregator/k8s/staging-probe-job.yaml \
+            | kubectl apply -f -
+          local deadline=$((SECONDS + 120))
+          local succeeded=0
+          while (( SECONDS < deadline )); do
+            succeeded="$(kubectl get "job/${PROBE_JOB}" -n "${NAMESPACE}" -o jsonpath='{.status.succeeded}')"
+            local failed
+            failed="$(kubectl get "job/${PROBE_JOB}" -n "${NAMESPACE}" -o jsonpath='{.status.failed}')"
+            if [[ "${succeeded:-0}" -ge 1 ]]; then
+              break
+            fi
+            if [[ "${failed:-0}" -ge 1 ]]; then
+              diagnostics
+              return 1
+            fi
+            sleep 2
+          done
+          if [[ "${succeeded:-0}" -lt 1 ]]; then
+            diagnostics
+            return 1
           fi
-          if [[ "${failed:-0}" -ge 1 ]]; then
-            echo "Integration Job failed." >&2
+          kubectl logs "job/${PROBE_JOB}" -n "${NAMESPACE}"
+        }
+        trap cleanup EXIT INT TERM
+
+        kubectl get namespace "${NAMESPACE}" >/dev/null
+        envsubst '${AGGREGATOR_DEPLOYMENT} ${FEATURE_DEPLOYMENT} ${NAMESPACE} ${RUN_LABEL} ${AGGREGATOR_IMAGE} ${FEATURE_IMAGE} ${REDIS_URL} ${BOOK_STREAM} ${TRADE_STREAM} ${BOOK_GROUP} ${TRADE_GROUP} ${OUTPUT_PREFIX} ${BARS_STREAM} ${PRIMITIVE_STREAM} ${ORDERBOOK_STREAM} ${FEATURE_STREAM} ${FEATURE_KEY} ${FEATURE_STATE_KEY} ${FEATURE_GROUP}' \
+          < services/aggregator/k8s/staging-pipeline-deployments.yaml \
+          | kubectl apply -f -
+        kubectl rollout status "deployment/${AGGREGATOR_DEPLOYMENT}" -n "${NAMESPACE}" --timeout=3m
+        kubectl rollout status "deployment/${FEATURE_DEPLOYMENT}" -n "${NAMESPACE}" --timeout=3m
+
+        run_probe baseline
+
+        kubectl rollout restart "deployment/${AGGREGATOR_DEPLOYMENT}" "deployment/${FEATURE_DEPLOYMENT}" -n "${NAMESPACE}"
+        kubectl rollout status "deployment/${AGGREGATOR_DEPLOYMENT}" -n "${NAMESPACE}" --timeout=3m
+        kubectl rollout status "deployment/${FEATURE_DEPLOYMENT}" -n "${NAMESPACE}" --timeout=3m
+        run_probe continuation
+
+        kubectl scale "deployment/${FEATURE_DEPLOYMENT}" -n "${NAMESPACE}" --replicas=0
+        deadline=$((SECONDS + 120))
+        while [[ -n "$(kubectl get pods -n "${NAMESPACE}" -l "app=${FEATURE_DEPLOYMENT}" -o name)" ]]; do
+          if (( SECONDS >= deadline )); then
             diagnostics
             exit 1
           fi
           sleep 2
         done
-        if [[ "${succeeded:-0}" -lt 1 ]]; then
-          echo "Integration Job timed out after 5 minutes." >&2
-          diagnostics
-          exit 1
-        fi
-        kubectl logs "job/${JOB_NAME}" -n "${NAMESPACE}"
+        run_probe stage-pending
+        sleep 2
+        kubectl scale "deployment/${FEATURE_DEPLOYMENT}" -n "${NAMESPACE}" --replicas=1
+        kubectl rollout status "deployment/${FEATURE_DEPLOYMENT}" -n "${NAMESPACE}" --timeout=3m
+        run_probe verify-recovery

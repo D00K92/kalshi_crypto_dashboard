@@ -6,7 +6,8 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True, slots=True)
 class Settings:
-    model_version: str = "v1"
+    model_version: str = "v2_10s"
+    feature_version: str = "v2_10s"
     max_feature_age_ms: int = 60_000
     allowed_future_skew_ms: int = 2_000
     ewma_decay: float = 0.96
@@ -14,7 +15,8 @@ class Settings:
     @classmethod
     def from_env(cls) -> "Settings":
         return cls(
-            model_version=os.getenv("MODEL_VERSION", "v1").strip() or "v1",
+            model_version=os.getenv("MODEL_VERSION", "v2_10s").strip() or "v2_10s",
+            feature_version=os.getenv("FEATURE_VERSION", "v2_10s").strip() or "v2_10s",
             max_feature_age_ms=_positive_int("MODEL_MAX_FEATURE_AGE_MS", 90_000),
             allowed_future_skew_ms=_positive_int("MODEL_ALLOWED_FUTURE_SKEW_MS", 2_000),
             ewma_decay=_bounded_float("EWMA_DECAY", 0.96, 0.0, 1.0),

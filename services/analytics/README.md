@@ -8,14 +8,14 @@ remains available only as a rollback/parity path.
 ## Inputs and outputs
 
 Inputs are `market:spot:BTCUSDT:latest`,
-`market:features:BTCUSD:latest`, and `stream:kalshi_tickers`. The service owns
+`market:features:v2_10s:BTCUSD:latest`, and `stream:kalshi_tickers`. The service owns
 consumer group `analytics-pricing-v1`; startup uses `XREVRANGE` and abandoned
 pending entries are recovered with `XAUTOCLAIM`, so Pub/Sub is not required for
 recovery. Kalshi REST supplies authoritative above-strike market metadata.
 
 Successful cycles write:
 
-- `market:volatility:v1:BTCUSD:latest` (60-second TTL)
+- `market:volatility:v2_10s:BTCUSD:latest` (60-second TTL)
 - `market:pricing:v1:<market_ticker>` (60-second TTL)
 - `market:pricing:v1:active`, `stream:pricing:v1`, and `pub:pricing:v1`
 
@@ -33,7 +33,8 @@ the quote/edge fields null; the standalone model probability remains available.
 | `FORECAST_PROVIDER` | `http` (production) or `direct` (rollback/parity); defaults to `http`. |
 | `MODEL_SERVING_URL`, `MODEL_SERVING_TIMEOUT_MS` | Internal model-serving URL and bounded request timeout. |
 | `VOLATILITY_MODEL_1M`, `VOLATILITY_MODEL_5M`, `VOLATILITY_MODEL_15M`, `VOLATILITY_MODEL_30M`, `VOLATILITY_MODEL_1H` | Exact immutable Vertex resource names, such as `projects/123/locations/asia-northeast3/models/456@1`. |
-| `VOLATILITY_MODEL_VERSION` | Expected artifact/label version; defaults to `v1`. |
+| `FEATURE_VERSION` | Expected live feature contract; defaults to `v2_10s`. |
+| `VOLATILITY_MODEL_VERSION` | Expected artifact/label version; defaults to `v2_10s`. |
 | `CONSUMER_NAME` | Redis consumer identity; defaults to the pod hostname. |
 | `HEALTH_PORT` | HTTP probe port; defaults to `8080`. |
 | `SPOT_MAX_AGE_MS`, `TICKER_MAX_AGE_MS`, `FEATURE_MAX_AGE_MS`, `VOLATILITY_MAX_AGE_MS` | Freshness limits; defaults are 5, 60, 90, and 60 seconds. |
@@ -116,5 +117,5 @@ curl --fail http://127.0.0.1:18080/readyz
 
 `/healthz` proves the process is alive. `/readyz` succeeds only after models are
 loaded and at least one supported market has a fresh published price. Inspect
-`market:volatility:v1:BTCUSD:latest`, `market:pricing:v1:active`, and matching
+`market:volatility:v2_10s:BTCUSD:latest`, `market:pricing:v1:active`, and matching
 `market:pricing:v1:KXBTCD-*` keys for post-deploy evidence.

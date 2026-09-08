@@ -46,7 +46,9 @@ spec:
         - name: GCP_REGION
           value: "${GCP_REGION}"
         - name: VOLATILITY_MODEL_VERSION
-          value: "v1"
+          value: "v2_10s"
+        - name: FEATURE_VERSION
+          value: "v2_10s"
         - name: FORECAST_PROVIDER
           value: "http"
         - name: MODEL_SERVING_URL

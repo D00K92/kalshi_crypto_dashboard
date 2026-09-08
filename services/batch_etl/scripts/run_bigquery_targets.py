@@ -9,12 +9,19 @@ from pathlib import Path
 from google.cloud import bigquery
 
 
+TARGET_SQL = {
+    "v1": "013_compute_future_realized_volatility.sql",
+    "v2_10s": "015_compute_v2_10s_targets.sql",
+}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--target-hour", default=os.getenv("BATCH_ETL_TARGET_HOUR"))
     parser.add_argument("--project", default=os.getenv("GCP_PROJECT_ID", "kalshi-crypto-506614"))
     parser.add_argument("--location", default="asia-northeast3")
     parser.add_argument("--delay-hours", type=int, default=2)
+    parser.add_argument("--label-version", default=os.getenv("LABEL_VERSION", "v2_10s"), choices=TARGET_SQL)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
     target = (
@@ -24,7 +31,7 @@ def main() -> None:
     )
     if target.minute or target.second or target.microsecond or args.delay_hours < 1:
         parser.error("target hour must be aligned to UTC hour and delay must be positive")
-    sql = (Path(__file__).resolve().parents[1] / "sql" / "013_compute_future_realized_volatility.sql").read_text()
+    sql = (Path(__file__).resolve().parents[1] / "sql" / TARGET_SQL[args.label_version]).read_text()
     sql = sql.replace("${project}", args.project)
     config = bigquery.QueryJobConfig(
         query_parameters=[
@@ -37,7 +44,11 @@ def main() -> None:
     job = bigquery.Client(project=args.project, location=args.location).query(sql, job_config=config)
     if not args.dry_run:
         job.result()
-    print(f"{'validated' if args.dry_run else 'wrote'} future-volatility labels for {target.isoformat()}", flush=True)
+    print(
+        f"{'validated' if args.dry_run else 'wrote'} {args.label_version} "
+        f"future-volatility labels for {target.isoformat()}",
+        flush=True,
+    )
 
 
 if __name__ == "__main__":

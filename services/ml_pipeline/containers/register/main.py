@@ -13,7 +13,8 @@ def main() -> None:
     p.add_argument("--project", required=True)
     p.add_argument("--location", default="asia-northeast3")
     p.add_argument("--bucket", default="kalshi-crypto-tick-data")
-    p.add_argument("--model-version", default="v1")
+    p.add_argument("--model-version", default="v2_10s")
+    p.add_argument("--feature-version", default="v2_10s")
     p.add_argument("--horizon", required=True)
     p.add_argument("--promote-file")
     a = p.parse_args()
@@ -25,7 +26,12 @@ def main() -> None:
         display_name=f"crypto-volatility-{a.model_version}-{a.horizon}",
         artifact_uri=a.artifact_uri,
         serving_container_image_uri="us-docker.pkg.dev/vertex-ai/prediction/xgboost-cpu.1-7:latest",
-        labels={"version": a.model_version, "stage": "champion", "horizon": a.horizon},
+        labels={
+            "version": a.model_version,
+            "feature_version": a.feature_version,
+            "stage": "champion",
+            "horizon": a.horizon,
+        },
     )
     print(model.resource_name, flush=True)
 
