@@ -47,6 +47,12 @@ spec:
           value: "${GCP_REGION}"
         - name: VOLATILITY_MODEL_VERSION
           value: "v1"
+        - name: FORECAST_PROVIDER
+          value: "http"
+        - name: MODEL_SERVING_URL
+          value: "http://model-serving:8080"
+        - name: MODEL_SERVING_TIMEOUT_MS
+          value: "1000"
         - name: VOLATILITY_MODEL_1M
           value: "${VOLATILITY_MODEL_1M}"
         - name: VOLATILITY_MODEL_5M

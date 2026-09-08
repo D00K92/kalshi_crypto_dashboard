@@ -1,14 +1,14 @@
 # Analytics pricing service
 
-Analytics consumes the existing aggregator latest keys and Kalshi ticker stream,
-loads five approved volatility models, and publishes model probabilities and
-quote-relative edges. It never emits orders or trading decisions and has no EWMA
-or other production fallback.
+Analytics consumes the live feature snapshot and Kalshi ticker stream, calls the
+internal model-serving API, and publishes model probabilities and quote-relative
+edges. It never emits orders or trading decisions. Direct Vertex artifact loading
+remains available only as a rollback/parity path.
 
 ## Inputs and outputs
 
 Inputs are `market:spot:BTCUSDT:latest`,
-`market:features:v1:BTCUSD:latest`, and `stream:kalshi_tickers`. The service owns
+`market:features:BTCUSD:latest`, and `stream:kalshi_tickers`. The service owns
 consumer group `analytics-pricing-v1`; startup uses `XREVRANGE` and abandoned
 pending entries are recovered with `XAUTOCLAIM`, so Pub/Sub is not required for
 recovery. Kalshi REST supplies authoritative above-strike market metadata.
@@ -30,6 +30,8 @@ the quote/edge fields null; the standalone model probability remains available.
 | `REDIS_HOST`, `REDIS_PORT` | Existing private Redis endpoint; `ANALYTICS_REDIS_URL` may override both locally. |
 | `KALSHI_API_KEY`, `KALSHI_PRIVATE_KEY` | Existing authenticated REST credentials. |
 | `GCP_PROJECT_ID`, `GCP_REGION` | Vertex/GCS project and region. |
+| `FORECAST_PROVIDER` | `http` (production) or `direct` (rollback/parity); defaults to `http`. |
+| `MODEL_SERVING_URL`, `MODEL_SERVING_TIMEOUT_MS` | Internal model-serving URL and bounded request timeout. |
 | `VOLATILITY_MODEL_1M`, `VOLATILITY_MODEL_5M`, `VOLATILITY_MODEL_15M`, `VOLATILITY_MODEL_30M`, `VOLATILITY_MODEL_1H` | Exact immutable Vertex resource names, such as `projects/123/locations/asia-northeast3/models/456@1`. |
 | `VOLATILITY_MODEL_VERSION` | Expected artifact/label version; defaults to `v1`. |
 | `CONSUMER_NAME` | Redis consumer identity; defaults to the pod hostname. |

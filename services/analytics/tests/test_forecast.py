@@ -5,7 +5,7 @@ import pandas as pd
 import pytest
 from xgboost import XGBRegressor
 
-from kalshi_crypto_analytics.forecast import ArtifactBundle, ConfiguredForecastProvider
+from kalshi_crypto_analytics.forecast import ArtifactBundle, ConfiguredForecastProvider, HttpForecastProvider
 from kalshi_crypto_analytics.schemas import (
     HORIZONS,
     FeatureObservation,
@@ -78,3 +78,37 @@ def test_training_joblib_xgboost_format_round_trips_in_runtime():
     restored = joblib.load(encoded)
     result = restored.predict(pd.DataFrame([[1.0, 2.0]], columns=columns))
     assert float(result[0]) > 0
+
+
+async def test_http_provider_maps_and_validates_complete_response():
+    calls = []
+
+    def transport(method, url, payload, timeout):
+        calls.append((method, url, payload, timeout))
+        if method == "GET":
+            return {"status": "ready"}
+        return {
+            "annualized_volatility": {horizon: 0.2 for horizon in HORIZONS},
+            "feature_asof_ts_ms": 100,
+            "generated_ts_ms": 110,
+            "model_resources": {horizon: f"ewma/v1/{horizon}" for horizon in HORIZONS},
+            "model_version": "v1",
+        }
+
+    provider = HttpForecastProvider(base_url="http://model-serving:8080/", timeout_ms=500, transport=transport)
+    await provider.load()
+    snapshot = await provider.forecast(FeatureObservation({"log_return": 0.0, "venue_count": 2}, 100), 110)
+    assert snapshot.annualized_volatility == {horizon: 0.2 for horizon in HORIZONS}
+    assert calls[0][1] == "http://model-serving:8080/readyz"
+    assert calls[1][2]["source_timestamps_ms"] == {"features": 100}
+
+
+async def test_http_provider_fails_closed_on_incomplete_response():
+    def transport(method, url, payload, timeout):
+        return {"status": "ready"} if method == "GET" else {"annualized_volatility": {"1m": 0.2}}
+
+    provider = HttpForecastProvider(base_url="http://model-serving:8080", timeout_ms=500, transport=transport)
+    await provider.load()
+    with pytest.raises(PricingUnavailable) as exc:
+        await provider.forecast(FeatureObservation({"log_return": 0.0, "venue_count": 2}, 100), 110)
+    assert exc.value.reason == UnavailableReason.MODEL_INFERENCE_FAILED

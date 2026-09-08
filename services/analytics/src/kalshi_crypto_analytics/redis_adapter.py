@@ -60,7 +60,10 @@ class RedisMarketData:
 
     async def read_features(self) -> FeatureObservation:
         try:
-            payload = _decode(await self.client.get("market:features:v1:BTCUSD:latest"))
+            raw = await self.client.get("market:features:BTCUSD:latest")
+            if raw is None:
+                raw = await self.client.get("market:features:v1:BTCUSD:latest")
+            payload = _decode(raw)
             if payload.get("feature_set") != "market_features" or payload.get("feature_version") != "v1":
                 raise ValueError("unexpected feature schema")
             values = payload["values"]

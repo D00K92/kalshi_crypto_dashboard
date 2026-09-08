@@ -4,6 +4,8 @@ import asyncio
 import json
 import logging
 import math
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from io import BytesIO
 from typing import Any, Protocol
@@ -111,3 +113,75 @@ class ConfiguredForecastProvider:
         except Exception as exc:
             raise PricingUnavailable(UnavailableReason.MODEL_INFERENCE_FAILED) from exc
         return VolatilitySnapshot(outputs, observation.event_timestamp_ms, now_ms, dict(self.resources), self.model_version)
+
+
+class HttpForecastProvider:
+    """Forecast provider backed by the internal model-serving API."""
+
+    def __init__(self, *, base_url: str, timeout_ms: int, model_version: str = "v1", transport=None) -> None:
+        if not base_url.strip():
+            raise ValueError("model-serving URL must not be empty")
+        if timeout_ms <= 0:
+            raise ValueError("model-serving timeout must be positive")
+        self.base_url = base_url.rstrip("/")
+        self.timeout_seconds = timeout_ms / 1000
+        self.model_version = model_version
+        self._transport = transport or _urlopen_json
+        self._ready = False
+
+    @property
+    def ready(self) -> bool:
+        return self._ready
+
+    async def load(self) -> None:
+        try:
+            payload = await asyncio.to_thread(self._transport, "GET", f"{self.base_url}/readyz", None, self.timeout_seconds)
+            if payload.get("status") != "ready":
+                raise ValueError("model-serving is not ready")
+        except Exception as exc:
+            self._ready = False
+            raise RuntimeError("model-serving readiness check failed") from exc
+        self._ready = True
+
+    async def forecast(self, observation: FeatureObservation, now_ms: int) -> VolatilitySnapshot:
+        if not self.ready:
+            raise PricingUnavailable(UnavailableReason.MODEL_INFERENCE_FAILED, "model-serving is not ready")
+        request = {
+            "feature_set": observation.feature_set,
+            "feature_version": observation.feature_version,
+            "event_timestamp_ms": observation.event_timestamp_ms,
+            "values": observation.values,
+            "source_timestamps_ms": {"features": observation.event_timestamp_ms},
+        }
+        try:
+            payload = await asyncio.to_thread(self._transport, "POST", f"{self.base_url}/v1/forecast", request, self.timeout_seconds)
+            volatility = payload.get("annualized_volatility")
+            if not isinstance(volatility, dict) or set(volatility) != set(HORIZONS):
+                raise ValueError("model-serving returned an incomplete term structure")
+            values = {horizon: float(volatility[horizon]) for horizon in HORIZONS}
+            if any(not math.isfinite(value) or value <= 0 for value in values.values()):
+                raise ValueError("model-serving returned invalid volatility")
+            if int(payload.get("feature_asof_ts_ms")) != observation.event_timestamp_ms:
+                raise ValueError("model-serving feature timestamp mismatch")
+            if payload.get("model_version") != self.model_version:
+                raise ValueError("model-serving version mismatch")
+            resources = payload.get("model_resources")
+            if not isinstance(resources, dict) or set(resources) != set(HORIZONS):
+                raise ValueError("model-serving returned invalid model resources")
+            return VolatilitySnapshot(values, observation.event_timestamp_ms, int(payload["generated_ts_ms"]), resources, self.model_version)
+        except Exception as exc:
+            LOGGER.exception("model_inference_failed via model-serving: %s", exc)
+            raise PricingUnavailable(UnavailableReason.MODEL_INFERENCE_FAILED) from exc
+
+
+def _urlopen_json(method: str, url: str, payload: dict[str, Any] | None, timeout_seconds: float) -> dict[str, Any]:
+    body = None if payload is None else json.dumps(payload, separators=(",", ":")).encode()
+    request = urllib.request.Request(url, data=body, method=method, headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
+            decoded = json.loads(response.read())
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+        raise RuntimeError("model-serving request failed") from exc
+    if not isinstance(decoded, dict):
+        raise ValueError("model-serving response must be an object")
+    return decoded

@@ -41,7 +41,7 @@ ingestion (unchanged) ---> Redis trade/book streams
       |                       |                     available to other clients)
       |                       v
       |              market:spot:BTCUSDT:latest
-      |              market:features:v1:BTCUSD:latest
+      |              market:features:BTCUSD:latest
       |                       |
       +--> stream:kalshi_tickers
       |              |
@@ -63,7 +63,7 @@ existing services. Each dependency has a narrow purpose:
 | Dependency | Existing interface used by analytics | Purpose | Required upstream change |
 |---|---|---|---|
 | Aggregator | `GET market:spot:BTCUSDT:latest` | Synthetic spot and spot timestamp | None |
-| Aggregator | `GET market:features:v1:BTCUSD:latest` | One timestamped v1 model-feature observation | None |
+| Live feature service | `GET market:features:BTCUSD:latest` | One timestamped v1 model-feature observation | None |
 | Aggregator | `SUBSCRIBE market:aggregated_spot` | Low-latency wake-up only | None |
 | Ingestion | `stream:kalshi_tickers` | Bid, ask, ticker freshness, event and market identifiers | None |
 | Kalshi REST | Existing authenticated event/market endpoints | Authoritative market definition, strike, settlement/expiry time, and status | None |
@@ -122,23 +122,22 @@ code can be extracted later, but is not required here.
 
 ## Live inference adapter
 
-The current ML pipeline registers models but does not deploy prediction
-endpoints or publish live volatility to Redis. Therefore analytics owns a
-`ForecastProvider` boundary rather than requiring the ML service to change.
+The model-serving service owns inference and publishes no Redis data itself.
+Analytics retains a `ForecastProvider` boundary so the HTTP migration can be
+rolled back safely to the direct provider during parity testing.
 
-The production provider is configured with exactly one approved Vertex model
-resource for each horizon:
+The production provider calls the private model-serving API for exactly five
+horizons:
 
 ```text
 1m, 5m, 15m, 30m, 1h
 ```
 
-For each configured resource, analytics resolves the artifact URI, loads
-`model.joblib` and `metadata.json`, and retains the model in memory. It reads
-one `market:features:v1:BTCUSD:latest` envelope, verifies its
-`feature_set=market_features` and `feature_version=v1`, supplies values in the
-recorded `feature_columns` order, and clamps only a negative raw volatility
-prediction to zero as specified by the training contract.
+Analytics reads one `market:features:BTCUSD:latest` envelope and forwards its
+feature contract, timestamp, and values to `/v1/forecast`. It rejects timeouts,
+malformed responses, version mismatches, incomplete horizons, invalid values,
+or timestamp mismatches. Set `FORECAST_PROVIDER=direct` only for rollback or
+parity testing with the legacy Vertex/GCS artifact path.
 
 All five results must use the same latest-feature observation and complete
 successfully. Partial results are not published. The assembled snapshot is

@@ -7,7 +7,7 @@ import signal
 import redis.asyncio as redis
 
 from .config import Settings
-from .forecast import ConfiguredForecastProvider, VertexGCSResolver
+from .forecast import ConfiguredForecastProvider, HttpForecastProvider, VertexGCSResolver
 from .health import HealthServer
 from .kalshi import CachedMetadataProvider, KalshiRestClient
 from .redis_adapter import RedisMarketData, RedisPricingPublisher
@@ -25,9 +25,14 @@ async def _run() -> None:
         KalshiRestClient(settings.kalshi_rest_url, settings.kalshi_api_key, settings.kalshi_private_key),
         refresh_ms=settings.metadata_refresh_ms,
     )
-    forecasts = ConfiguredForecastProvider(settings.model_resources,
-                                           VertexGCSResolver(project=settings.gcp_project, location=settings.gcp_region),
-                                           model_version=settings.model_version)
+    if settings.forecast_provider == "http":
+        forecasts = HttpForecastProvider(base_url=settings.model_serving_url,
+                                         timeout_ms=settings.model_serving_timeout_ms,
+                                         model_version=settings.model_version)
+    else:
+        forecasts = ConfiguredForecastProvider(settings.model_resources,
+                                               VertexGCSResolver(project=settings.gcp_project, location=settings.gcp_region),
+                                               model_version=settings.model_version)
     service = AnalyticsService(
         market_data, metadata, forecasts, publisher,
         spot_max_age_ms=settings.spot_max_age_ms, ticker_max_age_ms=settings.ticker_max_age_ms,
@@ -44,7 +49,7 @@ async def _run() -> None:
         try:
             await forecasts.load()
         except Exception:
-            LOGGER.exception("model_artifact_load_failed")
+            LOGGER.exception("forecast_provider_load_failed provider=%s", settings.forecast_provider)
         await service.run(stop)
     finally:
         await health.close()

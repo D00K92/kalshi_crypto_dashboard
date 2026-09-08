@@ -200,7 +200,7 @@ jobs:
         envsubst '${MODEL_SERVING_IMAGE}' \
           < k8s/model-serving-deployment.yaml \
           | kubectl apply -f -
-        required='${ANALYTICS_GCP_SERVICE_ACCOUNT} ${VOLATILITY_MODEL_1M} ${VOLATILITY_MODEL_5M} ${VOLATILITY_MODEL_15M} ${VOLATILITY_MODEL_30M} ${VOLATILITY_MODEL_1H}'
+        required='${ANALYTICS_GCP_SERVICE_ACCOUNT}'
         if [[ "${required}" == *'  '* || "${required}" == ' '* || "${required}" == *' ' ]]; then
           echo "Analytics deployment prerequisite missing: configure all analytics repository variables." >&2
           exit 1
