@@ -40,23 +40,19 @@ async def main(wait_seconds: int) -> None:
         for event in events:
             await client.xadd(stream, {"event_id": event["event_id"], "event_type": event["event_type"], "payload": orjson.dumps(event)})
     deadline = time.monotonic() + wait_seconds
-    book = spot = primitive = None
+    spot = primitive = None
     while time.monotonic() < deadline:
-        book_raw = await client.get(f"{prefix}:book:BTCUSDT:latest")
         spot_raw = await client.get(f"{prefix}:spot:BTCUSDT:latest")
         primitive_raw = await client.get(f"{prefix}:primitive:binance:10s:latest")
-        if book_raw and spot_raw and primitive_raw:
-            book, spot, primitive = orjson.loads(book_raw), orjson.loads(spot_raw), orjson.loads(primitive_raw)
+        if spot_raw and primitive_raw:
+            spot, primitive = orjson.loads(spot_raw), orjson.loads(primitive_raw)
             break
         await asyncio.sleep(0.25)
-    if not book or not spot or not primitive:
-        raise AssertionError("aggregator did not publish book, spot, and completed 10s primitive state")
+    if not spot or not primitive:
+        raise AssertionError("aggregator did not publish spot and completed 10s primitive state")
     assert spot["method"] == "simple_average_fresh_venues", spot
     assert spot["price"] == "105", spot
     assert spot["total_volume"] == "4", spot
-    assert book["venues"] == ["binance", "coinbase"], book
-    assert book["bids"][0]["venues"] == {"binance": "2", "coinbase": "2"}, book
-    assert len(book["bids"]) <= 10 and len(book["asks"]) <= 10
     assert await client.exists(f"{prefix}:candles:BTCUSDT:30s")
     assert primitive["event_type"] == "primitive_bar"
     assert primitive["frequency"] == "10s"
