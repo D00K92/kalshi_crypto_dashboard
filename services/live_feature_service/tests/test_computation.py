@@ -46,6 +46,13 @@ def test_requires_per_venue_prices():
         V1FeatureComputer().compute({"event_type": "market_bar", "frequency": "1m", "bucket_start_ts_ms": 1}, now_ms=2)
 
 
+def test_rejects_stale_replayed_bar_before_mutating_state():
+    computer = V1FeatureComputer(max_bar_age_ms=120_000)
+    with pytest.raises(ValueError, match="stale feature bar"):
+        computer.compute(bar(60_000, {"a": 100}), now_ms=300_001)
+    assert computer.snapshot()["last_timestamp_ms"] is None
+
+
 def test_state_round_trip_preserves_lag_and_ewma():
     original = V1FeatureComputer()
     original.compute(bar(60_000, {"a": 100}), now_ms=61_000)

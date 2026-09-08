@@ -15,6 +15,7 @@ class Settings:
     consumer_name: str = "live-features-1"
     health_port: int = 8080
     ewma_decay: float = 0.96
+    max_bar_age_ms: int = 120_000
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -28,4 +29,5 @@ class Settings:
             consumer_name=os.getenv("HOSTNAME", "live-features-1"),
             health_port=int(os.getenv("HEALTH_PORT", "8080")),
             ewma_decay=float(os.getenv("EWMA_DECAY", "0.96")),
+            max_bar_age_ms=int(os.getenv("MAX_BAR_AGE_MS", "120000")),
         )

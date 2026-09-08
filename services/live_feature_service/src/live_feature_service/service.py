@@ -20,7 +20,10 @@ class LiveFeatureService:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self.client = redis.Redis.from_url(settings.redis_url, decode_responses=False, health_check_interval=30)
-        self.computer = V1FeatureComputer(ewma_decay=settings.ewma_decay)
+        self.computer = V1FeatureComputer(
+            ewma_decay=settings.ewma_decay,
+            max_bar_age_ms=settings.max_bar_age_ms,
+        )
         self.health = HealthServer(settings.health_port)
 
     async def run(self, stop_event: asyncio.Event) -> None:

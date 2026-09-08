@@ -49,11 +49,20 @@ class V1FeatureComputer:
     volume-weighted or cross-venue price.
     """
 
-    def __init__(self, *, asset: str = "BTCUSD", ewma_decay: float = 0.96) -> None:
+    def __init__(
+        self,
+        *,
+        asset: str = "BTCUSD",
+        ewma_decay: float = 0.96,
+        max_bar_age_ms: int = 120_000,
+    ) -> None:
         if not 0.0 < ewma_decay < 1.0:
             raise ValueError("EWMA decay must be between zero and one")
+        if max_bar_age_ms <= 0:
+            raise ValueError("maximum bar age must be positive")
         self.asset = asset
         self.ewma_decay = ewma_decay
+        self.max_bar_age_ms = max_bar_age_ms
         self._last_timestamp_ms: int | None = None
         self._last_price: float | None = None
         self._ewma_variance: float | None = None
@@ -62,6 +71,11 @@ class V1FeatureComputer:
         if bar.get("event_type") != "market_bar" or bar.get("frequency") != SUPPORTED_FREQUENCY:
             return None
         timestamp = int(bar["bucket_start_ts_ms"])
+        bucket_end = int(bar.get("bucket_end_ts_ms", timestamp + SECONDS_PER_MINUTE * 1000))
+        if now_ms - bucket_end > self.max_bar_age_ms:
+            # Aggregator restarts can replay completed historical bars. They
+            # must not become the latest live feature snapshot.
+            raise ValueError("stale feature bar")
         if self._last_timestamp_ms is not None and timestamp <= self._last_timestamp_ms:
             # Redis redelivery is harmless; an older bar cannot mutate state.
             if timestamp == self._last_timestamp_ms:

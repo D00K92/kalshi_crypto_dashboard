@@ -43,6 +43,8 @@ spec:
           value: "live-features-v1"
         - name: EWMA_DECAY
           value: "0.96"
+        - name: MAX_BAR_AGE_MS
+          value: "120000"
         - name: HEALTH_PORT
           value: "8080"
         ports:
