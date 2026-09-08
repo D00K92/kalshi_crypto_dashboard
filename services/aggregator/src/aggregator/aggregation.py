@@ -215,6 +215,11 @@ class MarketAggregator:
                         break
                     parts = [state["venues"][venue] | {"start": bucket} for bucket, state in self.trade_buckets.items() if start <= bucket < end and venue in state["venues"]]
                     parts.sort(key=lambda part: part["start"])
+                    # Candle state written before primitive_schema_version=2
+                    # has no per-venue OHLC values. Do not let that legacy
+                    # state crash the live consumer; newer buckets repopulate
+                    # the complete primitive row naturally.
+                    parts = [part for part in parts if all(part.get(key) is not None for key in ("open", "high", "low", "close"))]
                     if parts:
                         count = sum(part["trade_count"] for part in parts)
                         volume = sum((part["volume"] for part in parts), Decimal("0"))
