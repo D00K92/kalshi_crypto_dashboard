@@ -86,7 +86,7 @@ async def test_trade_publishes_candle_state_once_per_ten_second_bucket() -> None
     service = object.__new__(AggregatorService)
     service.client = TradeRedis()
     service.state = MarketAggregator()
-    service.settings = SimpleNamespace(output_prefix="market", feature_stream="stream:features:v1", feature_maxlen=5_000)
+    service.settings = SimpleNamespace(output_prefix="market")
     service._last_candle_publish_bucket = None
 
     first = {"event_id": "one", "event_type": "trade", "venue": "binance", "instrument": "BTCUSDT", "price": "100", "quantity": "1", "taker_side": "buy", "exchange_ts_ms": 10_000, "received_ts_ms": 10_000}

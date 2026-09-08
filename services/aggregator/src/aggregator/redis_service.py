@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
 
 import orjson
 import redis.asyncio as redis
@@ -19,9 +18,10 @@ class AggregatorService:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self.client = redis.Redis.from_url(settings.redis_url, decode_responses=False, health_check_interval=30)
-        self.state = MarketAggregator(settings.price_tick, settings.book_depth, settings.freshness_ms, settings.aggregation_venues, dict(settings.taker_fees), settings.trade_freshness_ms)
+        self.state = MarketAggregator(settings.price_tick, settings.book_depth, settings.freshness_ms, settings.aggregation_venues, dict(settings.taker_fees), settings.trade_freshness_ms, settings.history_ms)
         self.health = HealthServer(settings.health_port)
         self._last_candle_publish_bucket: int | None = None
+        self._published_bars: set[tuple[str, int]] = set()
 
     async def run(self, stop_event: asyncio.Event) -> None:
         await self.health.start()
@@ -76,6 +76,7 @@ class AggregatorService:
         prefix = self.settings.output_prefix
         pipe = self.client.pipeline(transaction=False)
         pipe.set(f"{prefix}:book:BTCUSDT:latest", encoded)
+        pipe.xadd(getattr(self.settings, "orderbook_stream", "stream:orderbook:v1"), {"payload": encoded}, maxlen=getattr(self.settings, "orderbook_maxlen", 10_000), approximate=True)
         pipe.publish(f"{prefix}:aggregated_orderbook", encoded)
         await pipe.execute()
 
@@ -89,35 +90,25 @@ class AggregatorService:
         prefix = self.settings.output_prefix
         pipe = self.client.pipeline(transaction=False)
         pipe.set(f"{prefix}:spot:BTCUSDT:latest", encoded)
-        if spot.get("price") is not None:
-            feature = {
-                "schema_version": 1, "event_type": "market_feature",
-                "feature_set": "market_features", "feature_version": "v1",
-                "asset": "BTCUSD", "event_timestamp_ms": spot["generated_ts_ms"],
-                "event_timestamp": datetime.fromtimestamp(
-                    spot["generated_ts_ms"] / 1000, tz=timezone.utc
-                ).isoformat(),
-                "created_timestamp": datetime.now(timezone.utc).isoformat(),
-                "values": {
-                    "synthetic_price": spot["price"],
-                    "log_return": spot.get("log_return"),
-                    "venue_count": spot.get("venue_count", 0),
-                },
-            }
-            feature_bytes = orjson.dumps(feature)
-            pipe.xadd(self.settings.feature_stream, {"payload": feature_bytes}, maxlen=self.settings.feature_maxlen, approximate=True)
-            pipe.set(f"{prefix}:features:v1:BTCUSD:latest", feature_bytes, ex=120)
-            pipe.publish(f"pub:features:v1", feature_bytes)
         pipe.publish(f"{prefix}:aggregated_spot", encoded)
+        frequencies = dict(getattr(self.settings, "bar_frequencies", (("1m", 60_000), ("5m", 300_000), ("10m", 600_000), ("15m", 900_000), ("30m", 1_800_000), ("1h", 3_600_000))))
+        published_bars = getattr(self, "_published_bars", None)
+        if published_bars is None:
+            published_bars = self._published_bars = set()
+        for bar in self.state.resampled_bars("BTCUSDT", frequencies):
+            key = (bar["frequency"], bar["bucket_start_ts_ms"])
+            if key in published_bars:
+                continue
+            encoded_bar = orjson.dumps(bar)
+            pipe.xadd(getattr(self.settings, "bars_stream", "stream:bars:v1"), {"payload": encoded_bar}, maxlen=getattr(self.settings, "bars_maxlen", 50_000), approximate=True)
+            pipe.set(f"{prefix}:bars:BTCUSDT:{bar['frequency']}:latest", encoded_bar)
+            published_bars.add(key)
         bucket = spot["bucket_start_ts_ms"]
         if bucket != self._last_candle_publish_bucket:
             candles = orjson.dumps(self.state.candle_snapshot("BTCUSDT"))
-            cvd = orjson.dumps(self.state.cvd_snapshot("BTCUSDT"))
             pipe.set(f"{prefix}:candle_state:BTCUSDT:10s", orjson.dumps(self.state.export_candle_state()))
             pipe.set(f"{prefix}:candles:BTCUSDT:10s", candles)
-            pipe.set(f"{prefix}:cvd:BTCUSDT:10s", cvd)
             pipe.publish(f"{prefix}:aggregated_candles", candles)
-            pipe.publish(f"{prefix}:aggregated_cvd", cvd)
             self._last_candle_publish_bucket = bucket
         await pipe.execute()
 
