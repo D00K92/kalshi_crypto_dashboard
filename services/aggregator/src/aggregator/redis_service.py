@@ -61,7 +61,13 @@ class AggregatorService:
                 published_ts_ms = int(redis_id.split(b"-", 1)[0] if isinstance(redis_id, bytes) else str(redis_id).split("-", 1)[0])
                 await handler(event, published_ts_ms)
             except (ValueError, TypeError, orjson.JSONDecodeError) as exc:
-                LOGGER.warning("event_rejected", extra={"stream": stream, "redis_id": redis_id, "error": str(exc)})
+                LOGGER.warning(
+                    "event_rejected stream=%s redis_id=%s error_type=%s error=%s",
+                    stream,
+                    redis_id,
+                    type(exc).__name__,
+                    str(exc),
+                )
             acknowledged.append(redis_id)
         if acknowledged:
             await self.client.xack(stream, group, *acknowledged)

@@ -28,9 +28,9 @@ spec:
         - name: AGGREGATOR_OUTPUT_PREFIX
           value: "market"
         - name: BOOK_CONSUMER_GROUP
-          value: "aggregator_books_v3"
+          value: "aggregator_books_v4"
         - name: TRADE_CONSUMER_GROUP
-          value: "aggregator_trades_v3"
+          value: "aggregator_trades_v4"
         - name: AGGREGATOR_GROUP_START_ID
           value: "$"
         - name: FEATURE_STREAM_MAXLEN

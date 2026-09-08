@@ -68,7 +68,7 @@ async def test_process_entries_acknowledges_batch_in_one_round_trip() -> None:
     ]
 
 
-async def test_process_entries_acknowledges_rejected_rows_with_batch() -> None:
+async def test_process_entries_acknowledges_rejected_rows_with_batch(caplog) -> None:
     service = object.__new__(AggregatorService)
     service.client = FakeRedis()
 
@@ -80,6 +80,8 @@ async def test_process_entries_acknowledges_rejected_rows_with_batch() -> None:
     await service._process_entries("stream:ticks", "group", entries, handler)
 
     assert service.client.acks == [("stream:ticks", "group", b"1000-0")]
+    assert "event_rejected stream=stream:ticks redis_id=b'1000-0'" in caplog.text
+    assert "error_type=ValueError error=missing payload" in caplog.text
 
 
 async def test_trade_publishes_candle_state_once_per_thirty_second_bucket() -> None:
