@@ -53,6 +53,6 @@ class Settings:
                    _positive_int("MODEL_SERVING_TIMEOUT_MS", 1_000),
                    os.getenv("CONSUMER_NAME", f"analytics-{os.getenv('HOSTNAME', 'local')}"),
                    _positive_int("HEALTH_PORT", 8080), _positive_int("SPOT_MAX_AGE_MS", 5_000),
-                   _positive_int("TICKER_MAX_AGE_MS", 60_000), _positive_int("FEATURE_MAX_AGE_MS", 60_000),
+                   _positive_int("TICKER_MAX_AGE_MS", 60_000), _positive_int("FEATURE_MAX_AGE_MS", 90_000),
                    _positive_int("VOLATILITY_MAX_AGE_MS", 60_000), _positive_int("ALLOWED_FUTURE_SKEW_MS", 2_000),
                    _positive_int("KALSHI_METADATA_REFRESH_MS", 15_000))

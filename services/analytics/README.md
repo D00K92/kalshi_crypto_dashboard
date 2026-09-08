@@ -36,7 +36,7 @@ the quote/edge fields null; the standalone model probability remains available.
 | `VOLATILITY_MODEL_VERSION` | Expected artifact/label version; defaults to `v1`. |
 | `CONSUMER_NAME` | Redis consumer identity; defaults to the pod hostname. |
 | `HEALTH_PORT` | HTTP probe port; defaults to `8080`. |
-| `SPOT_MAX_AGE_MS`, `TICKER_MAX_AGE_MS`, `FEATURE_MAX_AGE_MS`, `VOLATILITY_MAX_AGE_MS` | Freshness limits; defaults are 5, 60, 60, and 60 seconds. |
+| `SPOT_MAX_AGE_MS`, `TICKER_MAX_AGE_MS`, `FEATURE_MAX_AGE_MS`, `VOLATILITY_MAX_AGE_MS` | Freshness limits; defaults are 5, 60, 90, and 60 seconds. |
 | `ALLOWED_FUTURE_SKEW_MS`, `KALSHI_METADATA_REFRESH_MS` | Clock-skew allowance and active metadata refresh; defaults are 2 and 15 seconds. |
 
 Do not configure a display name, alias such as `latest`, or a model-family name.
