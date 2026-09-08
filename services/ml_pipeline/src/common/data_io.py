@@ -9,8 +9,8 @@ import pandas as pd
 
 DEFAULT_TARGET_TABLE = "kalshi-crypto-506614.training_labels.future_realized_volatility_v1"
 
-REQUIRED_FREQUENCIES = {"1s", "5s", "1m", "5m", "10m", "30m", "1h"}
-REQUIRED_TARGETS = {"target_rv_1m", "target_rv_5m", "target_rv_15m", "target_rv_30m", "target_rv_1h"}
+REQUIRED_FREQUENCIES = {"10s"}
+REQUIRED_TARGETS = {"target_rv_5m", "target_rv_15m", "target_rv_30m", "target_rv_1h"}
 
 
 def dates(start: date, end: date) -> Iterable[date]:
@@ -95,11 +95,12 @@ def load_training_table_from_feast(
     client = bigquery.Client(project=project, location="asia-northeast3")
     query = f"""
       SELECT market_id, prediction_timestamp, label_window_end,
-             target_rv_1m, target_rv_5m, target_rv_15m,
+             target_rv_5m, target_rv_15m,
              target_rv_30m, target_rv_1h, label_version
       FROM `{target_table}`
       WHERE DATE(prediction_timestamp) BETWEEN @start_date AND @end_date
         AND target_rv_1h IS NOT NULL
+        AND label_version = 'v2_10s'
     """
     config = bigquery.QueryJobConfig(query_parameters=[
         bigquery.ScalarQueryParameter("start_date", "DATE", start),
@@ -127,7 +128,7 @@ def load_training_table_from_feast(
     )
     if joined.empty:
         raise ValueError("Feast historical retrieval produced no label/feature matches")
-    joined["frequency"] = "1m"
+    joined["frequency"] = "10s"
     joined["timestamp"] = joined["event_timestamp"]
     joined.attrs["training_cutoff"] = end.isoformat()
     validate_training_table(

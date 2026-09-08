@@ -13,7 +13,7 @@ from src.common.benchmarks import ewma_annualized_volatility
 from src.common.data_io import load_training_table
 from src.common.evaluation import score_predictions
 
-HORIZONS = ("1m", "5m", "15m", "30m", "1h")
+HORIZONS = ("5m", "15m", "30m", "1h")
 
 
 def compute_benchmark(table, decay: float = 0.96) -> dict:

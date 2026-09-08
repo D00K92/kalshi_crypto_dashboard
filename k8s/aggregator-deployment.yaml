@@ -35,8 +35,12 @@ spec:
           value: "$"
         - name: AGGREGATOR_READ_COUNT
           value: "50"
-        - name: FEATURE_STREAM_MAXLEN
-          value: "5000"
+        - name: AGGREGATED_BARS_STREAM
+          value: "stream:bars:v1"
+        - name: AGGREGATED_ORDERBOOK_STREAM
+          value: "stream:orderbook:v1"
+        - name: AGGREGATION_HISTORY_MS
+          value: "7200000"
         - name: AGGREGATION_PRICE_TICK
           value: "0.01"
         - name: AGGREGATION_TAKER_FEES

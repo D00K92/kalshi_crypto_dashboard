@@ -7,8 +7,10 @@ import pandas as pd
 
 SECONDS_PER_YEAR = 365 * 24 * 60 * 60
 FREQUENCY_SECONDS = {
+    "10s": 10,
     "1s": 1,
     "5s": 5,
+    # Retain legacy benchmark input compatibility; production training data is 10s.
     "1m": 60,
     "5m": 300,
     "10m": 600,

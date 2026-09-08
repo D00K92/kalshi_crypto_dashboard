@@ -4,7 +4,7 @@ from kfp import dsl
 
 from src.components.kfp_components import evaluate_container, load_container, register_container, train_container
 
-HORIZONS = ("1m", "5m", "15m", "30m", "1h")
+HORIZONS = ("5m", "15m", "30m", "1h")
 
 
 @dsl.pipeline(name="crypto-volatility-training-v1")

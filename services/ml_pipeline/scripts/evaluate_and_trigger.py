@@ -14,7 +14,7 @@ import pandas as pd
 
 from src.common.evaluation import evaluate_frame, retrain_decision
 
-HORIZONS = ("1m", "5m", "15m", "30m", "1h")
+HORIZONS = ("5m", "15m", "30m", "1h")
 
 
 def main() -> None:
