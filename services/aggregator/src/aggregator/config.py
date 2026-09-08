@@ -35,8 +35,12 @@ class Settings:
     read_count: int
     read_block_ms: int
     output_prefix: str
-    feature_stream: str
-    feature_maxlen: int
+    bars_stream: str
+    bars_maxlen: int
+    orderbook_stream: str
+    orderbook_maxlen: int
+    bar_frequencies: tuple[tuple[str, int], ...]
+    history_ms: int
     trade_freshness_ms: int
     health_port: int
     aggregation_venues: tuple[str, ...]
@@ -66,8 +70,15 @@ class Settings:
             read_count=_int("AGGREGATOR_READ_COUNT", 200),
             read_block_ms=_int("AGGREGATOR_READ_BLOCK_MS", 1000),
             output_prefix=os.getenv("AGGREGATOR_OUTPUT_PREFIX", "market"),
-            feature_stream=os.getenv("FEATURE_STREAM", "stream:features:v1"),
-            feature_maxlen=_int("FEATURE_STREAM_MAXLEN", 5_000),
+            bars_stream=os.getenv("AGGREGATED_BARS_STREAM", "stream:bars:v1"),
+            bars_maxlen=_int("AGGREGATED_BARS_MAXLEN", 50_000),
+            orderbook_stream=os.getenv("AGGREGATED_ORDERBOOK_STREAM", "stream:orderbook:v1"),
+            orderbook_maxlen=_int("AGGREGATED_ORDERBOOK_MAXLEN", 10_000),
+            bar_frequencies=tuple(
+                (name, _int(f"BAR_{name.upper()}_MS", milliseconds))
+                for name, milliseconds in (("1m", 60_000), ("5m", 300_000), ("10m", 600_000), ("15m", 900_000), ("30m", 1_800_000), ("1h", 3_600_000))
+            ),
+            history_ms=_int("AGGREGATION_HISTORY_MS", 2 * 60 * 60 * 1000),
             trade_freshness_ms=_int("FEATURE_TRADE_FRESHNESS_MS", 60_000),
             health_port=_int("HEALTH_PORT", 8080),
             aggregation_venues=tuple(
