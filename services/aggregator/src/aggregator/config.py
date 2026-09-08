@@ -41,6 +41,7 @@ class Settings:
     freshness_ms: int
     read_count: int
     read_block_ms: int
+    replay_max_age_ms: int
     allowed_lateness_ms: int
     pending_idle_ms: int
     output_prefix: str
@@ -80,6 +81,7 @@ class Settings:
             freshness_ms=_int("AGGREGATION_FRESHNESS_MS", 500),
             read_count=_int("AGGREGATOR_READ_COUNT", 200),
             read_block_ms=_int("AGGREGATOR_READ_BLOCK_MS", 1000),
+            replay_max_age_ms=_int("AGGREGATOR_REPLAY_MAX_AGE_MS", 5_000),
             allowed_lateness_ms=_non_negative_int("AGGREGATOR_ALLOWED_LATENESS_MS", 5_000),
             pending_idle_ms=_int("AGGREGATOR_PENDING_IDLE_MS", 60_000),
             output_prefix=os.getenv("AGGREGATOR_OUTPUT_PREFIX", "market"),

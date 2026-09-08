@@ -51,7 +51,10 @@ Primitive buckets close on an event-time watermark. Configure the tolerated
 delay with `AGGREGATOR_ALLOWED_LATENESS_MS` (default `5000`); trades older than
 the finalized watermark are acknowledged and dropped. Unacknowledged Redis
 consumer entries are reclaimed after `AGGREGATOR_PENDING_IDLE_MS` (default
-`60000`). Keep both values explicit in production manifests.
+`60000`). Redis entries older than `AGGREGATOR_REPLAY_MAX_AGE_MS` (default
+`5000`) are acknowledged without updating live state, so a restart drains its
+backlog without replacing fresh spot or book keys with expired observations.
+Keep these values explicit in production manifests.
 
 Health endpoints listen on `HEALTH_PORT` (default `8080`): `/healthz` reports
 the process and `/readyz` reports Redis/group readiness.

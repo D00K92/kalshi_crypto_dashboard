@@ -48,6 +48,8 @@ spec:
           value: "${ORDERBOOK_STREAM}"
         - name: AGGREGATOR_ALLOWED_LATENESS_MS
           value: "5000"
+        - name: AGGREGATOR_REPLAY_MAX_AGE_MS
+          value: "5000"
         - name: AGGREGATOR_PENDING_IDLE_MS
           value: "1000"
         - name: AGGREGATOR_READ_COUNT

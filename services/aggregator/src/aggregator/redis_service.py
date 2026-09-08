@@ -25,6 +25,7 @@ class AggregatorService:
         self._last_finalized_primitive_bucket: int | None = None
         self._published_bars: set[tuple[str, int]] = set()
         self._published_primitives: set[tuple[str, str, int]] = set()
+        self._clock_ms = lambda: int(time.time() * 1000)
 
     async def run(self, stop_event: asyncio.Event) -> None:
         await self.health.start()
@@ -119,6 +120,8 @@ class AggregatorService:
     async def _handle_book(self, event: dict, published_ts_ms: int | None = None, pipeline=None) -> bool:
         if event.get("event_type") != "book_snapshot":
             return False
+        if self._is_stale_replay(published_ts_ms):
+            return False
         if self.state.apply_book(event, published_ts_ms=published_ts_ms) is None:
             return False
         snapshot = self.state.primitive_book_snapshot(event, published_ts_ms or int(time.time() * 1000))
@@ -133,6 +136,8 @@ class AggregatorService:
 
     async def _handle_trade(self, event: dict, published_ts_ms: int | None = None, pipeline=None) -> bool:
         if event.get("event_type") != "trade":
+            return False
+        if self._is_stale_replay(published_ts_ms):
             return False
         event_ts_ms = int(event.get("exchange_ts_ms") or event.get("received_ts_ms") or published_ts_ms or time.time() * 1000)
         event_bucket = (event_ts_ms // CANDLE_INTERVAL_MS) * CANDLE_INTERVAL_MS
@@ -196,6 +201,12 @@ class AggregatorService:
         if pipeline is None:
             await pipe.execute()
         return True
+
+    def _is_stale_replay(self, published_ts_ms: int | None) -> bool:
+        max_age_ms = getattr(self.settings, "replay_max_age_ms", None)
+        if published_ts_ms is None or max_age_ms is None:
+            return False
+        return self._clock_ms() - published_ts_ms > max_age_ms
 
     async def _ensure_group(self, stream: str, group: str) -> None:
         try:

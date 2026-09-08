@@ -203,3 +203,78 @@ async def test_trade_checkpoint_output_and_ack_share_one_transaction() -> None:
     assert "market:candle_state:BTCUSDT:10s" in keys
     assert "market:primitive_watermark:BTCUSDT:10s" in keys
     assert operations[-1] == ("xack", ("stream:ticks", "group", b"10000-0"))
+
+
+async def test_stale_replayed_trade_is_acked_without_overwriting_live_state() -> None:
+    service = object.__new__(AggregatorService)
+    service.client = FakeRedis()
+    service.state = MarketAggregator()
+    service.settings = SimpleNamespace(
+        trade_stream="stream:ticks",
+        output_prefix="market",
+        allowed_lateness_ms=5_000,
+        replay_max_age_ms=5_000,
+        primitive_stream="stream:primitives:v1",
+        primitive_maxlen=100_000,
+    )
+    service._clock_ms = lambda: 100_000
+    service._last_finalized_primitive_bucket = None
+    service._max_trade_event_ts_ms = None
+    event = {
+        "event_id": "stale-replay",
+        "event_type": "trade",
+        "venue": "binance",
+        "instrument": "BTCUSDT",
+        "price": "100",
+        "quantity": "1",
+        "taker_side": "buy",
+        "exchange_ts_ms": 90_000,
+        "received_ts_ms": 90_000,
+    }
+
+    await service._process_entries(
+        "stream:ticks",
+        "group",
+        [(b"90000-0", {b"payload": orjson.dumps(event)})],
+        service._handle_trade,
+    )
+
+    assert service.state.trade_buckets == {}
+    assert service.client.pipelines[0].operations == [
+        ("xack", ("stream:ticks", "group", b"90000-0"))
+    ]
+
+
+async def test_recent_redis_trade_still_updates_live_state() -> None:
+    service = object.__new__(AggregatorService)
+    service.client = TradeRedis()
+    service.state = MarketAggregator()
+    service.settings = SimpleNamespace(
+        output_prefix="market",
+        allowed_lateness_ms=5_000,
+        replay_max_age_ms=5_000,
+        primitive_stream="stream:primitives:v1",
+        primitive_maxlen=100_000,
+    )
+    service._clock_ms = lambda: 100_000
+    service._last_finalized_primitive_bucket = None
+    service._max_trade_event_ts_ms = None
+    event = {
+        "event_id": "recent",
+        "event_type": "trade",
+        "venue": "binance",
+        "instrument": "BTCUSDT",
+        "price": "100",
+        "quantity": "1",
+        "taker_side": "buy",
+        "exchange_ts_ms": 96_000,
+        "received_ts_ms": 96_000,
+    }
+
+    assert await service._handle_trade(event, published_ts_ms=96_000) is True
+
+    assert 90_000 in service.state.trade_buckets
+    assert any(
+        operation[0] == "set" and operation[1][0] == "market:spot:BTCUSDT:latest"
+        for operation in service.client.pipelines[0].operations
+    )
