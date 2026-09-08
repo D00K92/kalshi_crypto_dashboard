@@ -46,10 +46,15 @@ async def _run() -> None:
         loop.add_signal_handler(sig, stop.set)
     await health.start()
     try:
-        try:
-            await forecasts.load()
-        except Exception:
-            LOGGER.exception("forecast_provider_load_failed provider=%s", settings.forecast_provider)
+        while not stop.is_set() and not forecasts.ready:
+            try:
+                await forecasts.load()
+            except Exception:
+                LOGGER.exception("forecast_provider_load_failed provider=%s", settings.forecast_provider)
+                try:
+                    await asyncio.wait_for(stop.wait(), timeout=5)
+                except asyncio.TimeoutError:
+                    pass
         await service.run(stop)
     finally:
         await health.close()

@@ -12,6 +12,9 @@ class FakeRedis:
     def __init__(self) -> None:
         self.acks: list[tuple[object, ...]] = []
 
+    def pipeline(self, **kwargs) -> "RecordingPipeline":
+        return RecordingPipeline()
+
     async def xack(self, *args) -> int:
         self.acks.append(args)
         return len(args) - 2
@@ -49,7 +52,7 @@ async def test_process_entries_acknowledges_batch_in_one_round_trip() -> None:
     service.client = FakeRedis()
     handled: list[tuple[dict, int]] = []
 
-    async def handler(event: dict, published_ts_ms: int) -> None:
+    async def handler(event: dict, published_ts_ms: int, pipeline) -> None:
         handled.append((event, published_ts_ms))
 
     entries = [

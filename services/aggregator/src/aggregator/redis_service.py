@@ -52,6 +52,8 @@ class AggregatorService:
 
     async def _process_entries(self, stream: str, group: str, entries, handler) -> None:
         acknowledged = []
+        pipeline = self.client.pipeline(transaction=False)
+        has_writes = False
         for redis_id, fields in entries:
             try:
                 payload = fields.get(b"payload")
@@ -59,7 +61,7 @@ class AggregatorService:
                     raise ValueError("missing payload")
                 event = orjson.loads(payload)
                 published_ts_ms = int(redis_id.split(b"-", 1)[0] if isinstance(redis_id, bytes) else str(redis_id).split("-", 1)[0])
-                await handler(event, published_ts_ms)
+                has_writes = (await handler(event, published_ts_ms, pipeline)) or has_writes
             except (ValueError, TypeError, orjson.JSONDecodeError) as exc:
                 LOGGER.warning(
                     "event_rejected stream=%s redis_id=%s error_type=%s error=%s",
@@ -69,32 +71,36 @@ class AggregatorService:
                     str(exc),
                 )
             acknowledged.append(redis_id)
+        if has_writes:
+            await pipeline.execute()
         if acknowledged:
             await self.client.xack(stream, group, *acknowledged)
 
-    async def _handle_book(self, event: dict, published_ts_ms: int | None = None) -> None:
+    async def _handle_book(self, event: dict, published_ts_ms: int | None = None, pipeline=None) -> bool:
         if event.get("event_type") != "book_snapshot":
-            return
+            return False
         snapshot = self.state.apply_book(event, published_ts_ms=published_ts_ms)
         if snapshot is None:
-            return
+            return False
         encoded = orjson.dumps(snapshot)
         prefix = self.settings.output_prefix
-        pipe = self.client.pipeline(transaction=False)
+        pipe = pipeline or self.client.pipeline(transaction=False)
         pipe.set(f"{prefix}:book:BTCUSDT:latest", encoded)
         pipe.xadd(getattr(self.settings, "orderbook_stream", "stream:orderbook:v1"), {"payload": encoded}, maxlen=getattr(self.settings, "orderbook_maxlen", 10_000), approximate=True)
         pipe.publish(f"{prefix}:aggregated_orderbook", encoded)
-        await pipe.execute()
+        if pipeline is None:
+            await pipe.execute()
+        return True
 
-    async def _handle_trade(self, event: dict, published_ts_ms: int | None = None) -> None:
+    async def _handle_trade(self, event: dict, published_ts_ms: int | None = None, pipeline=None) -> bool:
         if event.get("event_type") != "trade":
-            return
+            return False
         spot = self.state.apply_trade(event)
         if spot is None:
-            return
+            return False
         encoded = orjson.dumps(spot)
         prefix = self.settings.output_prefix
-        pipe = self.client.pipeline(transaction=False)
+        pipe = pipeline or self.client.pipeline(transaction=False)
         pipe.set(f"{prefix}:spot:BTCUSDT:latest", encoded)
         pipe.publish(f"{prefix}:aggregated_spot", encoded)
         frequencies = dict(getattr(self.settings, "bar_frequencies", (("1m", 60_000), ("5m", 300_000), ("10m", 600_000), ("15m", 900_000), ("30m", 1_800_000), ("1h", 3_600_000))))
@@ -116,7 +122,9 @@ class AggregatorService:
             pipe.set(f"{prefix}:candles:BTCUSDT:30s", candles)
             pipe.publish(f"{prefix}:aggregated_candles", candles)
             self._last_candle_publish_bucket = bucket
-        await pipe.execute()
+        if pipeline is None:
+            await pipe.execute()
+        return True
 
     async def _ensure_group(self, stream: str, group: str) -> None:
         try:
