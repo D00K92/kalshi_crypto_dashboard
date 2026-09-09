@@ -21,3 +21,11 @@ def test_v2_10s_label_sql_owns_a_new_table_and_matching_entity():
     assert "'BTCUSD' AS market_id" in text
     assert "target_rv_1m" in text
     assert "MERGE `${project}.training_labels.future_realized_volatility_v1`" not in text
+
+
+def test_hourly_bar_sql_deduplicates_identified_trades_before_aggregation():
+    text = (SQL / "010_resample_bars_1m.sql").read_text()
+
+    assert "QUALIFY trade_id IS NULL OR ROW_NUMBER() OVER" in text
+    assert "PARTITION BY venue, instrument, trade_id" in text
+    assert "ORDER BY COALESCE(received_timestamp, event_timestamp), ingested_at," in text

@@ -6,6 +6,25 @@ USING (
     SELECT ts AS event_timestamp FROM UNNEST(GENERATE_TIMESTAMP_ARRAY(
       @source_start, TIMESTAMP_SUB(@target_end, INTERVAL 1 MINUTE), INTERVAL 1 MINUTE)) ts
   ),
+  trade_source AS (
+    SELECT *
+    FROM `kalshi-crypto-506614.market_data.raw_trades`
+    WHERE event_timestamp >= @source_start AND event_timestamp < @target_end
+      AND venue=@venue AND instrument=@instrument
+    -- Live aggregation rejects a repeated venue trade ID. Apply that same
+    -- contract here while retaining every row that has no usable identity.
+    QUALIFY trade_id IS NULL OR ROW_NUMBER() OVER (
+      PARTITION BY venue, instrument, trade_id
+      ORDER BY COALESCE(received_timestamp, event_timestamp), ingested_at,
+        source_object, event_timestamp, price, quantity, taker_side
+    ) = 1
+  ),
+  trade_intervals AS (
+    SELECT *, LAG(event_timestamp) OVER (
+      PARTITION BY venue, instrument ORDER BY event_timestamp, trade_id, received_timestamp
+    ) previous_trade_timestamp
+    FROM trade_source
+  ),
   t AS (
     SELECT TIMESTAMP_TRUNC(event_timestamp, MINUTE) bucket, venue, instrument,
       ARRAY_AGG(price ORDER BY event_timestamp, COALESCE(CAST(trade_id AS STRING), FORMAT_TIMESTAMP('%Y-%m-%dT%H:%M:%E6SZ', received_timestamp)) LIMIT 1)[OFFSET(0)] p_open,
@@ -16,14 +35,7 @@ USING (
       AVG(TIMESTAMP_DIFF(event_timestamp, previous_trade_timestamp, MILLISECOND)) dt_fill_mean_ms,
       MAX(TIMESTAMP_DIFF(event_timestamp, previous_trade_timestamp, MILLISECOND)) dt_fill_max_ms,
       MIN(TIMESTAMP_DIFF(event_timestamp, previous_trade_timestamp, MILLISECOND)) dt_fill_min_ms
-    FROM (
-      SELECT *, LAG(event_timestamp) OVER (
-        PARTITION BY venue, instrument ORDER BY event_timestamp, trade_id, received_timestamp
-      ) previous_trade_timestamp
-      FROM `kalshi-crypto-506614.market_data.raw_trades`
-    )
-    WHERE event_timestamp >= @source_start AND event_timestamp < @target_end
-      AND venue=@venue AND instrument=@instrument
+    FROM trade_intervals
     GROUP BY 1,2,3
   ),
   latest AS (
