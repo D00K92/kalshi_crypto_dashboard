@@ -8,7 +8,10 @@ RUN uv pip install --system --no-cache -r pyproject.toml \
     && useradd --uid 10001 --gid 10001 --no-create-home --home-dir /nonexistent \
         --shell /usr/sbin/nologin model-serving
 COPY --chown=10001:10001 src/ ./src/
-ENV PYTHONUNBUFFERED=1 PYTHONPATH=/app/src
+COPY --chown=10001:10001 model_bundle/ /models/
+ENV PYTHONUNBUFFERED=1 PYTHONPATH=/app/src MODEL_BUNDLE_MANIFEST=/models/manifest.json
+ARG REQUIRE_MODEL_BUNDLE=false
+RUN if [ "${REQUIRE_MODEL_BUNDLE}" = "true" ]; then python -m model_serving.verify_bundle; fi
 USER 10001:10001
 EXPOSE 8080
 CMD ["uvicorn", "model_serving.api:app", "--host", "0.0.0.0", "--port", "8080"]

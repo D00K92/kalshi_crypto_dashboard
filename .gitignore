@@ -29,3 +29,5 @@ htmlcov/
 *.parquet
 dist/
 build/
+services/model_serving/model_bundle/*
+!services/model_serving/model_bundle/.gitkeep

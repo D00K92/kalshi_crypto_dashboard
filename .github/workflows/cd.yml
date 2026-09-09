@@ -99,13 +99,38 @@ jobs:
         docker build --platform linux/amd64 -t "${IMAGE_URI}:${IMAGE_TAG}" services/live_feature_service
         docker push "${IMAGE_URI}:${IMAGE_TAG}"
 
+    - name: Stage approved 1h model bundle
+      env:
+        MODEL_RESOURCE: ${{ vars.VOLATILITY_MODEL_1H }}
+      run: |
+        set -euo pipefail
+        if [[ -z "${MODEL_RESOURCE}" ]]; then
+          echo "VOLATILITY_MODEL_1H must identify an immutable v2_10s Vertex model version." >&2
+          exit 1
+        fi
+        artifact_uri="$(gcloud ai models describe "${MODEL_RESOURCE}" \
+          --region="${GCP_REGION}" --format='value(artifactUri)')"
+        if [[ -z "${artifact_uri}" ]]; then
+          echo "Vertex model has no GCS artifact URI: ${MODEL_RESOURCE}" >&2
+          exit 1
+        fi
+        artifact_dir="$(mktemp -d)"
+        gcloud storage cp "${artifact_uri}/model.joblib" "${artifact_dir}/model.joblib"
+        gcloud storage cp "${artifact_uri}/metadata.json" "${artifact_dir}/metadata.json"
+        python services/model_serving/scripts/prepare_bundle.py \
+          --artifact-dir "${artifact_dir}" \
+          --output-dir services/model_serving/model_bundle \
+          --resource-name "${MODEL_RESOURCE}" \
+          --artifact-uri "${artifact_uri}"
+
     - name: Build and push model serving image
       env:
         IMAGE_URI: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/model-serving
         IMAGE_TAG: ${{ github.event.workflow_run.head_sha || github.sha }}
       run: |
         set -euo pipefail
-        docker build --platform linux/amd64 -t "${IMAGE_URI}:${IMAGE_TAG}" services/model_serving
+        docker build --platform linux/amd64 --build-arg REQUIRE_MODEL_BUNDLE=true \
+          -t "${IMAGE_URI}:${IMAGE_TAG}" services/model_serving
         docker push "${IMAGE_URI}:${IMAGE_TAG}"
 
     - name: Build and push dashboard image
@@ -179,11 +204,6 @@ jobs:
         DASHBOARD_IMAGE: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/dashboard:${{ github.event.workflow_run.head_sha || github.sha }}
         ANALYTICS_IMAGE: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/analytics:${{ github.event.workflow_run.head_sha || github.sha }}
         ANALYTICS_GCP_SERVICE_ACCOUNT: ${{ vars.ANALYTICS_GCP_SERVICE_ACCOUNT }}
-        VOLATILITY_MODEL_1M: ${{ vars.VOLATILITY_MODEL_1M }}
-        VOLATILITY_MODEL_5M: ${{ vars.VOLATILITY_MODEL_5M }}
-        VOLATILITY_MODEL_15M: ${{ vars.VOLATILITY_MODEL_15M }}
-        VOLATILITY_MODEL_30M: ${{ vars.VOLATILITY_MODEL_30M }}
-        VOLATILITY_MODEL_1H: ${{ vars.VOLATILITY_MODEL_1H }}
         BATCH_ETL_IMAGE: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/batch-etl:${{ github.event.workflow_run.head_sha || github.sha }}
         REDIS_HOST: ${{ steps.redis.outputs.host }}
       run: |
@@ -221,7 +241,7 @@ jobs:
           echo "Analytics deployment prerequisite missing: configure all analytics repository variables." >&2
           exit 1
         fi
-        envsubst '${ANALYTICS_IMAGE} ${REDIS_HOST} ${REDIS_PORT} ${GCP_PROJECT_ID} ${GCP_REGION} ${ANALYTICS_GCP_SERVICE_ACCOUNT} ${VOLATILITY_MODEL_1M} ${VOLATILITY_MODEL_5M} ${VOLATILITY_MODEL_15M} ${VOLATILITY_MODEL_30M} ${VOLATILITY_MODEL_1H}' \
+        envsubst '${ANALYTICS_IMAGE} ${REDIS_HOST} ${REDIS_PORT} ${GCP_PROJECT_ID} ${GCP_REGION} ${ANALYTICS_GCP_SERVICE_ACCOUNT}' \
           < k8s/analytics-deployment.yaml \
           | kubectl apply -f -
         envsubst '${BATCH_ETL_IMAGE} ${GCS_BUCKET_NAME}' \
@@ -265,6 +285,8 @@ jobs:
         kubectl delete "job/${PARITY_JOB}" --wait=false
 
     - name: Smoke check analytics outputs
+      env:
+        EXPECTED_MODEL_RESOURCE_1H: ${{ vars.VOLATILITY_MODEL_1H }}
       run: |
         set -euo pipefail
         kubectl exec deployment/analytics -- python -c '
@@ -276,10 +298,15 @@ jobs:
             client = redis.Redis(host=os.environ["REDIS_HOST"], port=int(os.environ["REDIS_PORT"]))
             now = int(time.time() * 1000)
             volatility_raw = await client.get("market:volatility:v2_10s:BTCUSD:latest")
-            assert volatility_raw, "missing fresh volatility snapshot (check model IDs, model IAM, and live features)"
+            assert volatility_raw, "missing fresh volatility snapshot (check packaged model and live features)"
             volatility = json.loads(volatility_raw)
             assert volatility["model_version"] == "v2_10s", "wrong model contract"
             assert now - volatility["generated_ts_ms"] <= 60_000, "stale volatility snapshot"
+            resources = volatility["model_resources"]
+            assert resources["1h"] == os.environ["EXPECTED_MODEL_RESOURCE_1H"], "1h champion is not live"
+            for horizon in ("1m", "5m", "15m", "30m"):
+                assert resources[horizon] == f"ewma/v2_10s/{horizon}", f"wrong {horizon} provider"
+            assert all(float(value) > 0 for value in volatility["annualized_volatility"].values()), "invalid volatility"
             keys = [key async for key in client.scan_iter(match="market:pricing:v1:KXBTCD-*")]
             fresh = []
             for key in keys:

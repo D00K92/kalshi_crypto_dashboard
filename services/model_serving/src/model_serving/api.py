@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import time
+from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
 from .config import Settings
-from .inference_service import EWMAProvider, ForecastRequest, HORIZONS
+from .inference_service import HORIZONS, ForecastRequest
+from .packaged_provider import PackagedHybridProvider
 
 
 class ForecastPayload(BaseModel):
@@ -20,15 +22,25 @@ class ForecastPayload(BaseModel):
     source_timestamps_ms: dict[str, int]
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def create_app(settings: Settings | None = None, *, provider: Any | None = None) -> FastAPI:
     settings = settings or Settings.from_env()
-    provider = EWMAProvider(
-        model_version=settings.model_version,
-        feature_version=settings.feature_version,
-        decay=settings.ewma_decay,
-    )
-    app = FastAPI(title="Kalshi Crypto Model Serving", version="1")
-    app.state.ready = True
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        if app.state.provider is None:
+            app.state.provider = PackagedHybridProvider.load(
+                settings.model_bundle_manifest,
+                model_version=settings.model_version,
+                feature_version=settings.feature_version,
+                decay=settings.ewma_decay,
+            )
+        app.state.ready = bool(app.state.provider.ready)
+        yield
+        app.state.ready = False
+
+    app = FastAPI(title="Kalshi Crypto Model Serving", version="1", lifespan=lifespan)
+    app.state.provider = provider
+    app.state.ready = bool(provider is not None and provider.ready)
 
     @app.get("/healthz")
     def healthz() -> dict[str, str]:
@@ -52,7 +64,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             source_timestamps_ms=payload.source_timestamps_ms,
         )
         try:
-            result = provider.forecast(
+            result = app.state.provider.forecast(
                 request,
                 now_ms,
                 max_age_ms=settings.max_feature_age_ms,

@@ -38,6 +38,10 @@ class EWMAProvider:
         self.model_version, self.feature_version = model_version, feature_version
         self.decay = decay
 
+    @property
+    def ready(self) -> bool:
+        return True
+
     def forecast(self, request: ForecastRequest, now_ms: int, *, max_age_ms: int, future_skew_ms: int) -> ForecastResponse:
         if request.feature_set != "market_features" or request.feature_version != self.feature_version:
             raise ValueError("unsupported feature contract")

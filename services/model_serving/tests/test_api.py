@@ -6,6 +6,17 @@ from fastapi.testclient import TestClient
 
 from model_serving.api import create_app
 from model_serving.config import Settings
+from model_serving.inference_service import EWMAProvider
+
+
+def client(settings: Settings | None = None) -> TestClient:
+    settings = settings or Settings()
+    provider = EWMAProvider(
+        model_version=settings.model_version,
+        feature_version=settings.feature_version,
+        decay=settings.ewma_decay,
+    )
+    return TestClient(create_app(settings, provider=provider))
 
 
 def payload(**overrides):
@@ -21,14 +32,13 @@ def payload(**overrides):
 
 
 def test_health_and_ready():
-    client = TestClient(create_app(Settings()))
-    assert client.get("/healthz").json() == {"status": "ok"}
-    assert client.get("/readyz").json() == {"status": "ready"}
+    api = client()
+    assert api.get("/healthz").json() == {"status": "ok"}
+    assert api.get("/readyz").json() == {"status": "ready"}
 
 
 def test_forecast_returns_complete_term_structure():
-    client = TestClient(create_app(Settings()))
-    response = client.post("/v1/forecast", json=payload())
+    response = client().post("/v1/forecast", json=payload())
     assert response.status_code == 200
     body = response.json()
     assert set(body["annualized_volatility"]) == {"1m", "5m", "15m", "30m", "1h"}
@@ -38,28 +48,26 @@ def test_forecast_returns_complete_term_structure():
 
 
 def test_forecast_rejects_missing_ewma_state():
-    client = TestClient(create_app(Settings()))
-    response = client.post("/v1/forecast", json=payload(values={"synthetic_price": 70_000.0}))
+    response = client().post("/v1/forecast", json=payload(values={"synthetic_price": 70_000.0}))
     assert response.status_code == 422
 
 
 def test_forecast_rejects_missing_required_feature():
-    client = TestClient(create_app(Settings()))
-    response = client.post("/v1/forecast", json=payload(values={"ewma_state": {"frequency": "1m", "variance": 1e-6}}))
+    response = client().post("/v1/forecast", json=payload(values={"ewma_state": {"frequency": "1m", "variance": 1e-6}}))
     assert response.status_code == 422
 
 
 def test_forecast_rejects_stale_features():
-    client = TestClient(create_app(Settings(max_feature_age_ms=10)))
+    api = client(Settings(max_feature_age_ms=10))
     old = int(time.time() * 1000) - 100
-    response = client.post("/v1/forecast", json=payload(event_timestamp_ms=old))
+    response = api.post("/v1/forecast", json=payload(event_timestamp_ms=old))
     assert response.status_code == 422
 
 
 def test_forecast_uses_availability_timestamp_for_freshness():
-    client = TestClient(create_app(Settings(max_feature_age_ms=10)))
+    api = client(Settings(max_feature_age_ms=1_000))
     now = int(time.time() * 1000)
-    response = client.post(
+    response = api.post(
         "/v1/forecast",
         json=payload(event_timestamp_ms=now - 100_000, available_timestamp_ms=now),
     )
@@ -67,12 +75,10 @@ def test_forecast_uses_availability_timestamp_for_freshness():
 
 
 def test_forecast_rejects_non_finite_variance():
-    client = TestClient(create_app(Settings()))
-    response = client.post("/v1/forecast", json=payload(values={"ewma_state": {"frequency": "1m", "variance": "nan"}}))
+    response = client().post("/v1/forecast", json=payload(values={"ewma_state": {"frequency": "1m", "variance": "nan"}}))
     assert response.status_code == 422
 
 
 def test_forecast_rejects_legacy_feature_contract():
-    client = TestClient(create_app(Settings()))
-    response = client.post("/v1/forecast", json=payload(feature_version="v1"))
+    response = client().post("/v1/forecast", json=payload(feature_version="v1"))
     assert response.status_code == 422
