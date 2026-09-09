@@ -46,5 +46,5 @@ spec:
             - name: FEATURE_KEY
               value: "market:features:v2_10s:BTCUSD:latest"
             resources:
-              requests: {cpu: "100m", memory: "256Mi"}
-              limits: {cpu: "500m", memory: "512Mi"}
+              requests: {cpu: "100m", memory: "256Mi", ephemeral-storage: "100Mi"}
+              limits: {cpu: "500m", memory: "512Mi", ephemeral-storage: "1Gi"}

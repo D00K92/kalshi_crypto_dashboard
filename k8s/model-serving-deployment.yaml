@@ -65,11 +65,13 @@ spec:
           timeoutSeconds: 2
         resources:
           requests:
-            cpu: "100m"
-            memory: "128Mi"
+            cpu: "50m"
+            memory: "192Mi"
+            ephemeral-storage: "100Mi"
           limits:
             cpu: "500m"
             memory: "512Mi"
+            ephemeral-storage: "1Gi"
 ---
 apiVersion: v1
 kind: Service

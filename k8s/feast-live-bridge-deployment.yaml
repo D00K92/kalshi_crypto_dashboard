@@ -34,5 +34,5 @@ spec:
         - name: FEAST_PENDING_IDLE_MS
           value: "120000"
         resources:
-          requests: {cpu: "100m", memory: "256Mi"}
-          limits: {cpu: "500m", memory: "1Gi"}
+          requests: {cpu: "50m", memory: "256Mi", ephemeral-storage: "100Mi"}
+          limits: {cpu: "500m", memory: "1Gi", ephemeral-storage: "1Gi"}

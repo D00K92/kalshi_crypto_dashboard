@@ -30,8 +30,8 @@ spec:
             - name: GCP_PROJECT_ID
               value: "${GCP_PROJECT_ID}"
             resources:
-              requests: {cpu: "500m", memory: "1Gi"}
-              limits: {cpu: "2000m", memory: "4Gi"}
+              requests: {cpu: "100m", memory: "128Mi", ephemeral-storage: "100Mi"}
+              limits: {cpu: "2000m", memory: "4Gi", ephemeral-storage: "1Gi"}
 ---
 apiVersion: batch/v1
 kind: CronJob
@@ -65,5 +65,5 @@ spec:
             - name: GCP_PROJECT_ID
               value: "${GCP_PROJECT_ID}"
             resources:
-              requests: {cpu: "500m", memory: "1Gi"}
-              limits: {cpu: "2000m", memory: "4Gi"}
+              requests: {cpu: "100m", memory: "128Mi", ephemeral-storage: "100Mi"}
+              limits: {cpu: "2000m", memory: "4Gi", ephemeral-storage: "1Gi"}
