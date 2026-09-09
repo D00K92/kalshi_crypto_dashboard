@@ -11,6 +11,7 @@ class ModelFeatureContract:
     feature_version: str
     feature_view: str
     feature_service: str
+    offline_table: str
     label_version: str
     feature_columns: tuple[str, ...]
 
@@ -21,6 +22,7 @@ CONTRACTS = {
         feature_version="v1",
         feature_view="v1_market_features",
         feature_service="volatility_v1",
+        offline_table="kalshi-crypto-506614.feature_store.realized_volatility_v1",
         # The legacy v1 feature table was paired with the existing v2_10s
         # labels; keep that rollback loader behavior intact.
         label_version="v2_10s",
@@ -31,6 +33,7 @@ CONTRACTS = {
         feature_version="v2_10s",
         feature_view="v2_10s_market_features",
         feature_service="volatility_v2_10s",
+        offline_table="kalshi-crypto-506614.feature_store.realized_volatility_v2_10s",
         label_version="v2_10s",
         feature_columns=("log_return", "venue_count"),
     ),

@@ -83,56 +83,58 @@ def load_training_table_from_feast(
     target_table: str = DEFAULT_TARGET_TABLE,
     feature_version: str = CURRENT_CONTRACT_VERSION,
 ) -> pd.DataFrame:
-    """Load BigQuery labels and attach point-in-time Feast features.
+    """Load the BigQuery tables declared by the immutable Feast contract.
 
-    Labels are keyed by ``prediction_timestamp``.  Feast receives that same
-    timestamp as ``event_timestamp`` so no feature after the prediction cutoff
-    can enter the training row.
+    This contract is exact-timestamp aligned at 10-second boundaries.  Joining
+    the two partitioned tables directly avoids Feast's range join over the full
+    feature-view TTL while preserving point-in-time correctness.
     """
+    del feast_repo  # Retained in the public loader boundary for pipeline compatibility.
     yesterday = datetime.now(timezone.utc).date() - timedelta(days=1)
     if end > yesterday:
         raise ValueError(f"training end date {end} exceeds policy cutoff {yesterday}")
     from google.cloud import bigquery
-    from feast import FeatureStore
 
     contract = resolve_contract(feature_version)
 
     client = bigquery.Client(project=project, location="asia-northeast3")
     query = f"""
-      SELECT market_id, prediction_timestamp, label_window_end,
-             target_rv_1m, target_rv_5m, target_rv_15m,
-             target_rv_30m, target_rv_1h, label_version
-      FROM `{target_table}`
-      WHERE DATE(prediction_timestamp) BETWEEN @start_date AND @end_date
-        AND target_rv_1h IS NOT NULL
-        AND label_version = @label_version
+      SELECT
+        f.asset,
+        f.event_timestamp,
+        f.synthetic_price,
+        f.log_return,
+        f.venue_count,
+        l.market_id,
+        l.prediction_timestamp,
+        l.label_window_end,
+        l.target_rv_1m,
+        l.target_rv_5m,
+        l.target_rv_15m,
+        l.target_rv_30m,
+        l.target_rv_1h,
+        l.label_version
+      FROM `{target_table}` AS l
+      INNER JOIN `{contract.offline_table}` AS f
+        ON f.asset = l.market_id
+       AND f.event_timestamp = l.prediction_timestamp
+       AND f.feature_version = @feature_version
+      WHERE DATE(l.prediction_timestamp) BETWEEN @start_date AND @end_date
+        AND l.target_rv_1h IS NOT NULL
+        AND l.label_window_end <= CURRENT_TIMESTAMP()
+        AND l.label_version = @label_version
     """
     config = bigquery.QueryJobConfig(query_parameters=[
         bigquery.ScalarQueryParameter("start_date", "DATE", start),
         bigquery.ScalarQueryParameter("end_date", "DATE", end),
+        bigquery.ScalarQueryParameter("feature_version", "STRING", contract.feature_version),
         bigquery.ScalarQueryParameter("label_version", "STRING", contract.label_version),
     ])
-    labels = client.query(query, job_config=config).to_dataframe()
-    if labels.empty:
-        raise FileNotFoundError("BigQuery target table has no usable labels for the requested range")
-    labels["prediction_timestamp"] = pd.to_datetime(labels["prediction_timestamp"], utc=True)
-    entities = labels.rename(columns={"market_id": "asset", "prediction_timestamp": "event_timestamp"})[
-        ["asset", "event_timestamp"]
-    ]
-    features = FeatureStore(repo_path=feast_repo).get_historical_features(
-        entity_df=entities.sort_values("event_timestamp"),
-        features=[
-            f"{contract.feature_view}:synthetic_price",
-            *(f"{contract.feature_view}:{name}" for name in contract.feature_columns),
-        ],
-    ).to_df()
-    features["event_timestamp"] = pd.to_datetime(features["event_timestamp"], utc=True)
-    joined = features.merge(
-        labels, left_on=["asset", "event_timestamp"],
-        right_on=["market_id", "prediction_timestamp"], how="inner",
-    )
+    joined = client.query(query, job_config=config).to_dataframe()
     if joined.empty:
-        raise ValueError("Feast historical retrieval produced no label/feature matches")
+        raise FileNotFoundError("BigQuery contract tables have no usable feature/label matches")
+    joined["event_timestamp"] = pd.to_datetime(joined["event_timestamp"], utc=True)
+    joined["prediction_timestamp"] = pd.to_datetime(joined["prediction_timestamp"], utc=True)
     joined["frequency"] = "10s"
     joined["timestamp"] = joined["event_timestamp"]
     joined.attrs["feature_contract"] = contract.feature_version

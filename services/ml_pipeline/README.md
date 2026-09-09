@@ -7,13 +7,13 @@ generation, Feast definitions, and online-store materialization belong to
 
 ## Inputs
 
-Training labels are read from BigQuery
-`training_labels.future_realized_volatility_v2_10s`. Point-in-time features are
-retrieved through the Feast repository in `services/feast_store`, whose
-offline source is BigQuery and whose online store is Redis.
+Training labels and exact-timestamp features are joined directly from the
+partitioned BigQuery tables declared by the immutable Feast contract. This
+avoids an expensive range join across the feature-view TTL; Feast remains the
+owner of the corresponding offline and online feature definitions.
 
-Training is point-in-time safe: the loader rejects current-day data and limits
-samples to `end_date 23:00 UTC` because the longest target horizon is one hour.
+Training is point-in-time safe: the loader rejects current-day ranges and only
+uses labels whose future window has completed.
 
 ## Structure
 
@@ -55,7 +55,8 @@ or promote a model; use `run_pipeline.py` with a completed training range and
 record the resulting Vertex resources before changing analytics variables.
 
 Historical feature retrieval is centralized in
-`src/common/data_io.py::load_training_table_from_feast`; Feast configuration is
+`src/common/data_io.py::load_training_table_from_feast`; it resolves the model
+contract and performs an exact-timestamp BigQuery join. Feast configuration is
 owned by `services/feast_store`. The legacy GCS loader remains available for
 rollback only.
 
