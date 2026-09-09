@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import time
+from dataclasses import dataclass
 from typing import Any
 
 import orjson
@@ -151,7 +151,10 @@ class RedisReader:
         payloads = self.client.mget(*keys)
         now_ms = int(time.time() * 1000)
         for row, raw in zip(rows, payloads, strict=False):
-            row.update({"model_value": "-", "edge_mid": "-", "buy_yes_edge": "-", "sell_yes_edge": "-"})
+            row.update({
+                "model_value": "-", "model_vol": "-", "tau": "-",
+                "edge_mid": "-", "buy_yes_edge": "-", "sell_yes_edge": "-",
+            })
             price = decode(raw, {})
             generated = price.get("generated_ts_ms") if isinstance(price, dict) else None
             if (not isinstance(price, dict) or price.get("status") != "available"
@@ -162,6 +165,10 @@ class RedisReader:
                 "model_value": _cents_display(price.get("model_value_dollars")),
                 "model_value_cents": price.get("model_value_cents"),
                 "model_probability": price.get("model_probability"),
+                "model_vol": _percent_display(price.get("annualized_volatility")),
+                "annualized_volatility": price.get("annualized_volatility"),
+                "tau": _minutes_display(price.get("time_to_expiry_minutes")),
+                "time_to_expiry_minutes": price.get("time_to_expiry_minutes"),
                 "edge_mid": _signed_cents(price.get("edge_vs_mid_probability")),
                 "buy_yes_edge": _signed_cents(price.get("buy_yes_edge_probability")),
                 "sell_yes_edge": _signed_cents(price.get("sell_yes_edge_probability")),
@@ -203,3 +210,19 @@ def _signed_cents(value: Any) -> str:
     except (TypeError, ValueError):
         return "-"
     return f"{parsed:+.1f}¢"
+
+
+def _percent_display(value: Any) -> str:
+    try:
+        parsed = float(value) * 100
+    except (TypeError, ValueError):
+        return "-"
+    return f"{parsed:.1f}%"
+
+
+def _minutes_display(value: Any) -> str:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return "-"
+    return f"{parsed:.1f}m"

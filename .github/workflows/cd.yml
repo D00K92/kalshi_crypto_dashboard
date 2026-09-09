@@ -314,3 +314,16 @@ jobs:
             assert fresh, "no fresh Kalshi price (check open <=1h event, ticker freshness, and REST metadata)"
             await client.aclose()
         asyncio.run(check())'
+        kubectl exec deployment/dashboard -- python -c '
+        import json, time
+        from dashboard.data import RedisReader, redis_client_from_env
+        client = redis_client_from_env()
+        for _ in range(30):
+            spot = json.loads(client.get("market:spot:BTCUSDT:latest"))
+            rows = RedisReader(client).read_kalshi_data(spot.get("price"))["contracts"]
+            missing = [row["market_ticker"] for row in rows if row.get("model_value") == "-"]
+            if rows and not missing:
+                break
+            time.sleep(1)
+        else:
+            raise AssertionError(f"dashboard contracts missing fair prices: {missing}")'

@@ -1,9 +1,6 @@
-import math
-
 import pytest
 
 from kalshi_crypto_analytics.core import (
-    SECONDS_PER_YEAR,
     gaussian_probability,
     interpolate_volatility,
     quote_edges,
@@ -25,12 +22,9 @@ def test_horizon_boundaries(tau, bracket, expected):
     assert sigma == pytest.approx(expected)
 
 
-def test_linear_total_variance_uses_365_day_year():
+def test_linear_annualized_volatility_interpolation():
     sigma, _ = interpolate_volatility(600, VOLS)
-    v0 = .21 ** 2 * 300 / SECONDS_PER_YEAR
-    v1 = .22 ** 2 * 900 / SECONDS_PER_YEAR
-    expected = math.sqrt((.5 * v0 + .5 * v1) / (600 / SECONDS_PER_YEAR))
-    assert sigma == pytest.approx(expected)
+    assert sigma == pytest.approx(.215)
 
 
 @pytest.mark.parametrize("tau", [0, -1, float("nan"), float("inf"), 3600.0001])
@@ -48,11 +42,11 @@ def test_invalid_volatility_rejected(bad):
     assert exc.value.reason == UnavailableReason.INCOMPLETE_TERM_STRUCTURE
 
 
-def test_non_monotone_selected_total_variance_rejected():
+def test_descending_curve_is_interpolated_without_repair():
     values = {**VOLS, "15m": .05}
-    with pytest.raises(PricingUnavailable) as exc:
-        interpolate_volatility(600, values)
-    assert exc.value.reason == UnavailableReason.NON_MONOTONE_TOTAL_VARIANCE
+    sigma, bracket = interpolate_volatility(600, values)
+    assert bracket == ("5m", "15m")
+    assert sigma == pytest.approx(.13)
 
 
 def test_gaussian_probability_directionality():

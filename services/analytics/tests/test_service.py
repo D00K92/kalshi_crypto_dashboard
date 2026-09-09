@@ -89,12 +89,16 @@ async def test_feature_freshness_uses_completion_timestamp_not_event_start():
     assert service.ready is True
 
 
-@pytest.mark.parametrize(("delta", "reason"), [(-60_001, "stale_ticker"), (2_001, "stale_ticker")])
-async def test_stale_timestamp_and_future_skew_cleanup(delta, reason):
+@pytest.mark.parametrize("delta", [-60_001, 2_001])
+async def test_stale_quote_still_publishes_fair_price_without_edges(delta):
     item = ticker(ts=NOW + delta); out = Publisher()
     service = AnalyticsService(Data(bootstrap=[item]), Meta({item.market_ticker: MarketMetadata(item.market_ticker, item.event_ticker, 100, NOW + 300_000, "open")}), Forecast(), out, clock_ms=lambda: NOW)
     await service.start(); await service.cycle()
-    assert out.unavailable_reasons == [(item.market_ticker, reason)]
+    assert out.unavailable_reasons == []
+    assert out.prices[0]["model_value_dollars"] > .5
+    assert out.prices[0]["time_to_expiry_minutes"] == pytest.approx(5)
+    assert out.prices[0]["volatility_bracket"] == ["5m", "15m"]
+    assert out.prices[0]["market_mid_probability"] is None
 
 
 async def test_rollover_removes_old_and_prices_new_event():

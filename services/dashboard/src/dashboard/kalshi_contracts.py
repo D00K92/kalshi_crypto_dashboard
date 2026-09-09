@@ -193,6 +193,8 @@ def contract_table(rows: list[dict[str, Any]]) -> dag.AgGrid:
             {"field": "spread", "headerName": "SPR", "type": "rightAligned", "width": 82},
             {"field": "last", "headerName": "LAST", "type": "rightAligned", "width": 88},
             {"field": "model_value", "headerName": "MODEL", "type": "rightAligned", "width": 92},
+            {"field": "model_vol", "headerName": "VOL", "type": "rightAligned", "width": 84},
+            {"field": "tau", "headerName": "TTE", "type": "rightAligned", "width": 82},
             {"field": "edge_mid", "headerName": "EDGE MID", "type": "rightAligned", "width": 105},
             {"field": "buy_yes_edge", "headerName": "BUY YES", "type": "rightAligned", "width": 100},
             {"field": "sell_yes_edge", "headerName": "SELL YES", "type": "rightAligned", "width": 100},

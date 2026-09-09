@@ -7,7 +7,7 @@ from typing import Any
 from .schemas import HORIZON_SECONDS, HORIZONS, PricingUnavailable, UnavailableReason
 
 SECONDS_PER_YEAR = 365 * 24 * 60 * 60
-INTERPOLATION_METHOD = "linear_total_variance_v1"
+INTERPOLATION_METHOD = "linear_annualized_volatility_v1"
 DISTRIBUTION_MODEL = "zero_log_return_gaussian_v1"
 
 
@@ -43,13 +43,9 @@ def interpolate_volatility(tau_seconds: Any, volatilities: Mapping[str, Any]) ->
     upper_index = next(index for index, value in enumerate(seconds) if tau < value)
     lower, upper = HORIZONS[upper_index - 1], HORIZONS[upper_index]
     h0, h1 = HORIZON_SECONDS[lower], HORIZON_SECONDS[upper]
-    variance0 = vols[lower] ** 2 * h0 / SECONDS_PER_YEAR
-    variance1 = vols[upper] ** 2 * h1 / SECONDS_PER_YEAR
-    if variance1 < variance0:
-        raise PricingUnavailable(UnavailableReason.NON_MONOTONE_TOTAL_VARIANCE)
     weight = (tau - h0) / (h1 - h0)
-    variance_tau = (1 - weight) * variance0 + weight * variance1
-    return math.sqrt(variance_tau / (tau / SECONDS_PER_YEAR)), (lower, upper)
+    sigma = (1 - weight) * vols[lower] + weight * vols[upper]
+    return sigma, (lower, upper)
 
 
 def gaussian_probability(spot: Any, strike: Any, sigma: Any, tau_seconds: Any) -> float:

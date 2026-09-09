@@ -1,6 +1,6 @@
-import redis
 import time
 
+import redis
 from dashboard.data import RedisReader, decode
 
 
@@ -13,7 +13,7 @@ class FakeRedis:
 
 
 def test_reader_supports_redis_url(monkeypatch):
-    import dashboard.data as data
+    from dashboard import data
     monkeypatch.setenv("REDIS_URL", "redis://example.test:6380/2")
     client = data.redis_client_from_env()
     assert client.connection_pool.connection_kwargs["host"] == "example.test"
@@ -119,13 +119,16 @@ def test_reader_joins_fresh_analytics_prices_read_only():
         def mget(self, *keys):
             if keys == ("market:pricing:v1:E-T100",):
                 return [(f'{{"status":"available","model_probability":0.6,"model_value_dollars":0.6,'
-                         f'"model_value_cents":60,"edge_vs_mid_probability":0.15,'
+                         f'"model_value_cents":60,"annualized_volatility":0.215,'
+                         f'"time_to_expiry_minutes":12.5,"edge_vs_mid_probability":0.15,'
                          f'"buy_yes_edge_probability":0.1,"sell_yes_edge_probability":-0.2,'
                          f'"generated_ts_ms":{now}}}').encode()]
             return super().mget(*keys)
 
     row = RedisReader(AnalyticsRedis()).read_kalshi_data(100)["contracts"][0]
     assert row["model_value"] == "60.0¢"
+    assert row["model_vol"] == "21.5%"
+    assert row["tau"] == "12.5m"
     assert row["edge_mid"] == "+15.0¢"
     assert row["buy_yes_edge"] == "+10.0¢"
     assert row["sell_yes_edge"] == "-20.0¢"

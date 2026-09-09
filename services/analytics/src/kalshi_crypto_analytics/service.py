@@ -3,8 +3,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from dataclasses import replace
 from collections.abc import Callable
+from dataclasses import replace
 
 from .core import (
     DISTRIBUTION_MODEL,
@@ -106,25 +106,30 @@ class AnalyticsService:
     async def _price(self, ticker: Ticker, metadata: MarketMetadata | None, spot: Spot,
                      volatility: VolatilitySnapshot, now_ms: int) -> PricingResult | UnavailableReason:
         try:
-            validate_fresh(ticker.exchange_ts_ms, now_ms, self.ticker_max_age_ms, UnavailableReason.STALE_TICKER, self.future_skew_ms)
             if metadata is None:
                 raise PricingUnavailable(UnavailableReason.MISSING_MARKET_METADATA)
             if (ticker.series_ticker != "KXBTCD" or metadata.event_ticker != ticker.event_ticker
                     or metadata.status.lower() not in OPEN_STATUSES):
                 raise PricingUnavailable(UnavailableReason.UNSUPPORTED_CONTRACT)
-            tau = (metadata.expiry_ts_ms - spot.generated_ts_ms) / 1000
-            sigma, bracket = interpolate_volatility(tau, volatility.annualized_volatility)
-            probability = gaussian_probability(spot.price, metadata.strike, sigma, tau)
+            tau_seconds = (metadata.expiry_ts_ms - now_ms) / 1000
+            sigma, bracket = interpolate_volatility(tau_seconds, volatility.annualized_volatility)
+            probability = gaussian_probability(spot.price, metadata.strike, sigma, tau_seconds)
         except PricingUnavailable as exc:
             return exc.reason
-        edges = quote_edges(ticker.yes_bid_dollars, ticker.yes_ask_dollars, probability)
-        invalid_quote = edges["market_mid_probability"] is None
+        try:
+            validate_fresh(ticker.exchange_ts_ms, now_ms, self.ticker_max_age_ms, UnavailableReason.STALE_TICKER, self.future_skew_ms)
+            edges = quote_edges(ticker.yes_bid_dollars, ticker.yes_ask_dollars, probability)
+            quote_reason = UnavailableReason.INVALID_QUOTE if edges["market_mid_probability"] is None else None
+        except PricingUnavailable:
+            edges = quote_edges(None, None, probability)
+            quote_reason = UnavailableReason.STALE_TICKER
         payload = {
             "schema_version": 1, "event_type": "kalshi_model_price", "status": "available",
             "market_ticker": ticker.market_ticker, "event_ticker": ticker.event_ticker, "asset": "BTCUSD",
             "spot_price": spot.price, "spot_generated_ts_ms": spot.generated_ts_ms, "strike": metadata.strike,
-            "expiry_ts_ms": metadata.expiry_ts_ms, "pricing_asof_ts_ms": spot.generated_ts_ms,
-            "time_to_expiry_seconds": tau, "annualized_volatility": sigma, "volatility_bracket": list(bracket),
+            "expiry_ts_ms": metadata.expiry_ts_ms, "pricing_asof_ts_ms": now_ms,
+            "time_to_expiry_seconds": tau_seconds, "time_to_expiry_minutes": tau_seconds / 60,
+            "annualized_volatility": sigma, "volatility_bracket": list(bracket),
             "volatility_generated_ts_ms": volatility.generated_ts_ms, "interpolation_method": INTERPOLATION_METHOD,
             "feature_event_timestamp_ms": volatility.feature_asof_ts_ms,
             "inference_asof_timestamp_ms": volatility.feature_available_ts_ms or volatility.feature_asof_ts_ms,
@@ -132,7 +137,7 @@ class AnalyticsService:
             "model_value_dollars": probability, "model_value_cents": 100 * probability, **edges,
             "model_version": volatility.model_version, "generated_ts_ms": now_ms,
         }
-        return PricingResult(payload, UnavailableReason.INVALID_QUOTE if invalid_quote else None)
+        return PricingResult(payload, quote_reason)
 
     async def run(self, stop: asyncio.Event) -> None:
         await self.start()
