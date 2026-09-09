@@ -62,7 +62,7 @@ class VertexGCSResolver:
 class ConfiguredForecastProvider:
     def __init__(self, resources: dict[str, str], resolver: ArtifactResolver, *, model_version: str = "v2_10s", feature_version: str = "v2_10s") -> None:
         if set(resources) != set(HORIZONS) or any(not value for value in resources.values()):
-            raise ValueError("exactly five non-empty horizon model resources are required")
+            raise ValueError("exactly four non-empty horizon model resources are required")
         self.resources, self.resolver, self.model_version, self.feature_version = resources, resolver, model_version, feature_version
         self._bundles: dict[str, ArtifactBundle] = {}
 

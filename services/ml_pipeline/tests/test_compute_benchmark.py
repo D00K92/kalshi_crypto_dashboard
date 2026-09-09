@@ -16,14 +16,14 @@ def test_bootstrap_report_covers_pipeline_horizons_in_champion_format() -> None:
             "venue_count": [6] * count,
             **{
                 f"target_rv_{horizon}": np.linspace(0.2, 0.3, count)
-                for horizon in ("1m", "5m", "15m", "30m", "1h")
+                for horizon in ("5m", "15m", "30m", "1h")
             },
         }
     )
 
     report = compute_benchmark(table)
 
-    assert HORIZONS == ("1m", "5m", "15m", "30m", "1h")
+    assert HORIZONS == ("5m", "15m", "30m", "1h")
     assert set(report) == {"_metadata", *HORIZONS}
     for horizon in HORIZONS:
         assert report[horizon]["rows"] == 30

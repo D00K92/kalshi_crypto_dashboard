@@ -35,8 +35,8 @@ def interpolate_volatility(tau_seconds: Any, volatilities: Mapping[str, Any]) ->
     if tau > 3600:
         raise PricingUnavailable(UnavailableReason.OUTSIDE_SUPPORTED_LIFETIME)
     vols = validate_term_structure(volatilities)
-    if tau < 60:
-        return vols["1m"], ("1m", "1m")
+    if tau < 300:
+        return vols["5m"], ("5m", "5m")
     if tau == 3600:
         return vols["1h"], ("1h", "1h")
     seconds = [HORIZON_SECONDS[horizon] for horizon in HORIZONS]

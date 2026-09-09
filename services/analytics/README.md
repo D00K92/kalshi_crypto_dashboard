@@ -32,7 +32,7 @@ the quote/edge fields null; the standalone model probability remains available.
 | `GCP_PROJECT_ID`, `GCP_REGION` | Vertex/GCS project and region. |
 | `FORECAST_PROVIDER` | `http` (production) or `direct` (rollback/parity); defaults to `http`. |
 | `MODEL_SERVING_URL`, `MODEL_SERVING_TIMEOUT_MS` | Internal model-serving URL and bounded request timeout. |
-| `VOLATILITY_MODEL_1M`, `VOLATILITY_MODEL_5M`, `VOLATILITY_MODEL_15M`, `VOLATILITY_MODEL_30M`, `VOLATILITY_MODEL_1H` | Exact immutable Vertex resource names, such as `projects/123/locations/asia-northeast3/models/456@1`. |
+| `VOLATILITY_MODEL_5M`, `VOLATILITY_MODEL_15M`, `VOLATILITY_MODEL_30M`, `VOLATILITY_MODEL_1H` | Exact immutable Vertex resource names for the direct rollback provider. |
 | `FEATURE_VERSION` | Expected live feature contract; defaults to `v2_10s`. |
 | `VOLATILITY_MODEL_VERSION` | Expected artifact/label version; defaults to `v2_10s`. |
 | `CONSUMER_NAME` | Redis consumer identity; defaults to the pod hostname. |
@@ -44,7 +44,7 @@ Do not configure a display name, alias such as `latest`, or a model-family name.
 Each exact resource must resolve to an artifact directory containing
 `model.joblib` and `metadata.json`. Metadata must contain the matching `horizon`
 and non-empty ordered `feature_columns`; Vertex labels `horizon` and `version`
-are checked when present. All five artifacts must load and infer from one feature
+are checked when present. All four artifacts must load and infer from one feature
 observation or readiness stays false.
 
 The training pipeline serializes an `xgboost.XGBRegressor` with joblib. The
@@ -57,16 +57,16 @@ fallback.
 
 ### Champion-selection deployment prerequisite
 
-The repository does not contain the five promoted champion resource IDs, so CD
+The repository does not contain the four promoted champion resource IDs, so CD
 cannot infer them safely. Copy the `vertex_resource` values from an approved
-promotion report into the five GitHub variables. Before doing so, verify that
+promotion report into the four GitHub variables. Before doing so, verify that
 each model's `artifactUri` is horizon-specific and immutable.
 
 The current promotion script uploads to
 `gs://<bucket>/models/<version>/candidate/<horizon>` before registration. A later
 promotion using the same version can overwrite that path, so an old numeric
 Vertex resource ID alone does not prove that its backing bytes are still the
-approved champion. Production deployment therefore requires either five models
+approved champion. Production deployment therefore requires either four models
 already registered from immutable per-promotion artifact paths, or an operator
 copy/re-registration of each approved bundle at such a path. Analytics validates
 the exact configured resource, horizon/version labels, metadata, and loadability,
@@ -88,7 +88,8 @@ Configure these GitHub repository variables:
 
 - `ANALYTICS_GCP_SERVICE_ACCOUNT`: GCP service-account email used by the
   Kubernetes `analytics` service account through Workload Identity.
-- All five `VOLATILITY_MODEL_*` exact resource names listed above.
+- All four `VOLATILITY_MODEL_*` exact resource names listed above when using
+  the direct rollback provider.
 
 The GCP service account needs `aiplatform.models.get` on the configured Vertex
 models and `storage.objects.get` on their artifact objects. Grant

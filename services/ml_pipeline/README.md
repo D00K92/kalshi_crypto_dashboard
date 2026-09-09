@@ -27,7 +27,7 @@ scripts/          Compile, submit, and event-trigger training workflows
 
 ## Training and retraining
 
-The five horizon models use chronological splits and non-negative predictions.
+The four horizon models use chronological splits and non-negative predictions.
 Evaluation compares model QLIKE against an annualized EWMA benchmark (`lambda=0.96`).
 `scripts/evaluate_and_trigger.py` records state and can submit the KFP pipeline
 after sustained champion deterioration. The KFP DAG evaluates each candidate on

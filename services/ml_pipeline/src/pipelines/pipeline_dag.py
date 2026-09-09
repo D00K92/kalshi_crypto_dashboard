@@ -4,7 +4,7 @@ from kfp import dsl
 
 from src.components.kfp_components import evaluate_container, load_container, register_container, train_container
 
-HORIZONS = ("1m", "5m", "15m", "30m", "1h")
+HORIZONS = ("5m", "15m", "30m", "1h")
 
 
 @dsl.pipeline(name="crypto-volatility-training-v2-10s")
@@ -23,7 +23,7 @@ def volatility_training_pipeline(
     data = load_container(feast_repo=feast_repo, target_table=target_table,
                           start_date=start_date, end_date=end_date, project=project,
                           feature_version=feature_version)
-    with dsl.ParallelFor(items=list(HORIZONS), parallelism=5) as horizon:
+    with dsl.ParallelFor(items=list(HORIZONS), parallelism=4) as horizon:
         trained = train_container(
             dataset=data.outputs["output_dataset"], horizon=horizon,
             feature_version=feature_version,

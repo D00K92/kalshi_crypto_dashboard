@@ -40,7 +40,7 @@ def build_bundle(tmp_path, *, checksum="valid"):
         "feature_version": "v2_10s",
         "horizons": {
             horizon: {"kind": "ewma", "resource": f"ewma/v2_10s/{horizon}"}
-            for horizon in ("1m", "5m", "15m", "30m")
+            for horizon in ("5m", "15m", "30m")
         } | {
             "1h": {
                 "kind": "xgboost",
@@ -75,7 +75,7 @@ def test_packaged_provider_routes_only_1h_to_model(tmp_path):
         future_skew_ms=2_000,
     )
     assert result.annualized_volatility["1h"] == pytest.approx(0.42)
-    assert len({result.annualized_volatility[h] for h in ("1m", "5m", "15m", "30m")}) == 1
+    assert len({result.annualized_volatility[h] for h in ("5m", "15m", "30m")}) == 1
     assert result.model_resources["1h"] == "projects/1/locations/test/models/2@1"
     assert result.model_resources["30m"] == "ewma/v2_10s/30m"
 

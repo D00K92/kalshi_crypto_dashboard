@@ -1,8 +1,8 @@
 # Model-serving API
 
-Internal ClusterIP service for validated five-horizon volatility forecasts.
+Internal ClusterIP service for validated four-horizon volatility forecasts.
 The production image contains an immutable model bundle: the promoted 1h
-XGBoost artifact plus EWMA configuration for 1m, 5m, 15m, and 30m. It does
+XGBoost artifact plus EWMA configuration for 5m, 15m, and 30m. It does
 not consume Redis, publish to Feast, or expose a public endpoint.
 
 Release CI resolves the approved Vertex model, downloads its GCS artifact into

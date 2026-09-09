@@ -10,12 +10,12 @@ from kalshi_crypto_analytics.core import (
 )
 from kalshi_crypto_analytics.schemas import PricingUnavailable, UnavailableReason
 
-VOLS = {"1m": .2, "5m": .21, "15m": .22, "30m": .23, "1h": .24}
+VOLS = {"5m": .21, "15m": .22, "30m": .23, "1h": .24}
 
 
 @pytest.mark.parametrize(("tau", "bracket", "expected"), [
-    (.001, ("1m", "1m"), .2), (59.999, ("1m", "1m"), .2),
-    (60, ("1m", "5m"), .2), (300, ("5m", "15m"), .21),
+    (.001, ("5m", "5m"), .21), (299.999, ("5m", "5m"), .21),
+    (300, ("5m", "15m"), .21),
     (900, ("15m", "30m"), .22), (1800, ("30m", "1h"), .23),
     (3600, ("1h", "1h"), .24),
 ])
@@ -26,10 +26,10 @@ def test_horizon_boundaries(tau, bracket, expected):
 
 
 def test_linear_total_variance_uses_365_day_year():
-    sigma, _ = interpolate_volatility(180, VOLS)
-    v0 = .2 ** 2 * 60 / SECONDS_PER_YEAR
-    v1 = .21 ** 2 * 300 / SECONDS_PER_YEAR
-    expected = math.sqrt((.5 * v0 + .5 * v1) / (180 / SECONDS_PER_YEAR))
+    sigma, _ = interpolate_volatility(600, VOLS)
+    v0 = .21 ** 2 * 300 / SECONDS_PER_YEAR
+    v1 = .22 ** 2 * 900 / SECONDS_PER_YEAR
+    expected = math.sqrt((.5 * v0 + .5 * v1) / (600 / SECONDS_PER_YEAR))
     assert sigma == pytest.approx(expected)
 
 
@@ -49,9 +49,9 @@ def test_invalid_volatility_rejected(bad):
 
 
 def test_non_monotone_selected_total_variance_rejected():
-    values = {**VOLS, "5m": .05}
+    values = {**VOLS, "15m": .05}
     with pytest.raises(PricingUnavailable) as exc:
-        interpolate_volatility(120, values)
+        interpolate_volatility(600, values)
     assert exc.value.reason == UnavailableReason.NON_MONOTONE_TOTAL_VARIANCE
 
 

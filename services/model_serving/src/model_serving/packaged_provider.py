@@ -49,7 +49,7 @@ class PackagedHybridProvider:
 
         horizons = manifest.get("horizons")
         if not isinstance(horizons, dict) or set(horizons) != set(HORIZONS):
-            raise ValueError("model bundle must configure exactly five horizons")
+            raise ValueError("model bundle must configure exactly four horizons")
         for horizon in HORIZONS[:-1]:
             expected_resource = f"ewma/{model_version}/{horizon}"
             entry = horizons[horizon]

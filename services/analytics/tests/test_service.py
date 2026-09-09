@@ -10,7 +10,7 @@ from kalshi_crypto_analytics.schemas import (
 from kalshi_crypto_analytics.service import AnalyticsService
 
 NOW = 1_800_000_000_000
-VOLS = {"1m": .2, "5m": .21, "15m": .22, "30m": .23, "1h": .24}
+VOLS = {"5m": .21, "15m": .22, "30m": .23, "1h": .24}
 
 
 def ticker(market="KXBTCD-E-T100", event="KXBTCD-E", ts=NOW):

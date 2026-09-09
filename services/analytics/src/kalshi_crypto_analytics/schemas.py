@@ -4,8 +4,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
-HORIZONS = ("1m", "5m", "15m", "30m", "1h")
-HORIZON_SECONDS = {"1m": 60, "5m": 300, "15m": 900, "30m": 1800, "1h": 3600}
+HORIZONS = ("5m", "15m", "30m", "1h")
+HORIZON_SECONDS = {"5m": 300, "15m": 900, "30m": 1800, "1h": 3600}
 
 
 class UnavailableReason(StrEnum):

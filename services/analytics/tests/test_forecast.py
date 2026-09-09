@@ -37,7 +37,7 @@ class Resolver:
 def resources(): return {h: f"resource-{h}" for h in HORIZONS}
 
 
-async def test_metadata_feature_order_and_atomic_five_horizon_inference():
+async def test_metadata_feature_order_and_atomic_four_horizon_inference():
     resolver = Resolver()
     provider = ConfiguredForecastProvider(resources(), resolver, model_version="v1", feature_version="v1")
     await provider.load()
@@ -64,7 +64,7 @@ async def test_partial_model_failure_publishes_no_snapshot():
 
 
 def test_exact_resource_set_is_required():
-    with pytest.raises(ValueError, match="exactly five"):
+    with pytest.raises(ValueError, match="exactly four"):
         ConfiguredForecastProvider({"1m": "latest"}, Resolver())
 
 

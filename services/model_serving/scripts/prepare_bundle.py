@@ -6,7 +6,7 @@ import json
 import shutil
 from pathlib import Path
 
-HORIZONS = ("1m", "5m", "15m", "30m", "1h")
+HORIZONS = ("5m", "15m", "30m", "1h")
 
 
 def sha256(path: Path) -> str:

@@ -10,8 +10,8 @@ FREQUENCY_SECONDS = {
     "10s": 10,
     "1s": 1,
     "5s": 5,
-    # Retain legacy benchmark input compatibility; production training data is 10s.
     "1m": 60,
+    # Retain legacy benchmark input compatibility; production training data is 10s.
     "5m": 300,
     "10m": 600,
     "15m": 900,
@@ -41,7 +41,7 @@ def _benchmark_frame(table: pd.DataFrame) -> pd.DataFrame:
 
 def ewma_annualized_volatility(table: pd.DataFrame, horizon: str, decay: float = 0.96) -> np.ndarray:
     """Forecast annualized volatility from prior same-frequency returns."""
-    horizon_seconds = {"1m": 60, "5m": 300, "15m": 900, "30m": 1800, "1h": 3600}[horizon]
+    horizon_seconds = {"5m": 300, "15m": 900, "30m": 1800, "1h": 3600}[horizon]
     frame = _benchmark_frame(table)
     frame["timestamp"] = pd.to_datetime(frame["timestamp"], utc=True)
     frame["trade_log_return"] = pd.to_numeric(frame["trade_log_return"], errors="coerce").fillna(0.0)

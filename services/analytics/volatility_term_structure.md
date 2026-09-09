@@ -67,11 +67,11 @@ existing services. Each dependency has a narrow purpose:
 | Aggregator | `SUBSCRIBE market:aggregated_spot` | Low-latency wake-up only | None |
 | Ingestion | `stream:kalshi_tickers` | Bid, ask, ticker freshness, event and market identifiers | None |
 | Kalshi REST | Existing authenticated event/market endpoints | Authoritative market definition, strike, settlement/expiry time, and status | None |
-| Vertex AI Model Registry/GCS | Five configured model resource names and their artifact URIs | Load the approved horizon models and `metadata.json` | None |
+| Vertex AI Model Registry/GCS | Four configured model resource names and their artifact URIs | Load the approved horizon models and `metadata.json` | None |
 | Dashboard | Existing Redis connection; optional read of analytics-owned keys | Display model value and edge later | None |
 
 The v2_10s analytics path reads the versioned timestamped latest-feature
-envelope directly. This guarantees that all five local model calls use exactly
+envelope directly. This guarantees that all four local model calls use exactly
 one observation and lets analytics validate its age. The existing Feast live
 bridge and `feast-server:6566` continue unchanged for their current consumers;
 analytics does not need to put the Feast server on its critical path merely to
@@ -110,7 +110,7 @@ changing ingestion.
   contain expiry and settlement fields.
 - Loading configured approved model artifacts, ordering features according to
   each artifact's `metadata.json`, and running online inference.
-- Combining the five forecasts into one atomic internal term structure.
+- Combining the four forecasts into one atomic internal term structure.
 - Interpolating variance, computing model probabilities, and publishing the
   analytics-owned Redis outputs.
 - Reporting unavailable states without emitting a tradable-looking stale
@@ -126,11 +126,11 @@ The model-serving service owns inference and publishes no Redis data itself.
 Analytics retains a `ForecastProvider` boundary so the HTTP migration can be
 rolled back safely to the direct provider during parity testing.
 
-The production provider calls the private model-serving API for exactly five
+The production provider calls the private model-serving API for exactly four
 horizons:
 
 ```text
-1m, 5m, 15m, 30m, 1h
+5m, 15m, 30m, 1h
 ```
 
 Analytics reads one `market:features:v2_10s:BTCUSD:latest` envelope and forwards its
@@ -139,7 +139,7 @@ malformed responses, version mismatches, incomplete horizons, invalid values,
 or timestamp mismatches. Set `FORECAST_PROVIDER=direct` only for rollback or
 parity testing with the legacy Vertex/GCS artifact path.
 
-All five results must use the same latest-feature observation and complete
+All four results must use the same latest-feature observation and complete
 successfully. Partial results are not published. The assembled snapshot is
 written by analytics, not by the ML pipeline:
 
@@ -156,7 +156,6 @@ Example:
   "asset": "BTCUSD",
   "model_version": "v2_10s",
   "model_resources": {
-    "1m": "projects/.../models/...",
     "5m": "projects/.../models/...",
     "15m": "projects/.../models/...",
     "30m": "projects/.../models/...",
@@ -165,7 +164,6 @@ Example:
   "feature_asof_ts_ms": 1788593790000,
   "generated_ts_ms": 1788593790116,
   "annualized_volatility": {
-    "1m": 0.31,
     "5m": 0.34,
     "15m": 0.37,
     "30m": 0.41,
@@ -260,8 +258,7 @@ Selection is:
 
 | Remaining lifetime | Rule |
 |---|---|
-| `0 < tau < 1m` | Flat short-end variance: `sigma_tau = sigma_1m` |
-| `1m <= tau < 5m` | Interpolate `V1m` and `V5m` |
+| `0 < tau < 5m` | Flat short-end variance: `sigma_tau = sigma_5m` |
 | `5m <= tau < 15m` | Interpolate `V5m` and `V15m` |
 | `15m <= tau < 30m` | Interpolate `V15m` and `V30m` |
 | `30m <= tau < 60m` | Interpolate `V30m` and `V1h` |
@@ -420,7 +417,7 @@ reasons above make the model price unavailable.
 3. Add the Kalshi REST metadata cache and verify strike/expiry semantics
    against recorded active market responses.
 4. Add the live-feature adapter and configured Vertex/GCS artifact loader; test
-   feature ordering from `metadata.json` and all-or-nothing five-horizon
+   feature ordering from `metadata.json` and all-or-nothing four-horizon
    inference.
 5. Add the pricing loop, analytics-owned Redis publisher, health endpoints,
    and stale-state cleanup.
@@ -437,12 +434,12 @@ reasons above make the model price unavailable.
    change for analytics to run.
 2. Analytics can recover current spot and Kalshi ticker state after restart
    without relying on Pub/Sub delivery.
-3. Exactly the configured `1m`, `5m`, `15m`, `30m`, and `1h` artifacts produce
+3. Exactly the configured `5m`, `15m`, `30m`, and `1h` artifacts produce
    one atomic volatility snapshot from one feature observation.
 4. Annualization occurs in training only; pricing converts lifetime to year
    fraction once.
-5. Interpolation and pricing are deterministic at `0`, `1m`, `5m`, `15m`,
-   `30m`, and `60m` boundaries.
+5. Interpolation and pricing are deterministic at `0`, `5m`, `15m`, `30m`,
+   and `60m` boundaries.
 6. Missing, partial, stale, non-finite, or semantically ambiguous inputs cannot
    leave a live price key behind.
 7. Output fields have explicit units and readers can distinguish model value,

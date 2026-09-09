@@ -300,7 +300,7 @@ jobs:
             assert now - volatility["generated_ts_ms"] <= 60_000, "stale volatility snapshot"
             resources = volatility["model_resources"]
             assert resources["1h"] == os.environ["EXPECTED_MODEL_RESOURCE_1H"], "1h champion is not live"
-            for horizon in ("1m", "5m", "15m", "30m"):
+            for horizon in ("5m", "15m", "30m"):
                 assert resources[horizon] == f"ewma/v2_10s/{horizon}", f"wrong {horizon} provider"
             assert all(float(value) > 0 for value in volatility["annualized_volatility"].values()), "invalid volatility"
             keys = [key async for key in client.scan_iter(match="market:pricing:v1:KXBTCD-*")]
