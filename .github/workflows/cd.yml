@@ -285,7 +285,7 @@ jobs:
         EXPECTED_MODEL_RESOURCE_1H: ${{ vars.VOLATILITY_MODEL_1H }}
       run: |
         set -euo pipefail
-        kubectl exec deployment/analytics -- python -c '
+        kubectl exec deployment/analytics -- env "EXPECTED_MODEL_RESOURCE_1H=${EXPECTED_MODEL_RESOURCE_1H}" python -c '
         import asyncio, json, os, time, urllib.request
         import redis.asyncio as redis
         async def check():
