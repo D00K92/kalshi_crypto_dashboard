@@ -2,7 +2,13 @@ from datetime import datetime, timezone
 
 import pytest
 
-from jobs.parity import FeaturePoint, compare_points, load_feast_online_point, point_from_payload
+from jobs.parity import (
+    FeaturePoint,
+    compare_feast_online,
+    compare_points,
+    load_feast_online_point,
+    point_from_payload,
+)
 
 
 def payload(*, timestamp_ms=1_000, price=100.0, log_return=0.01, venue_count=2, version="v2_10s"):
@@ -72,11 +78,47 @@ def test_feast_online_point_uses_registered_v2_feature_view(monkeypatch):
             return Response()
 
     monkeypatch.setattr("jobs.parity.FeatureStore", Store)
-    point = load_feast_online_point(repo_path="/repo", timestamp_ms=1_000)
+    point = load_feast_online_point(repo_path="/repo")
 
-    assert point == FeaturePoint(1_000, 100.5, None, 3)
+    assert point == FeaturePoint(0, 100.5, None, 3)
     assert calls[1][1]["features"] == [
         "v2_10s_market_features:synthetic_price",
         "v2_10s_market_features:log_return",
         "v2_10s_market_features:venue_count",
     ]
+
+
+def test_feast_online_matches_recent_stream_point_without_inventing_timestamp():
+    online = {
+        1_000: FeaturePoint(1_000, 100.0, 0.01, 2),
+        2_000: FeaturePoint(2_000, 101.0, 0.02, 3),
+    }
+
+    mismatched, errors = compare_feast_online(
+        FeaturePoint(0, 100.0, 0.01, 2),
+        online,
+        max_lag_ms=1_000,
+        relative_tolerance=1e-9,
+        absolute_tolerance=1e-10,
+    )
+
+    assert (mismatched, errors) == (0, [])
+
+
+def test_feast_online_rejects_value_older_than_allowed_lag():
+    online = {
+        1_000: FeaturePoint(1_000, 100.0, 0.01, 2),
+        3_000: FeaturePoint(3_000, 101.0, 0.02, 3),
+    }
+
+    mismatched, errors = compare_feast_online(
+        FeaturePoint(0, 100.0, 0.01, 2),
+        online,
+        max_lag_ms=1_000,
+        relative_tolerance=1e-9,
+        absolute_tolerance=1e-10,
+    )
+
+    assert mismatched == 1
+    assert errors[0]["detail"] == "stale_feast_online"
+    assert errors[0]["lag_ms"] == 2_000
