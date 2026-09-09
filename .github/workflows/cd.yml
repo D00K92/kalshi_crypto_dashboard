@@ -102,18 +102,14 @@ jobs:
     - name: Stage approved 1h model bundle
       env:
         MODEL_RESOURCE: ${{ vars.VOLATILITY_MODEL_1H }}
+        MODEL_ARTIFACT_URI: ${{ vars.VOLATILITY_MODEL_1H_ARTIFACT_URI }}
       run: |
         set -euo pipefail
-        if [[ -z "${MODEL_RESOURCE}" ]]; then
-          echo "VOLATILITY_MODEL_1H must identify an immutable v2_10s Vertex model version." >&2
+        if [[ -z "${MODEL_RESOURCE}" || -z "${MODEL_ARTIFACT_URI}" ]]; then
+          echo "VOLATILITY_MODEL_1H and VOLATILITY_MODEL_1H_ARTIFACT_URI are required." >&2
           exit 1
         fi
-        artifact_uri="$(gcloud ai models describe "${MODEL_RESOURCE}" \
-          --region="${GCP_REGION}" --format='value(artifactUri)')"
-        if [[ -z "${artifact_uri}" ]]; then
-          echo "Vertex model has no GCS artifact URI: ${MODEL_RESOURCE}" >&2
-          exit 1
-        fi
+        artifact_uri="${MODEL_ARTIFACT_URI%/}"
         artifact_dir="$(mktemp -d)"
         gcloud storage cp "${artifact_uri}/model.joblib" "${artifact_dir}/model.joblib"
         gcloud storage cp "${artifact_uri}/metadata.json" "${artifact_dir}/metadata.json"
