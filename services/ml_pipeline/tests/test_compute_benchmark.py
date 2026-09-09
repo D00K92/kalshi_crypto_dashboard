@@ -13,6 +13,7 @@ def test_bootstrap_report_covers_pipeline_horizons_in_champion_format() -> None:
             "timestamp": pd.date_range("2026-09-01", periods=count, freq="10s", tz="UTC"),
             "frequency": ["10s"] * count,
             "log_return": np.linspace(-0.002, 0.002, count),
+            "venue_count": [6] * count,
             **{
                 f"target_rv_{horizon}": np.linspace(0.2, 0.3, count)
                 for horizon in ("1m", "5m", "15m", "30m", "1h")

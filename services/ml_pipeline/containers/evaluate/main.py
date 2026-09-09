@@ -21,7 +21,17 @@ def main() -> None:
     p.add_argument("--report", required=True)
     p.add_argument("--promote", required=True)
     a = p.parse_args()
-    result = evaluate_frame(pd.read_parquet(a.dataset), joblib.load(Path(a.model) / "model.joblib"), a.horizon)
+    model_root = Path(a.model)
+    metadata = json.loads((model_root / "metadata.json").read_text(encoding="utf-8"))
+    test_rows = int(metadata.get("rows", {}).get("test", 0))
+    if test_rows <= 0:
+        raise ValueError("model metadata has no held-out test rows")
+    result = evaluate_frame(
+        pd.read_parquet(a.dataset),
+        joblib.load(model_root / "model.joblib"),
+        a.horizon,
+        window_rows=test_rows,
+    )
     if a.champion_metrics.startswith("gs://"):
         with gcsfs.GCSFileSystem().open(a.champion_metrics, "r") as handle:
             champion = json.load(handle)

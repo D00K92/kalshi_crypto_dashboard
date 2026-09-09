@@ -27,17 +27,18 @@ def evaluate_frame(table: pd.DataFrame, model, horizon: str, window_rows: int = 
     target = f"target_rv_{horizon}"
     if target not in table:
         raise ValueError(f"missing target column: {target}")
-    usable = table.dropna(subset=[target]).sort_values("timestamp").reset_index(drop=True)
-    if window_rows:
-        usable = usable.tail(window_rows)
     columns = list(getattr(model, "feature_names_in_", []))
     if not columns:
         raise ValueError("model does not expose feature columns")
-    missing = sorted(set(columns) - set(usable.columns))
+    missing = sorted(set(columns) - set(table.columns))
     if missing:
         raise ValueError(f"evaluation data missing feature columns: {missing}")
-    prediction = np.maximum(model.predict(usable[columns]), 0.0)
+    usable = table.dropna(subset=[target, *columns]).sort_values("timestamp").reset_index(drop=True)
     benchmark = ewma_annualized_volatility(usable, horizon)
+    if window_rows:
+        usable = usable.tail(window_rows)
+        benchmark = benchmark[-window_rows:]
+    prediction = np.maximum(model.predict(usable[columns]), 0.0)
     return {"horizon": horizon, "rows": len(usable),
             "metrics": score_predictions(usable[target], prediction),
             "benchmark": {"name": "ewma", "decay": 0.96,

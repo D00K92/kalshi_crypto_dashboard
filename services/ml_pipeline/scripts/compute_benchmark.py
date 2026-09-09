@@ -34,7 +34,7 @@ def compute_benchmark(table, decay: float = 0.96) -> dict:
     }
     for horizon in HORIZONS:
         target = f"target_rv_{horizon}"
-        usable = table.dropna(subset=[target]).sort_values("timestamp").reset_index(drop=True)
+        usable = table.dropna(subset=[target, "log_return", "venue_count"]).sort_values("timestamp").reset_index(drop=True)
         test_start = int(len(usable) * 0.85)
         if len(usable) <= test_start:
             raise ValueError(f"not enough rows for benchmark holdout: {horizon}")
