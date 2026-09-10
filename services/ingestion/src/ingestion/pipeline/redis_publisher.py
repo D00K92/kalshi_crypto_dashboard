@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 
 import redis.asyncio as redis
 from redis.exceptions import ConnectionError, TimeoutError
@@ -28,27 +29,40 @@ class RedisPublisher:
         await self._client.ping()
 
     async def publish(self, event: MarketEvent) -> None:
-        payload = event.to_json()
-        await self._client.xadd(
-            event.stream_name,
-            {
-                "event_id": event.event_id,
-                "event_type": event.event_type,
-                "venue": event.venue,
-                "instrument": event.instrument,
-                "payload": payload,
-            },
-            maxlen=self._stream_maxlen,
-            approximate=True,
-        )
+        await self.publish_many((event,))
+
+    async def publish_many(self, events: Sequence[MarketEvent]) -> None:
+        """Append a batch atomically at the transport layer, then fan out Pub/Sub."""
+        if not events:
+            return
+        pipe = self._client.pipeline(transaction=False)
+        payloads: list[tuple[MarketEvent, bytes]] = []
+        for event in events:
+            payload = event.to_json()
+            payloads.append((event, payload))
+            pipe.xadd(
+                event.stream_name,
+                {
+                    "event_id": event.event_id,
+                    "event_type": event.event_type,
+                    "venue": event.venue,
+                    "instrument": event.instrument,
+                    "payload": payload,
+                },
+                maxlen=self._stream_maxlen,
+                approximate=True,
+            )
+        for event, payload in payloads:
+            pipe.publish(event.pubsub_channel, payload)
         try:
-            await self._client.publish(event.pubsub_channel, payload)
+            await pipe.execute()
         except (ConnectionError, TimeoutError):
             LOGGER.warning(
-                "pubsub_publish_failed",
-                extra={"event_id": event.event_id, "channel": event.pubsub_channel},
+                "redis_publish_batch_failed",
+                extra={"event_count": len(events)},
                 exc_info=True,
             )
+            raise
 
     async def close(self) -> None:
         await self._client.aclose()

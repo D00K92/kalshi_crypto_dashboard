@@ -8,13 +8,21 @@ class RecordingRedis:
     def __init__(self) -> None:
         self.calls: list[tuple[str, object]] = []
 
-    async def xadd(self, stream: str, fields: dict[str, str], **kwargs: object) -> str:
+    def xadd(self, stream: str, fields: dict[str, str], **kwargs: object) -> "RecordingRedis":
         self.calls.append(("xadd", stream))
-        return "1-0"
+        return self
 
-    async def publish(self, channel: str, payload: bytes) -> int:
+    def pipeline(self, **kwargs: object) -> "RecordingRedis":
+        self.calls.append(("pipeline", kwargs))
+        return self
+
+    async def execute(self) -> list[object]:
+        self.calls.append(("execute", None))
+        return []
+
+    def publish(self, channel: str, payload: bytes) -> "RecordingRedis":
         self.calls.append(("publish", channel))
-        return 1
+        return self
 
 
 async def test_stream_append_precedes_best_effort_pubsub() -> None:
@@ -37,6 +45,8 @@ async def test_stream_append_precedes_best_effort_pubsub() -> None:
     await publisher.publish(event)
 
     assert fake.calls == [
+        ("pipeline", {"transaction": False}),
         ("xadd", "stream:ticks"),
         ("publish", "pub:btc_ticks"),
+        ("execute", None),
     ]

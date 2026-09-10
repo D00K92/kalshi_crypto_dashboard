@@ -31,6 +31,9 @@ class IngestionService:
         self._pipeline = EventPipeline(
             self._publisher,
             maxsize=settings.queue_maxsize,
+            batch_size=settings.publish_batch_size,
+            flush_ms=settings.publish_flush_ms,
+            delay_warning_ms=settings.queue_delay_warning_ms,
         )
         self._feed = BinanceFeed(settings.binance_ws_url, self._pipeline)
         self._gemini = GeminiFeed(settings.gemini_ws_url, settings.gemini_symbol, self._pipeline)
