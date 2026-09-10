@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import math
 from typing import Any
 import plotly.graph_objects as go
 
 VENUE_COLORS = {"binance": "#f0b90b", "coinbase": "#1652f0", "bybit": "#f5a623"}
 PAPER = "#111827"
 GRID = "#243244"
+VOLATILITY_HORIZONS = (("5m", 5), ("15m", 15), ("30m", 30), ("1h", 60))
 
 
 def _figure(**kwargs: Any) -> go.Figure:
@@ -46,6 +48,44 @@ def volume_figure(rows: list[dict[str, Any]]) -> go.Figure:
     fig = _figure()
     fig.add_trace(go.Bar(x=x, y=volumes, name="Volume", marker_color=colors, hovertemplate="%{x|%H:%M:%S} · %{y:.6f} BTC<extra></extra>"))
     fig.update_layout(xaxis=dict(type="date", tickformat="%H:%M:%S", showticklabels=True), yaxis_title="BTC volume", height=120, showlegend=False, uirevision="btc-volume")
+    return fig
+
+
+def volatility_cone_figure(payload: dict[str, Any]) -> go.Figure:
+    """Plot the current four-horizon annualized volatility term structure."""
+    estimates = payload.get("annualized_volatility", {}) if isinstance(payload, dict) else {}
+    points: list[tuple[int, float, str]] = []
+    for horizon, minutes in VOLATILITY_HORIZONS:
+        try:
+            value = float(estimates[horizon])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if math.isfinite(value) and value >= 0:
+            points.append((minutes, value * 100, horizon))
+
+    fig = _figure()
+    fig.add_trace(go.Scatter(
+        x=[point[0] for point in points],
+        y=[point[1] for point in points],
+        customdata=[point[2] for point in points],
+        mode="lines+markers",
+        line=dict(color="#7dd3fc", width=2),
+        marker=dict(color="#7dd3fc", size=7),
+        fill="tozeroy",
+        fillcolor="rgba(125,211,252,.10)",
+        name="Forecast volatility",
+        hovertemplate="%{customdata} · %{y:.2f}% annualized<extra></extra>",
+    ))
+    fig.update_layout(
+        title=dict(text="Volatility cone", x=0, xanchor="left", font=dict(size=12, color="#cbd5e1")),
+        margin=dict(l=42, r=12, t=30, b=28),
+        xaxis=dict(tickmode="array", tickvals=[5, 15, 30, 60], ticktext=["5m", "15m", "30m", "1h"]),
+        xaxis_title="Forecast horizon",
+        yaxis_title="Annualized vol (%)",
+        height=170,
+        showlegend=False,
+        uirevision="btc-volatility-cone",
+    )
     return fig
 
 

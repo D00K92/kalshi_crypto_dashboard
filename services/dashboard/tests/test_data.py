@@ -67,6 +67,23 @@ def test_fast_market_reader_fetches_only_spot():
     assert client.keys == ("market:spot:BTCUSDT:latest",)
 
 
+def test_volatility_reader_fetches_four_horizon_snapshot():
+    class VolatilityRedis(FakeRedis):
+        def __init__(self):
+            self.key = None
+
+        def get(self, key):
+            self.key = key
+            return b'{"generated_ts_ms":123,"annualized_volatility":{"5m":0.21,"15m":0.22,"30m":0.23,"1h":0.24}}'
+
+    client = VolatilityRedis()
+    data = RedisReader(client).read_volatility_data()
+
+    assert client.key == "market:volatility:v2_10s:BTCUSD:latest"
+    assert data["annualized_volatility"] == {"5m": 0.21, "15m": 0.22, "30m": 0.23, "1h": 0.24}
+    assert data["redis_ok"] is True
+
+
 def test_reader_reads_kalshi_contract_streams():
     received_ts_ms = int(time.time() * 1000)
 

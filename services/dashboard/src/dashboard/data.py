@@ -120,6 +120,21 @@ class RedisReader:
             return {"candles": [], "redis_ok": False, "redis_error": type(exc).__name__}
         return {"candles": decode(raw, []), "redis_ok": True, "redis_error": None}
 
+    def read_volatility_data(self) -> dict[str, Any]:
+        """Read the analytics-owned four-horizon volatility snapshot."""
+        try:
+            raw = self.client.get("market:volatility:v2_10s:BTCUSD:latest")
+        except redis.RedisError as exc:
+            return {"annualized_volatility": {}, "redis_ok": False, "redis_error": type(exc).__name__}
+        payload = decode(raw, {})
+        if not isinstance(payload, dict):
+            payload = {}
+        volatility = payload.get("annualized_volatility")
+        payload["annualized_volatility"] = volatility if isinstance(volatility, dict) else {}
+        payload["redis_ok"] = True
+        payload["redis_error"] = None
+        return payload
+
     def read_kalshi_data(self, spot: Any = None) -> dict[str, Any]:
         """Read and window Kalshi data before sending it to the browser."""
         try:

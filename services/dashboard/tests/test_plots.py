@@ -1,9 +1,10 @@
-from dashboard.plots import candle_figure, cvd_figure, orderbook_figure, volume_figure
+from dashboard.plots import candle_figure, cvd_figure, orderbook_figure, volatility_cone_figure, volume_figure
 
 
 def test_market_figures_render_empty_state():
     assert len(candle_figure([]).data) == 1
     assert len(volume_figure([]).data) == 1
+    assert len(volatility_cone_figure({}).data) == 1
     assert len(cvd_figure([]).data) == 1
     assert len(orderbook_figure({"bids": [], "asks": []}).data) == 3
 
@@ -26,6 +27,18 @@ def test_candle_figure_places_synthetic_price_inside_chart():
     figure = candle_figure([{"bucket_start_ts_ms": 0, "open": "1", "high": "2", "low": "0", "close": "1", "volume": "3"}], "1.234")
     assert figure.layout.annotations[0].text == "Synthetic 1.23 USD"
     assert figure.layout.shapes[0].y0 == 1.234
+
+
+def test_volatility_cone_orders_and_formats_four_forecast_horizons():
+    figure = volatility_cone_figure({
+        "annualized_volatility": {"1h": 0.24, "5m": 0.21, "30m": 0.23, "15m": 0.22},
+    })
+
+    assert list(figure.data[0].x) == [5, 15, 30, 60]
+    assert list(figure.data[0].y) == [21, 22, 23, 24]
+    assert list(figure.data[0].customdata) == ["5m", "15m", "30m", "1h"]
+    assert figure.layout.title.text == "Volatility cone"
+    assert figure.layout.yaxis.title.text == "Annualized vol (%)"
 
 
 def test_candle_figure_replaces_current_bar_with_forming_candle():
