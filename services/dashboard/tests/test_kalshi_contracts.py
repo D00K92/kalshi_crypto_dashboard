@@ -116,6 +116,24 @@ def test_contract_age_uses_latest_orderbook_activity() -> None:
     assert rows[0]["age"] == "0s"
 
 
+def test_contract_age_resets_only_for_a_distinct_trade_change() -> None:
+    rows = contract_rows(
+        [{
+            "event_ticker": "KXBTCD-NEW", "market_ticker": "KXBTCD-NEW-T70199.99",
+            "yes_bid_dollars": "0.41", "yes_ask_dollars": "0.42", "received_ts_ms": 1_700_000_004_900,
+        }],
+        [
+            {"event_ticker": "KXBTCD-NEW", "market_ticker": "KXBTCD-NEW-T70199.99", "yes_price_dollars": "0.42", "count": "1", "taker_side": "yes", "received_ts_ms": 1_700_000_004_900},
+            {"event_ticker": "KXBTCD-NEW", "market_ticker": "KXBTCD-NEW-T70199.99", "yes_price_dollars": "0.42", "count": "1", "taker_side": "yes", "received_ts_ms": 1_700_000_004_000},
+            {"event_ticker": "KXBTCD-NEW", "market_ticker": "KXBTCD-NEW-T70199.99", "yes_price_dollars": "0.41", "count": "1", "taker_side": "yes", "received_ts_ms": 1_700_000_003_000},
+        ],
+        orderbooks=[{"event_ticker": "KXBTCD-NEW", "market_ticker": "KXBTCD-NEW-T70199.99", "received_ts_ms": 1_700_000_004_900}],
+        now_ms=1_700_000_005_000,
+    )
+
+    assert rows[0]["age"] == "1s"
+
+
 def test_contract_table_builds_ag_grid():
     grid = contract_table([{"contract": "BTC > 70,199.99"}])
 

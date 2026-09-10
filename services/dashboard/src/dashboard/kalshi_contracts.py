@@ -67,6 +67,15 @@ def _contract_label(market_ticker: str) -> str:
     return f"BTC > {strike:,.2f}"
 
 
+def _trade_fingerprint(payload: dict[str, Any]) -> tuple[float | None, float | None, str] | None:
+    fingerprint = (
+        _float(payload.get("yes_price_dollars")),
+        _float(payload.get("count")),
+        str(payload.get("taker_side") or "").strip().lower(),
+    )
+    return fingerprint if any(fingerprint) else None
+
+
 def _active_event(payloads: list[dict[str, Any]]) -> str | None:
     candidates = [
         payload for payload in payloads
@@ -95,7 +104,7 @@ def contract_rows(
     orderbooks = [payload for payload in (orderbooks or []) if fresh(payload)]
     event_ticker = _active_event(tickers + trades + orderbooks)
     latest_by_market: dict[str, dict[str, Any]] = {}
-    last_trade_by_market: dict[str, dict[str, Any]] = {}
+    trades_by_market: dict[str, list[dict[str, Any]]] = {}
     latest_book_by_market: dict[str, dict[str, Any]] = {}
 
     for payload in tickers:
@@ -112,7 +121,21 @@ def contract_rows(
             continue
         if event_ticker and payload.get("event_ticker") != event_ticker:
             continue
-        last_trade_by_market.setdefault(market, payload)
+        if _trade_fingerprint(payload) is not None:
+            trades_by_market.setdefault(market, []).append(payload)
+
+    last_trade_by_market: dict[str, dict[str, Any]] = {}
+    for market, market_trades in trades_by_market.items():
+        # Redis delivers this window newest-first. Repeated snapshots must not
+        # reset AGE; use the first timestamp at which the current displayed
+        # trade/quantity/side combination appeared.
+        current = market_trades[0]
+        fingerprint = _trade_fingerprint(current)
+        for prior in market_trades[1:]:
+            if _trade_fingerprint(prior) != fingerprint:
+                break
+            current = prior
+        last_trade_by_market[market] = current
 
     for payload in orderbooks:
         market = payload.get("market_ticker")
@@ -134,8 +157,10 @@ def contract_rows(
         ticker_received = _float(ticker.get("received_ts_ms"))
         trade_received = _float(trade.get("received_ts_ms"))
         book_received = _float(latest_book_by_market.get(market, {}).get("received_ts_ms"))
-        last_activity = max(
-            (timestamp for timestamp in (ticker_received, trade_received, book_received) if timestamp is not None),
+        # Once a market has traded, AGE is elapsed time since the latest
+        # distinct trade. Quote and book refreshes must not conceal it.
+        last_activity = trade_received if trade else max(
+            (timestamp for timestamp in (ticker_received, book_received) if timestamp is not None),
             default=None,
         )
         rows.append({
