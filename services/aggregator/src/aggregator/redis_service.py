@@ -76,13 +76,20 @@ class AggregatorService:
         acknowledged = []
         pipeline = self.client.pipeline(transaction=True)
         has_writes = False
+        stale_count = 0
+        oldest_age_ms = 0
         for redis_id, fields in entries:
             try:
+                published_ts_ms = int(redis_id.split(b"-", 1)[0] if isinstance(redis_id, bytes) else str(redis_id).split("-", 1)[0])
+                if self._is_stale_entry(published_ts_ms):
+                    stale_count += 1
+                    oldest_age_ms = max(oldest_age_ms, self._clock_ms() - published_ts_ms)
+                    acknowledged.append(redis_id)
+                    continue
                 payload = fields.get(b"payload")
                 if payload is None:
                     raise ValueError("missing payload")
                 event = orjson.loads(payload)
-                published_ts_ms = int(redis_id.split(b"-", 1)[0] if isinstance(redis_id, bytes) else str(redis_id).split("-", 1)[0])
                 if replay:
                     handled = await handler(event, published_ts_ms, pipeline, replay=True)
                 else:
@@ -97,6 +104,13 @@ class AggregatorService:
                     str(exc),
                 )
             acknowledged.append(redis_id)
+        if stale_count:
+            LOGGER.warning(
+                "stale_stream_entries_skipped stream=%s count=%s oldest_age_ms=%s",
+                stream,
+                stale_count,
+                oldest_age_ms,
+            )
         if stream == self.settings.trade_stream and has_writes:
             # Checkpoint the open event-time buckets in the same Redis
             # transaction as their outputs and acknowledgement. A restart can
@@ -124,7 +138,7 @@ class AggregatorService:
     async def _handle_book(self, event: dict, published_ts_ms: int | None = None, pipeline=None, *, replay: bool = False) -> bool:
         if event.get("event_type") != "book_snapshot":
             return False
-        if replay and self._is_stale_replay(published_ts_ms):
+        if replay and self._is_stale_entry(published_ts_ms):
             return False
         if self.state.apply_book(event, published_ts_ms=published_ts_ms) is None:
             return False
@@ -141,7 +155,7 @@ class AggregatorService:
     async def _handle_trade(self, event: dict, published_ts_ms: int | None = None, pipeline=None, *, replay: bool = False) -> bool:
         if event.get("event_type") != "trade":
             return False
-        if replay and self._is_stale_replay(published_ts_ms):
+        if replay and self._is_stale_entry(published_ts_ms):
             return False
         event_ts_ms = int(event.get("exchange_ts_ms") or event.get("received_ts_ms") or published_ts_ms or time.time() * 1000)
         event_bucket = (event_ts_ms // CANDLE_INTERVAL_MS) * CANDLE_INTERVAL_MS
@@ -206,7 +220,10 @@ class AggregatorService:
             await pipe.execute()
         return True
 
-    def _is_stale_replay(self, published_ts_ms: int | None) -> bool:
+    def _is_stale_entry(self, published_ts_ms: int | None) -> bool:
+        # Live aggregation values recency over completeness. Raw streams and
+        # archival consumers retain history; this consumer must never spend
+        # minutes replaying data that downstream feature freshness rejects.
         max_age_ms = getattr(self.settings, "replay_max_age_ms", None)
         if published_ts_ms is None or max_age_ms is None:
             return False

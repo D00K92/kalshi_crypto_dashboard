@@ -246,7 +246,7 @@ async def test_stale_replayed_trade_is_acked_without_overwriting_live_state() ->
     ]
 
 
-async def test_delayed_live_trade_is_not_mistaken_for_a_stale_replay() -> None:
+async def test_stale_unread_trade_is_acked_without_blocking_live_processing() -> None:
     service = object.__new__(AggregatorService)
     service.client = FakeRedis()
     service.state = MarketAggregator()
@@ -280,7 +280,10 @@ async def test_delayed_live_trade_is_not_mistaken_for_a_stale_replay() -> None:
         service._handle_trade,
     )
 
-    assert 90_000 in service.state.trade_buckets
+    assert service.state.trade_buckets == {}
+    assert service.client.pipelines[0].operations == [
+        ("xack", ("stream:ticks", "group", b"90000-0"))
+    ]
 
 
 async def test_recent_redis_trade_still_updates_live_state() -> None:

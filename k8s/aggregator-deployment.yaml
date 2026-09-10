@@ -28,13 +28,15 @@ spec:
         - name: AGGREGATOR_OUTPUT_PREFIX
           value: "market"
         - name: BOOK_CONSUMER_GROUP
-          value: "aggregator_books_v4"
+          value: "aggregator_books_v5"
         - name: TRADE_CONSUMER_GROUP
-          value: "aggregator_trades_v4"
+          value: "aggregator_trades_v5"
         - name: AGGREGATOR_GROUP_START_ID
           value: "$"
         - name: AGGREGATOR_READ_COUNT
-          value: "50"
+          value: "500"
+        - name: AGGREGATOR_REPLAY_MAX_AGE_MS
+          value: "5000"
         - name: AGGREGATOR_ALLOWED_LATENESS_MS
           value: "5000"
         - name: AGGREGATOR_PENDING_IDLE_MS
