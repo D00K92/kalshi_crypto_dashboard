@@ -1,6 +1,8 @@
 import pytest
 
 from kalshi_crypto_analytics.core import (
+    black_digital_probability,
+    calibrate_kalshi_iv,
     gaussian_probability,
     interpolate_volatility,
     quote_edges,
@@ -65,3 +67,38 @@ def test_quote_edges():
     assert result["market_mid_probability"] == pytest.approx(.45)
     assert result["buy_yes_edge_probability"] == pytest.approx(.1)
     assert result["sell_yes_edge_probability"] == pytest.approx(-.2)
+
+
+def test_kalshi_iv_fit_recovers_one_volatility_from_near_atm_mids():
+    spot, tau, expected = 100.0, 1_800.0, .42
+    strikes = [99.5, 99.7, 99.9, 100, 100.1, 100.3, 100.5]
+    quotes = []
+    for strike in strikes:
+        midpoint = black_digital_probability(spot, strike, expected, tau)
+        quotes.append((strike, midpoint - .002, midpoint + .002, 10))
+
+    actual, selected = calibrate_kalshi_iv(spot, tau, quotes)
+
+    assert actual == pytest.approx(expected, abs=.002)
+    assert len(selected) == 7
+
+
+def test_kalshi_iv_fit_requires_five_valid_quotes():
+    with pytest.raises(PricingUnavailable) as exc:
+        calibrate_kalshi_iv(100, 600, [(100, .4, .5, 0)] * 4)
+    assert exc.value.reason == UnavailableReason.INVALID_QUOTE
+
+
+def test_kalshi_iv_weights_selected_contracts_by_open_interest_plus_one():
+    spot, tau, sigma = 100.0, 600.0, .3
+    quotes = []
+    for strike, open_interest in zip((99.9, 99.95, 100, 100.05, 100.1), (0, 1, 4, 9, 86), strict=True):
+        midpoint = black_digital_probability(spot, strike, sigma, tau)
+        quotes.append((strike, midpoint - .002, midpoint + .002, open_interest))
+
+    _, selected = calibrate_kalshi_iv(spot, tau, quotes)
+
+    weights = {strike: weight for strike, _, weight in selected}
+    assert sum(weights.values()) == pytest.approx(1)
+    assert weights[100.1] == pytest.approx(87 / 105)
+    assert weights[99.9] == pytest.approx(1 / 105)

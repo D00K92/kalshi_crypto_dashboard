@@ -47,6 +47,7 @@ class CountingForecast(Forecast):
 class Publisher:
     def __init__(self): self.prices, self.unavailable_reasons, self.active = [], [], None
     async def publish_volatility(self, snapshot): self.vol = snapshot
+    async def publish_kalshi_iv(self, payload): self.kalshi_iv = payload
     async def publish_price(self, ticker, payload): self.prices.append(payload)
     async def unavailable(self, ticker, reason, now): self.unavailable_reasons.append((ticker, reason))
     async def expire_inactive(self, active, now): self.active = active
@@ -110,6 +111,22 @@ async def test_rollover_removes_old_and_prices_new_event():
     assert out.active == {new.market_ticker}
     assert (old.market_ticker, "missing_market_metadata") in out.unavailable_reasons
     assert data.acked == ["2-0"]
+
+
+async def test_kalshi_iv_uses_seven_near_atm_contract_mids():
+    items = [ticker(f"KXBTCD-E-T{strike}") for strike in range(98, 105)]
+    items = [Ticker(item.market_ticker, item.event_ticker, item.series_ticker, ".45", ".55", item.exchange_ts_ms) for item in items]
+    metadata = {
+        item.market_ticker: MarketMetadata(item.market_ticker, item.event_ticker, float(item.market_ticker.rsplit("T", 1)[1]), NOW + 300_000, "open")
+        for item in items
+    }
+    out = Publisher()
+    service = AnalyticsService(Data(bootstrap=items), Meta(metadata), Forecast(), out, clock_ms=lambda: NOW)
+
+    await service.start(); await service.cycle()
+
+    assert out.kalshi_iv["contracts_used"] == 7
+    assert out.kalshi_iv["event_ticker"] == "KXBTCD-E"
 
 
 async def test_future_contract_is_retained_until_it_enters_pricing_window():

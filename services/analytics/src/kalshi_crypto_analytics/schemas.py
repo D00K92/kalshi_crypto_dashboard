@@ -52,6 +52,7 @@ class Ticker:
     yes_bid_dollars: Any
     yes_ask_dollars: Any
     exchange_ts_ms: int
+    open_interest: Any = None
 
 
 @dataclass(frozen=True, slots=True)

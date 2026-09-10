@@ -138,6 +138,7 @@ class RedisReader:
         """Read the analytics-owned four-horizon volatility snapshot."""
         try:
             raw = self.client.get("market:volatility:v2_10s:BTCUSD:latest")
+            kalshi_iv_raw = self.client.get("market:implied_volatility:v1:BTCUSD:latest")
         except redis.RedisError as exc:
             return {"annualized_volatility": {}, "redis_ok": False, "redis_error": type(exc).__name__}
         payload = decode(raw, {})
@@ -145,6 +146,8 @@ class RedisReader:
             payload = {}
         volatility = payload.get("annualized_volatility")
         payload["annualized_volatility"] = volatility if isinstance(volatility, dict) else {}
+        kalshi_iv = decode(kalshi_iv_raw, {})
+        payload["kalshi_implied_volatility"] = kalshi_iv if isinstance(kalshi_iv, dict) else {}
         payload["redis_ok"] = True
         payload["redis_error"] = None
         return payload

@@ -70,16 +70,21 @@ def test_fast_market_reader_fetches_only_spot():
 def test_volatility_reader_fetches_four_horizon_snapshot():
     class VolatilityRedis(FakeRedis):
         def __init__(self):
-            self.key = None
+            self.keys = []
 
         def get(self, key):
-            self.key = key
-            return b'{"generated_ts_ms":123,"annualized_volatility":{"5m":0.21,"15m":0.22,"30m":0.23,"1h":0.24}}'
+            self.keys.append(key)
+            if key == "market:volatility:v2_10s:BTCUSD:latest":
+                return b'{"generated_ts_ms":123,"annualized_volatility":{"5m":0.21,"15m":0.22,"30m":0.23,"1h":0.24}}'
+            return None
 
     client = VolatilityRedis()
     data = RedisReader(client).read_volatility_data()
 
-    assert client.key == "market:volatility:v2_10s:BTCUSD:latest"
+    assert client.keys == [
+        "market:volatility:v2_10s:BTCUSD:latest",
+        "market:implied_volatility:v1:BTCUSD:latest",
+    ]
     assert data["annualized_volatility"] == {"5m": 0.21, "15m": 0.22, "30m": 0.23, "1h": 0.24}
     assert data["redis_ok"] is True
 

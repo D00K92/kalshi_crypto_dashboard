@@ -9,6 +9,8 @@ from dataclasses import replace
 from .core import (
     DISTRIBUTION_MODEL,
     INTERPOLATION_METHOD,
+    KALSHI_IV_METHOD,
+    calibrate_kalshi_iv,
     gaussian_probability,
     interpolate_volatility,
     quote_edges,
@@ -87,6 +89,7 @@ class AnalyticsService:
             LOGGER.exception("kalshi_metadata_refresh_failed")
             metadata = {}
         known_events = {item.event_ticker for item in metadata.values()}
+        await self._publish_kalshi_iv(metadata, spot, now_ms)
         active: set[str] = set()
         for ticker in list(self.tickers.values()):
             market_metadata = metadata.get(ticker.market_ticker)
@@ -106,6 +109,38 @@ class AnalyticsService:
         if entries:
             await self.market_data.acknowledge([entry_id for entry_id, _ in entries])
         self.ready = bool(active) and self.forecasts.ready and await self.publisher.ping()
+
+    async def _publish_kalshi_iv(self, metadata: dict[str, MarketMetadata], spot: Spot, now_ms: int) -> None:
+        candidates: list[tuple[Ticker, MarketMetadata]] = []
+        for ticker in self.tickers.values():
+            market = metadata.get(ticker.market_ticker)
+            if market is None or market.event_ticker != ticker.event_ticker or market.status.lower() not in OPEN_STATUSES:
+                continue
+            tau_seconds = (market.expiry_ts_ms - now_ms) / 1000
+            if ticker.series_ticker == "KXBTCD" and 0 < tau_seconds <= 3600:
+                candidates.append((ticker, market))
+        if not candidates:
+            await self.publisher.publish_kalshi_iv(None)
+            return
+        # A single event has a common expiry. Prefer its freshest/nearest active set.
+        event_ticker = max(candidates, key=lambda item: item[0].exchange_ts_ms)[0].event_ticker
+        event = [(ticker, market) for ticker, market in candidates if ticker.event_ticker == event_ticker]
+        tau_seconds = (event[0][1].expiry_ts_ms - now_ms) / 1000
+        try:
+            iv, selected = calibrate_kalshi_iv(
+                spot.price, tau_seconds,
+                [(market.strike, ticker.yes_bid_dollars, ticker.yes_ask_dollars, ticker.open_interest) for ticker, market in event],
+            )
+        except PricingUnavailable:
+            await self.publisher.publish_kalshi_iv(None)
+            return
+        await self.publisher.publish_kalshi_iv({
+            "schema_version": 1, "event_type": "kalshi_implied_volatility", "status": "available",
+            "asset": "BTCUSD", "event_ticker": event_ticker, "annualized_implied_volatility": iv,
+            "time_to_expiry_minutes": tau_seconds / 60, "contracts_used": len(selected),
+            "strikes": [strike for strike, _, _ in selected], "method": KALSHI_IV_METHOD,
+            "spot_price": spot.price, "generated_ts_ms": now_ms,
+        })
 
     async def _price(self, ticker: Ticker, metadata: MarketMetadata | None, spot: Spot,
                      volatility: VolatilitySnapshot, now_ms: int) -> PricingResult | UnavailableReason:

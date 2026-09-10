@@ -76,14 +76,25 @@ def volatility_cone_figure(payload: dict[str, Any]) -> go.Figure:
         name="Forecast volatility",
         hovertemplate="%{customdata} · %{y:.2f}% annualized<extra></extra>",
     ))
+    kalshi_iv = payload.get("kalshi_implied_volatility", {}) if isinstance(payload, dict) else {}
+    try:
+        iv = float(kalshi_iv["annualized_implied_volatility"])
+    except (KeyError, TypeError, ValueError):
+        iv = None
+    if iv is not None and math.isfinite(iv) and iv > 0:
+        fig.add_trace(go.Scatter(
+            x=[5, 60], y=[iv * 100, iv * 100], mode="lines", name="Kalshi implied IV",
+            line=dict(color="#facc15", width=2, dash="dot"),
+            hovertemplate="Kalshi IV · %{y:.2f}%<extra></extra>",
+        ))
     fig.update_layout(
         title=dict(text="Volatility cone", x=0, xanchor="left", font=dict(size=12, color="#cbd5e1")),
         margin=dict(l=42, r=12, t=30, b=28),
         xaxis=dict(tickmode="array", tickvals=[5, 15, 30, 60], ticktext=["5m", "15m", "30m", "1h"]),
         xaxis_title="Forecast horizon",
-        yaxis_title="Annualized vol (%)",
+        yaxis_title="vol (%,annum)",
         height=170,
-        showlegend=False,
+        showlegend=len(fig.data) > 1,
         uirevision="btc-volatility-cone",
     )
     return fig

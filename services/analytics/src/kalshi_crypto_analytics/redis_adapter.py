@@ -36,6 +36,7 @@ def _ticker(fields: dict[Any, Any]) -> Ticker:
         market_ticker=str(payload["market_ticker"]), event_ticker=str(payload["event_ticker"]),
         series_ticker=str(payload["series_ticker"]), yes_bid_dollars=payload.get("yes_bid_dollars"),
         yes_ask_dollars=payload.get("yes_ask_dollars"), exchange_ts_ms=int(payload["exchange_ts_ms"]),
+        open_interest=payload.get("open_interest"),
     )
 
 
@@ -115,6 +116,13 @@ class RedisPricingPublisher:
 
     async def publish_volatility(self, snapshot: VolatilitySnapshot) -> None:
         await self.client.set("market:volatility:v2_10s:BTCUSD:latest", json.dumps(snapshot.payload(), separators=(",", ":")), ex=self.ttl_seconds)
+
+    async def publish_kalshi_iv(self, payload: dict[str, Any] | None) -> None:
+        key = "market:implied_volatility:v1:BTCUSD:latest"
+        if payload is None:
+            await self.client.delete(key)
+            return
+        await self.client.set(key, json.dumps(payload, separators=(",", ":"), allow_nan=False), ex=self.ttl_seconds)
 
     async def publish_price(self, market_ticker: str, payload: dict[str, Any]) -> None:
         encoded = json.dumps(payload, separators=(",", ":"), allow_nan=False)
