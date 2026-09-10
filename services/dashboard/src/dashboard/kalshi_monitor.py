@@ -63,6 +63,19 @@ def kalshi_market_figure(rows: list[dict[str, Any]], spot: float | None = None) 
             customdata=hover,
             hovertemplate="%{customdata}<br>Strike %{x:,.2f}<br>Bid %{y:.1f}<extra></extra>",
         ))
+        model = [
+            probability * 100 if (probability := _float(row.get("model_probability"))) is not None else None
+            for row in chart_rows
+        ]
+        fig.add_trace(go.Scatter(
+            x=strikes,
+            y=model,
+            mode="lines",
+            line=dict(color="#facc15", width=2),
+            name="Model",
+            customdata=hover,
+            hovertemplate="%{customdata}<br>Strike %{x:,.2f}<br>Model %{y:.1f}<extra></extra>",
+        ))
         fig.add_trace(go.Scatter(
             x=strikes,
             y=last,

@@ -91,12 +91,41 @@ def test_contract_age_uses_latest_trade_activity() -> None:
     assert rows[0]["age"] == "1s"
 
 
+def test_contract_age_uses_latest_orderbook_activity() -> None:
+    rows = contract_rows(
+        [
+            {
+                "event_ticker": "KXBTCD-NEW",
+                "market_ticker": "KXBTCD-NEW-T70199.99",
+                "yes_bid_dollars": "0.41",
+                "yes_ask_dollars": "0.42",
+                "received_ts_ms": 1700000000000,
+            }
+        ],
+        [],
+        orderbooks=[
+            {
+                "event_ticker": "KXBTCD-NEW",
+                "market_ticker": "KXBTCD-NEW-T70199.99",
+                "received_ts_ms": 1700000004500,
+            }
+        ],
+        now_ms=1700000005000,
+    )
+
+    assert rows[0]["age"] == "0s"
+
+
 def test_contract_table_builds_ag_grid():
     grid = contract_table([{"contract": "BTC > 70,199.99"}])
 
     assert grid.id == "kalshi-contract-grid"
     assert grid.rowData == [{"contract": "BTC > 70,199.99"}]
     assert grid.columnDefs[0]["field"] == "contract"
+    fields = [column["field"] for column in grid.columnDefs]
+    assert "edge_mid" in fields
+    assert "buy_yes_edge" not in fields
+    assert "sell_yes_edge" not in fields
 
 
 def test_select_contract_window_keeps_six_strikes_each_side_of_atm():

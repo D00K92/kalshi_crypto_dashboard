@@ -10,6 +10,7 @@ ROWS = [
         "bid_value": 91.0,
         "ask_value": 92.0,
         "last_value": 91.0,
+        "model_probability": 0.88,
     },
     {
         "event": "KXBTCD-TEST",
@@ -19,6 +20,7 @@ ROWS = [
         "bid_value": 41.0,
         "ask_value": 42.0,
         "last_value": 41.0,
+        "model_probability": 0.38,
     },
 ]
 
@@ -26,9 +28,12 @@ ROWS = [
 def test_kalshi_market_figure_draws_market_band_and_last_trade_points():
     figure = kalshi_market_figure(ROWS, 70050)
 
-    assert len(figure.data) == 3
+    assert len(figure.data) == 4
     assert figure.data[1].name == "Market"
     assert list(figure.data[1].x) == [69999.99, 70099.99]
+    assert figure.data[2].name == "Model"
+    assert list(figure.data[2].y) == [88.0, 38.0]
+    assert figure.data[2].line.color == "#facc15"
     assert figure.layout.yaxis.title.text == "YES probability"
     assert figure.layout.yaxis.range == (0, 100)
 

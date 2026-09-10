@@ -38,10 +38,12 @@ class RedisReader:
         instrument: str = "BTCUSDT",
         kalshi_ticker_stream: str = "stream:kalshi_tickers",
         kalshi_trade_stream: str = "stream:kalshi_trades",
+        kalshi_orderbook_stream: str = "stream:kalshi_orderbook",
     ) -> None:
         self.client, self.prefix, self.instrument = client, prefix, instrument
         self.kalshi_ticker_stream = kalshi_ticker_stream
         self.kalshi_trade_stream = kalshi_trade_stream
+        self.kalshi_orderbook_stream = kalshi_orderbook_stream
 
     def read(self) -> DashboardData:
         try:
@@ -130,6 +132,7 @@ class RedisReader:
             rows = self._attach_analytics(contract_rows(
                 self._stream_payloads(self.kalshi_ticker_stream, 600),
                 self._stream_payloads(self.kalshi_trade_stream, 300),
+                self._stream_payloads(self.kalshi_orderbook_stream, 600),
             ))
             return {"contracts": select_contract_window(rows, spot_price), "spot": spot, "redis_ok": True, "redis_error": None}
         except redis.RedisError as exc:
@@ -141,6 +144,7 @@ class RedisReader:
         return self._attach_analytics(contract_rows(
             self._stream_payloads(self.kalshi_ticker_stream, 600),
             self._stream_payloads(self.kalshi_trade_stream, 300),
+            self._stream_payloads(self.kalshi_orderbook_stream, 600),
         ))
 
     def _attach_analytics(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -153,7 +157,7 @@ class RedisReader:
         for row, raw in zip(rows, payloads, strict=False):
             row.update({
                 "model_value": "-", "model_vol": "-", "tau": "-",
-                "edge_mid": "-", "buy_yes_edge": "-", "sell_yes_edge": "-",
+                "edge_mid": "-",
             })
             price = decode(raw, {})
             generated = price.get("generated_ts_ms") if isinstance(price, dict) else None
@@ -161,17 +165,23 @@ class RedisReader:
                     or not isinstance(generated, (int, float)) or now_ms - generated > 60_000
                     or generated - now_ms > 2_000):
                 continue
+            model_probability = _float(price.get("model_probability"))
+            bid_cents = _float(row.get("bid_value"))
+            ask_cents = _float(row.get("ask_value"))
+            if model_probability is not None and bid_cents is not None and ask_cents is not None:
+                edge_mid = ((bid_cents + ask_cents) / 200) - model_probability
+            else:
+                published_edge = _float(price.get("edge_vs_mid_probability"))
+                edge_mid = -published_edge if published_edge is not None else None
             row.update({
                 "model_value": _cents_display(price.get("model_value_dollars")),
                 "model_value_cents": price.get("model_value_cents"),
-                "model_probability": price.get("model_probability"),
+                "model_probability": model_probability,
                 "model_vol": _percent_display(price.get("annualized_volatility")),
                 "annualized_volatility": price.get("annualized_volatility"),
                 "tau": _minutes_display(price.get("time_to_expiry_minutes")),
                 "time_to_expiry_minutes": price.get("time_to_expiry_minutes"),
-                "edge_mid": _signed_cents(price.get("edge_vs_mid_probability")),
-                "buy_yes_edge": _signed_cents(price.get("buy_yes_edge_probability")),
-                "sell_yes_edge": _signed_cents(price.get("sell_yes_edge_probability")),
+                "edge_mid": _signed_cents(edge_mid),
             })
         return rows
 
@@ -210,6 +220,13 @@ def _signed_cents(value: Any) -> str:
     except (TypeError, ValueError):
         return "-"
     return f"{parsed:+.1f}¢"
+
+
+def _float(value: Any) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _percent_display(value: Any) -> str:

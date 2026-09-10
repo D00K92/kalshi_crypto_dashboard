@@ -129,9 +129,7 @@ def test_reader_joins_fresh_analytics_prices_read_only():
     assert row["model_value"] == "60.0¢"
     assert row["model_vol"] == "21.5%"
     assert row["tau"] == "12.5m"
-    assert row["edge_mid"] == "+15.0¢"
-    assert row["buy_yes_edge"] == "+10.0¢"
-    assert row["sell_yes_edge"] == "-20.0¢"
+    assert row["edge_mid"] == "-15.0¢"
 
 
 def test_reader_ignores_stale_analytics_price():

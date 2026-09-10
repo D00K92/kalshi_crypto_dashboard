@@ -79,6 +79,7 @@ def _active_event(payloads: list[dict[str, Any]]) -> str | None:
 def contract_rows(
     tickers: list[dict[str, Any]],
     trades: list[dict[str, Any]],
+    orderbooks: list[dict[str, Any]] | None = None,
     *,
     now_ms: int | None = None,
     max_age_ms: int = DEFAULT_MAX_AGE_MS,
@@ -91,9 +92,11 @@ def contract_rows(
 
     tickers = [payload for payload in tickers if fresh(payload)]
     trades = [payload for payload in trades if fresh(payload)]
-    event_ticker = _active_event(tickers + trades)
+    orderbooks = [payload for payload in (orderbooks or []) if fresh(payload)]
+    event_ticker = _active_event(tickers + trades + orderbooks)
     latest_by_market: dict[str, dict[str, Any]] = {}
     last_trade_by_market: dict[str, dict[str, Any]] = {}
+    latest_book_by_market: dict[str, dict[str, Any]] = {}
 
     for payload in tickers:
         market = payload.get("market_ticker")
@@ -111,6 +114,14 @@ def contract_rows(
             continue
         last_trade_by_market.setdefault(market, payload)
 
+    for payload in orderbooks:
+        market = payload.get("market_ticker")
+        if not isinstance(market, str) or not market:
+            continue
+        if event_ticker and payload.get("event_ticker") != event_ticker:
+            continue
+        latest_book_by_market.setdefault(market, payload)
+
     rows: list[dict[str, Any]] = []
     for market, ticker in latest_by_market.items():
         bid = _float(ticker.get("yes_bid_dollars"))
@@ -122,8 +133,9 @@ def contract_rows(
         last_trade = _float(trade.get("yes_price_dollars"))
         ticker_received = _float(ticker.get("received_ts_ms"))
         trade_received = _float(trade.get("received_ts_ms"))
+        book_received = _float(latest_book_by_market.get(market, {}).get("received_ts_ms"))
         last_activity = max(
-            (timestamp for timestamp in (ticker_received, trade_received) if timestamp is not None),
+            (timestamp for timestamp in (ticker_received, trade_received, book_received) if timestamp is not None),
             default=None,
         )
         rows.append({
@@ -196,8 +208,6 @@ def contract_table(rows: list[dict[str, Any]]) -> dag.AgGrid:
             {"field": "model_vol", "headerName": "VOL", "type": "rightAligned", "width": 84},
             {"field": "tau", "headerName": "TTE", "type": "rightAligned", "width": 82},
             {"field": "edge_mid", "headerName": "EDGE MID", "type": "rightAligned", "width": 105},
-            {"field": "buy_yes_edge", "headerName": "BUY YES", "type": "rightAligned", "width": 100},
-            {"field": "sell_yes_edge", "headerName": "SELL YES", "type": "rightAligned", "width": 100},
             {"field": "volume", "headerName": "VOL", "type": "rightAligned", "width": 110},
             {"field": "open_interest", "headerName": "OI", "type": "rightAligned", "width": 110},
             {"field": "last_trade", "headerName": "TRADE", "type": "rightAligned", "width": 88},
