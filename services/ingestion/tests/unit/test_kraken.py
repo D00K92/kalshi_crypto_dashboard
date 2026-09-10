@@ -1,4 +1,7 @@
-from ingestion.adapters.kraken import KrakenBook, KrakenMessageError, parse_kraken_message, trade_from_message
+import orjson
+
+from ingestion.adapters import kraken as kraken_module
+from ingestion.adapters.kraken import KrakenBook, KrakenFeed, KrakenMessageError, parse_kraken_message, trade_from_message
 
 
 def test_parse_kraken_trade() -> None:
@@ -48,3 +51,73 @@ def test_kraken_parser_rejects_malformed_book_levels() -> None:
         assert "price" in str(exc)
     else:
         raise AssertionError("malformed Kraken price was accepted")
+
+
+class _FakeWebSocket:
+    def __init__(self, frames: list[bytes]) -> None:
+        self.frames = iter(frames)
+
+    async def send(self, payload: bytes) -> None:
+        pass
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self) -> bytes:
+        try:
+            return next(self.frames)
+        except StopIteration as exc:
+            raise StopAsyncIteration from exc
+
+
+class _FakeConnections:
+    def __init__(self, websocket: _FakeWebSocket) -> None:
+        self.websocket = websocket
+        self.yielded = False
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self) -> _FakeWebSocket:
+        if self.yielded:
+            raise StopAsyncIteration
+        self.yielded = True
+        return self.websocket
+
+
+class _RecordingPipeline:
+    def __init__(self) -> None:
+        self.events: list[object] = []
+
+    async def put(self, event: object) -> None:
+        self.events.append(event)
+
+
+async def test_crossed_book_does_not_interrupt_following_trade(monkeypatch) -> None:
+    crossed_book = orjson.dumps({
+        "channel": "book", "type": "snapshot", "data": [{
+            "symbol": "BTC/USD",
+            "bids": [{"price": "101", "qty": "1"}],
+            "asks": [{"price": "100", "qty": "1"}],
+        }],
+    })
+    trade = orjson.dumps({
+        "channel": "trade", "type": "update", "data": [{
+            "symbol": "BTC/USD", "price": "100.5", "qty": "0.2",
+            "side": "buy", "trade_id": 42,
+            "timestamp": "2024-01-01T00:00:00.000000Z",
+        }],
+    })
+    websocket = _FakeWebSocket([crossed_book, trade])
+    monkeypatch.setattr(
+        kraken_module,
+        "connect",
+        lambda *args, **kwargs: _FakeConnections(websocket),
+    )
+    pipeline = _RecordingPipeline()
+    feed = KrakenFeed("wss://unused", "BTC/USD", pipeline)  # type: ignore[arg-type]
+
+    await feed.run()
+
+    assert [event.event_type for event in pipeline.events] == ["trade"]
+    assert feed.health.last_event_received_ts_ms is not None

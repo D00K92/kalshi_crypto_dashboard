@@ -179,7 +179,18 @@ class KrakenFeed:
                                 data = {**message["payload"], "type": message["type"]}
                                 if data.get("symbol") != self._symbol:
                                     continue
-                                snapshot = self._book.apply(data, received)
+                                try:
+                                    snapshot = self._book.apply(data, received)
+                                except ValueError as exc:
+                                    # A transient invalid book must not tear
+                                    # down the healthy Kraken trade stream.
+                                    self.health.synchronized = False
+                                    self.health.last_error = str(exc)
+                                    LOGGER.warning(
+                                        "venue_message_rejected",
+                                        extra={"venue": VENUE, "reason": str(exc)},
+                                    )
+                                    continue
                                 if snapshot is not None:
                                     await self._pipeline.put(snapshot)
                                     self.health.synchronized = True
