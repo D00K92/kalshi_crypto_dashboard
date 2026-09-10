@@ -4,8 +4,6 @@ metadata:
   name: dashboard
   labels:
     app: dashboard
-  annotations:
-    cloud.google.com/backend-config: '{"default": "crypto-dashboard-backend"}'
 spec:
   replicas: 1
   strategy:
@@ -70,6 +68,8 @@ metadata:
   name: dashboard
   labels:
     app: dashboard
+  annotations:
+    cloud.google.com/backend-config: '{"default": "crypto-dashboard-backend"}'
 spec:
   type: ClusterIP
   selector:
