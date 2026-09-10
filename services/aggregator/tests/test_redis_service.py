@@ -237,12 +237,50 @@ async def test_stale_replayed_trade_is_acked_without_overwriting_live_state() ->
         "group",
         [(b"90000-0", {b"payload": orjson.dumps(event)})],
         service._handle_trade,
+        replay=True,
     )
 
     assert service.state.trade_buckets == {}
     assert service.client.pipelines[0].operations == [
         ("xack", ("stream:ticks", "group", b"90000-0"))
     ]
+
+
+async def test_delayed_live_trade_is_not_mistaken_for_a_stale_replay() -> None:
+    service = object.__new__(AggregatorService)
+    service.client = FakeRedis()
+    service.state = MarketAggregator()
+    service.settings = SimpleNamespace(
+        trade_stream="stream:ticks",
+        output_prefix="market",
+        allowed_lateness_ms=5_000,
+        replay_max_age_ms=5_000,
+        primitive_stream="stream:primitives:v1",
+        primitive_maxlen=100_000,
+    )
+    service._clock_ms = lambda: 100_000
+    service._last_finalized_primitive_bucket = None
+    service._max_trade_event_ts_ms = None
+    event = {
+        "event_id": "delayed-live",
+        "event_type": "trade",
+        "venue": "bitstamp",
+        "instrument": "BTCUSD",
+        "price": "100",
+        "quantity": "1",
+        "taker_side": "buy",
+        "exchange_ts_ms": 90_000,
+        "received_ts_ms": 90_125,
+    }
+
+    await service._process_entries(
+        "stream:ticks",
+        "group",
+        [(b"90000-0", {b"payload": orjson.dumps(event)})],
+        service._handle_trade,
+    )
+
+    assert 90_000 in service.state.trade_buckets
 
 
 async def test_recent_redis_trade_still_updates_live_state() -> None:

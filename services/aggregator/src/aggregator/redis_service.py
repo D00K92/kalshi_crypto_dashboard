@@ -67,12 +67,12 @@ class AggregatorService:
                 count=self.settings.read_count,
             )
             if len(claimed) > 1 and claimed[1]:
-                await self._process_entries(stream, group, claimed[1], handler)
+                await self._process_entries(stream, group, claimed[1], handler, replay=True)
             rows = await self.client.xreadgroup(group, self.settings.consumer_name, {stream: ">"}, count=self.settings.read_count, block=self.settings.read_block_ms)
             for _, entries in rows:
                 await self._process_entries(stream, group, entries, handler)
 
-    async def _process_entries(self, stream: str, group: str, entries, handler) -> None:
+    async def _process_entries(self, stream: str, group: str, entries, handler, *, replay: bool = False) -> None:
         acknowledged = []
         pipeline = self.client.pipeline(transaction=True)
         has_writes = False
@@ -83,7 +83,11 @@ class AggregatorService:
                     raise ValueError("missing payload")
                 event = orjson.loads(payload)
                 published_ts_ms = int(redis_id.split(b"-", 1)[0] if isinstance(redis_id, bytes) else str(redis_id).split("-", 1)[0])
-                has_writes = (await handler(event, published_ts_ms, pipeline)) or has_writes
+                if replay:
+                    handled = await handler(event, published_ts_ms, pipeline, replay=True)
+                else:
+                    handled = await handler(event, published_ts_ms, pipeline)
+                has_writes = handled or has_writes
             except (ValueError, TypeError, orjson.JSONDecodeError) as exc:
                 LOGGER.warning(
                     "event_rejected stream=%s redis_id=%s error_type=%s error=%s",
@@ -117,10 +121,10 @@ class AggregatorService:
         if has_writes:
             await pipeline.execute()
 
-    async def _handle_book(self, event: dict, published_ts_ms: int | None = None, pipeline=None) -> bool:
+    async def _handle_book(self, event: dict, published_ts_ms: int | None = None, pipeline=None, *, replay: bool = False) -> bool:
         if event.get("event_type") != "book_snapshot":
             return False
-        if self._is_stale_replay(published_ts_ms):
+        if replay and self._is_stale_replay(published_ts_ms):
             return False
         if self.state.apply_book(event, published_ts_ms=published_ts_ms) is None:
             return False
@@ -134,10 +138,10 @@ class AggregatorService:
             await pipe.execute()
         return True
 
-    async def _handle_trade(self, event: dict, published_ts_ms: int | None = None, pipeline=None) -> bool:
+    async def _handle_trade(self, event: dict, published_ts_ms: int | None = None, pipeline=None, *, replay: bool = False) -> bool:
         if event.get("event_type") != "trade":
             return False
-        if self._is_stale_replay(published_ts_ms):
+        if replay and self._is_stale_replay(published_ts_ms):
             return False
         event_ts_ms = int(event.get("exchange_ts_ms") or event.get("received_ts_ms") or published_ts_ms or time.time() * 1000)
         event_bucket = (event_ts_ms // CANDLE_INTERVAL_MS) * CANDLE_INTERVAL_MS
