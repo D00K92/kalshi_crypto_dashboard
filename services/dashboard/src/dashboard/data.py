@@ -158,10 +158,22 @@ class RedisReader:
                 spot_price = float(spot) if spot is not None else None
             except (TypeError, ValueError):
                 spot_price = None
-            rows = self._attach_analytics(self._kalshi_contract_rows())
-            return {"contracts": select_contract_window(rows, spot_price), "spot": spot, "redis_ok": True, "redis_error": None}
+            rows = select_contract_window(self._attach_analytics(self._kalshi_contract_rows()), spot_price)
+            waiting_for_hourly_contract = bool(rows) and all(
+                row.get("pricing_reason") == "outside_supported_lifetime" for row in rows
+            )
+            return {
+                "contracts": rows,
+                "spot": spot,
+                "waiting_for_hourly_contract": waiting_for_hourly_contract,
+                "redis_ok": True,
+                "redis_error": None,
+            }
         except redis.RedisError as exc:
-            return {"contracts": [], "spot": spot, "redis_ok": False, "redis_error": type(exc).__name__}
+            return {
+                "contracts": [], "spot": spot, "waiting_for_hourly_contract": False,
+                "redis_ok": False, "redis_error": type(exc).__name__,
+            }
 
     def _read_kalshi_contracts(self) -> list[dict[str, Any]]:
         return self._attach_analytics(self._kalshi_contract_rows())
@@ -204,13 +216,19 @@ class RedisReader:
             return rows
         keys = [f"market:pricing:v1:{row['market_ticker']}" for row in rows]
         payloads = self.client.mget(*keys)
+        status_payloads = self.client.mget(*[
+            f"market:pricing:v1:status:{row['market_ticker']}" for row in rows
+        ])
         now_ms = int(time.time() * 1000)
-        for row, raw in zip(rows, payloads, strict=False):
+        for row, raw, status_raw in zip(rows, payloads, status_payloads, strict=False):
             row.update({
                 "model_value": "-", "model_vol": "-", "tau": "-",
-                "edge_mid": "-",
+                "edge_mid": "-", "pricing_reason": None,
             })
             price = decode(raw, {})
+            status = decode(status_raw, {})
+            if isinstance(status, dict) and isinstance(status.get("reason"), str):
+                row["pricing_reason"] = status["reason"]
             generated = price.get("generated_ts_ms") if isinstance(price, dict) else None
             if (not isinstance(price, dict) or price.get("status") != "available"
                     or not isinstance(generated, (int, float)) or now_ms - generated > 60_000

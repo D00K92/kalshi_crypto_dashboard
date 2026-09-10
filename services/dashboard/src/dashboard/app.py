@@ -37,7 +37,16 @@ def layout() -> html.Div:
             html.Div([html.H3("BTCUSDT", className="panel-title"), dcc.Graph(id="candles", config={"displayModeBar": False}), dcc.Graph(id="volume", config={"displayModeBar": False}), dcc.Graph(id="volatility-cone", config={"displayModeBar": False})], style=CARD),
             html.Div([html.H3("Kalshi contract monitor", className="panel-title"), kalshi_monitor_layout()], style=CARD),
         ], className="top-grid"),
-        html.Div([html.H3("Active KXBTCD contracts", className="panel-title"), contract_table()], style={**CARD, "marginTop": "14px"}),
+        html.Div([
+            html.H3("Active KXBTCD contracts", className="panel-title"),
+            contract_table(),
+            html.Div(
+                "Waiting for next hourly contract…",
+                id="kalshi-contracts-waiting",
+                className="placeholder",
+                style={"display": "none"},
+            ),
+        ], style={**CARD, "marginTop": "14px"}),
     ], className="shell")
 
 
@@ -120,7 +129,10 @@ def refresh_kalshi_table_data(_: int, spot_payload: dict | None):
 
 
 def _kalshi_snapshot(payload: dict | None) -> dict:
-    return payload or {"contracts": [], "spot": None, "redis_ok": False, "redis_error": "no data"}
+    return payload or {
+        "contracts": [], "spot": None, "waiting_for_hourly_contract": False,
+        "redis_ok": False, "redis_error": "no data",
+    }
 
 
 @app.callback(Output("candles", "figure"), Input("candle-data", "data"), Input("spot-data", "data"), Input("forming-candle", "data"))
@@ -140,21 +152,39 @@ def refresh_volatility_cone(payload: dict | None):
 
 @app.callback(
     Output("kalshi-monitor-summary", "children"),
+    Output("kalshi-monitor-summary", "style"),
     Output("kalshi-market-structure", "figure"),
+    Output("kalshi-market-structure", "style"),
+    Output("kalshi-monitor-waiting", "style"),
     Input("kalshi-monitor-data", "data"),
 )
 def refresh_kalshi_monitor(payload: dict | None):
     data = _kalshi_snapshot(payload)
     spot_payload = {"price": data["spot"]}
+    waiting = data["waiting_for_hourly_contract"]
     return (
         kalshi_monitor_summary(data["contracts"], spot_payload),
+        {"display": "none"} if waiting else {},
         kalshi_market_figure(data["contracts"], data["spot"]),
+        {"display": "none"} if waiting else {},
+        {} if waiting else {"display": "none"},
     )
 
 
-@app.callback(Output("kalshi-contract-grid", "rowData"), Input("kalshi-table-data", "data"))
+@app.callback(
+    Output("kalshi-contract-grid", "rowData"),
+    Output("kalshi-contract-grid", "style"),
+    Output("kalshi-contracts-waiting", "style"),
+    Input("kalshi-table-data", "data"),
+)
 def refresh_kalshi_contracts(payload: dict | None):
-    return _kalshi_snapshot(payload)["contracts"]
+    data = _kalshi_snapshot(payload)
+    waiting = data["waiting_for_hourly_contract"]
+    return (
+        data["contracts"],
+        {"display": "none"} if waiting else {"width": "100%", "height": "430px"},
+        {} if waiting else {"display": "none"},
+    )
 
 
 @app.callback(Output("status", "children"), Input("status-data", "data"))

@@ -131,6 +131,12 @@ def kalshi_monitor_layout() -> html.Div:
             figure=kalshi_market_figure([], None),
             config={"displayModeBar": False},
         ),
+        html.Div(
+            "Waiting for next hourly contract…",
+            id="kalshi-monitor-waiting",
+            className="placeholder",
+            style={"display": "none"},
+        ),
     ])
 
 

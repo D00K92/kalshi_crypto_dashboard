@@ -192,3 +192,24 @@ def test_reader_ignores_stale_analytics_price():
 
     row = RedisReader(StaleAnalyticsRedis()).read_kalshi_data(100)["contracts"][0]
     assert row["model_value"] == "-"
+
+
+def test_kalshi_reader_marks_daily_gap_as_waiting_for_hourly_contract():
+    now = int(time.time() * 1000)
+
+    class DailyGapRedis(FakeRedis):
+        def xrevrange(self, stream, count):
+            if stream == "stream:kalshi_tickers":
+                return [("1-0", {"payload": (f'{{"event_ticker":"E","market_ticker":"E-T100",'
+                                               f'"received_ts_ms":{now}}}').encode()})]
+            return []
+
+        def mget(self, *keys):
+            if keys == ("market:pricing:v1:E-T100",):
+                return [None]
+            if keys == ("market:pricing:v1:status:E-T100",):
+                return [b'{"status":"unavailable","reason":"outside_supported_lifetime"}']
+            return super().mget(*keys)
+
+    data = RedisReader(DailyGapRedis()).read_kalshi_data(100)
+    assert data["waiting_for_hourly_contract"] is True

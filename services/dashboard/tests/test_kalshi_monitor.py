@@ -43,6 +43,7 @@ def test_kalshi_monitor_builds_summary_and_chart():
 
     assert component.children[0].className == "kalshi-monitor-strip"
     assert component.children[1].id == "kalshi-market-structure"
+    assert component.children[2].id == "kalshi-monitor-waiting"
 
 
 def test_kalshi_monitor_layout_keeps_chart_identity_stable():
@@ -50,4 +51,5 @@ def test_kalshi_monitor_layout_keeps_chart_identity_stable():
 
     assert component.children[0].id == "kalshi-monitor-summary"
     assert component.children[1].id == "kalshi-market-structure"
+    assert component.children[2].id == "kalshi-monitor-waiting"
     assert len(kalshi_monitor_summary(ROWS, {"price": "70050"})) == 6
