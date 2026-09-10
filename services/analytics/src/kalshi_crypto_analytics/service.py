@@ -86,9 +86,11 @@ class AnalyticsService:
         except Exception:
             LOGGER.exception("kalshi_metadata_refresh_failed")
             metadata = {}
+        known_events = {item.event_ticker for item in metadata.values()}
         active: set[str] = set()
         for ticker in list(self.tickers.values()):
-            result = await self._price(ticker, metadata.get(ticker.market_ticker), spot, volatility, now_ms)
+            market_metadata = metadata.get(ticker.market_ticker)
+            result = await self._price(ticker, market_metadata, spot, volatility, now_ms)
             if isinstance(result, PricingResult):
                 active.add(ticker.market_ticker)
                 await self.publisher.publish_price(ticker.market_ticker, result.payload)
@@ -96,7 +98,9 @@ class AnalyticsService:
                     LOGGER.info("pricing_quote_unavailable reason=%s market=%s", result.quote_reason.value, ticker.market_ticker)
             else:
                 await self.publisher.unavailable(ticker.market_ticker, result.value, now_ms)
-                if result == UnavailableReason.OUTSIDE_SUPPORTED_LIFETIME or metadata and ticker.event_ticker not in {item.event_ticker for item in metadata.values()}:
+                expired = market_metadata is not None and market_metadata.expiry_ts_ms <= now_ms
+                inactive_event = bool(metadata) and ticker.event_ticker not in known_events
+                if expired or inactive_event:
                     self.tickers.pop(ticker.market_ticker, None)
         await self.publisher.expire_inactive(active, now_ms)
         if entries:

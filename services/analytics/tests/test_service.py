@@ -112,6 +112,31 @@ async def test_rollover_removes_old_and_prices_new_event():
     assert data.acked == ["2-0"]
 
 
+async def test_future_contract_is_retained_until_it_enters_pricing_window():
+    item = ticker()
+    clock = [NOW]
+    out = Publisher()
+    metadata = {
+        item.market_ticker: MarketMetadata(
+            item.market_ticker, item.event_ticker, 100, NOW + 3_601_000, "open"
+        )
+    }
+    service = AnalyticsService(
+        Data(bootstrap=[item]), Meta(metadata), Forecast(), out,
+        clock_ms=lambda: clock[0],
+    )
+    await service.start()
+
+    await service.cycle()
+    assert out.unavailable_reasons == [(item.market_ticker, "outside_supported_lifetime")]
+    assert item.market_ticker in service.tickers
+
+    clock[0] += 2_000
+    await service.cycle()
+    assert out.prices[-1]["time_to_expiry_seconds"] == pytest.approx(3_599)
+    assert service.ready is True
+
+
 async def test_non_open_market_is_unavailable():
     item = ticker(); out = Publisher()
     metadata = {item.market_ticker: MarketMetadata(item.market_ticker, item.event_ticker, 100, NOW + 300_000, "closed")}
