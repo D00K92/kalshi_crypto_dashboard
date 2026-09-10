@@ -5,6 +5,17 @@ kind: BackendConfig
 metadata:
   name: crypto-dashboard-backend
 spec:
+  # Cache only responses that explicitly opt in through origin Cache-Control
+  # headers. Dash callback and layout endpoints have no such headers, while
+  # versioned component bundles are immutable for one year.
+  cdn:
+    enabled: true
+    cacheMode: USE_ORIGIN_HEADERS
+    cachePolicy:
+      includeHost: true
+      includeProtocol: true
+      includeQueryString: true
+    requestCoalescing: true
   healthCheck:
     type: HTTP
     port: 8050
