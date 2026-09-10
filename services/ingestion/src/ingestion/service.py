@@ -28,11 +28,17 @@ class IngestionService:
             settings.redis_url,
             stream_maxlen=settings.stream_maxlen,
         )
+        self._book_publisher = RedisPublisher(
+            settings.redis_url,
+            stream_maxlen=settings.stream_maxlen,
+        )
         self._pipeline = EventPipeline(
             self._publisher,
             maxsize=settings.queue_maxsize,
+            book_publisher=self._book_publisher,
             batch_size=settings.publish_batch_size,
             flush_ms=settings.publish_flush_ms,
+            book_flush_ms=settings.book_flush_ms,
             delay_warning_ms=settings.queue_delay_warning_ms,
         )
         self._feed = BinanceFeed(settings.binance_ws_url, self._pipeline)
@@ -50,6 +56,7 @@ class IngestionService:
 
     async def run(self, stop_event: asyncio.Event) -> None:
         await self._publisher.ready()
+        await self._book_publisher.ready()
         LOGGER.info("redis_ready")
 
         pipeline_task = asyncio.create_task(
@@ -105,4 +112,5 @@ class IngestionService:
                 pipeline_task.cancel()
                 await asyncio.gather(pipeline_task, return_exceptions=True)
                 await self._publisher.close()
+                await self._book_publisher.close()
                 LOGGER.info("ingestion_stopped")

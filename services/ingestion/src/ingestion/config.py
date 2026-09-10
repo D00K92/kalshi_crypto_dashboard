@@ -61,6 +61,7 @@ class Settings:
     queue_maxsize: int
     publish_batch_size: int
     publish_flush_ms: int
+    book_flush_ms: int
     queue_delay_warning_ms: int
     stream_maxlen: int
     shutdown_grace_seconds: int
@@ -116,6 +117,7 @@ class Settings:
             queue_maxsize=_positive_int("INGESTION_QUEUE_MAXSIZE", 10_000),
             publish_batch_size=_positive_int("INGESTION_PUBLISH_BATCH_SIZE", 200),
             publish_flush_ms=_positive_int("INGESTION_PUBLISH_FLUSH_MS", 5),
+            book_flush_ms=_positive_int("INGESTION_BOOK_FLUSH_MS", 100),
             queue_delay_warning_ms=_positive_int("INGESTION_QUEUE_DELAY_WARNING_MS", 5_000),
             stream_maxlen=_positive_int("INGESTION_STREAM_MAXLEN", 1_000_000),
             shutdown_grace_seconds=_positive_int(
