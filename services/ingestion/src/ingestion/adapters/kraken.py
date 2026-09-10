@@ -165,6 +165,9 @@ class KrakenFeed:
         async for websocket in connect(self._ws_url, open_timeout=10, close_timeout=5, ping_interval=20, max_size=1_048_576, max_queue=32, compression=None):
             self.health.connected = True
             self.health.last_error = None
+            self.health.synchronized = False
+            self._book = KrakenBook(self._symbol)
+            awaiting_book_snapshot = True
             LOGGER.info("venue_connected", extra={"venue": VENUE})
             try:
                 await websocket.send(orjson.dumps({"method": "subscribe", "params": {"channel": "trade", "symbol": [self._symbol]}}))
@@ -179,21 +182,32 @@ class KrakenFeed:
                                 data = {**message["payload"], "type": message["type"]}
                                 if data.get("symbol") != self._symbol:
                                     continue
+                                if awaiting_book_snapshot and data.get("type") != "snapshot":
+                                    continue
                                 try:
                                     snapshot = self._book.apply(data, received)
                                 except ValueError as exc:
                                     # A transient invalid book must not tear
-                                    # down the healthy Kraken trade stream.
+                                    # down the healthy Kraken trade stream. Reset
+                                    # only the book channel and wait for its new
+                                    # snapshot before accepting more deltas.
                                     self.health.synchronized = False
                                     self.health.last_error = str(exc)
+                                    self._book = KrakenBook(self._symbol)
+                                    awaiting_book_snapshot = True
                                     LOGGER.warning(
-                                        "venue_message_rejected",
+                                        "venue_book_resync_requested",
                                         extra={"venue": VENUE, "reason": str(exc)},
                                     )
+                                    await websocket.send(orjson.dumps({"method": "unsubscribe", "params": {"channel": "book", "symbol": [self._symbol], "depth": 25}}))
+                                    await websocket.send(orjson.dumps({"method": "subscribe", "params": {"channel": "book", "symbol": [self._symbol], "depth": 25, "snapshot": True}}))
                                     continue
                                 if snapshot is not None:
                                     await self._pipeline.put(snapshot)
-                                    self.health.synchronized = True
+                                    if data.get("type") == "snapshot":
+                                        awaiting_book_snapshot = False
+                                        self.health.synchronized = True
+                                        self.health.last_error = None
                             self.health.last_event_received_ts_ms = received
                     except (KrakenMessageError, KeyError, TypeError) as exc:
                         self.health.last_error = str(exc)

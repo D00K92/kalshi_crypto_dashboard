@@ -56,9 +56,10 @@ def test_kraken_parser_rejects_malformed_book_levels() -> None:
 class _FakeWebSocket:
     def __init__(self, frames: list[bytes]) -> None:
         self.frames = iter(frames)
+        self.sent: list[dict[str, object]] = []
 
     async def send(self, payload: bytes) -> None:
-        pass
+        self.sent.append(orjson.loads(payload))
 
     def __aiter__(self):
         return self
@@ -93,12 +94,31 @@ class _RecordingPipeline:
         self.events.append(event)
 
 
-async def test_crossed_book_does_not_interrupt_following_trade(monkeypatch) -> None:
-    crossed_book = orjson.dumps({
+async def test_crossed_book_resubscribes_book_without_interrupting_trade(monkeypatch) -> None:
+    initial_book = orjson.dumps({
         "channel": "book", "type": "snapshot", "data": [{
             "symbol": "BTC/USD",
-            "bids": [{"price": "101", "qty": "1"}],
-            "asks": [{"price": "100", "qty": "1"}],
+            "bids": [{"price": "99", "qty": "1"}],
+            "asks": [{"price": "101", "qty": "1"}],
+        }],
+    })
+    crossed_book = orjson.dumps({
+        "channel": "book", "type": "update", "data": [{
+            "symbol": "BTC/USD",
+            "bids": [{"price": "102", "qty": "1"}],
+        }],
+    })
+    stale_delta = orjson.dumps({
+        "channel": "book", "type": "update", "data": [{
+            "symbol": "BTC/USD",
+            "bids": [{"price": "150", "qty": "1"}],
+        }],
+    })
+    recovered_book = orjson.dumps({
+        "channel": "book", "type": "snapshot", "data": [{
+            "symbol": "BTC/USD",
+            "bids": [{"price": "98", "qty": "1"}],
+            "asks": [{"price": "102", "qty": "1"}],
         }],
     })
     trade = orjson.dumps({
@@ -108,7 +128,7 @@ async def test_crossed_book_does_not_interrupt_following_trade(monkeypatch) -> N
             "timestamp": "2024-01-01T00:00:00.000000Z",
         }],
     })
-    websocket = _FakeWebSocket([crossed_book, trade])
+    websocket = _FakeWebSocket([initial_book, crossed_book, stale_delta, recovered_book, trade])
     monkeypatch.setattr(
         kraken_module,
         "connect",
@@ -119,5 +139,10 @@ async def test_crossed_book_does_not_interrupt_following_trade(monkeypatch) -> N
 
     await feed.run()
 
-    assert [event.event_type for event in pipeline.events] == ["trade"]
+    assert [event.event_type for event in pipeline.events] == ["book_snapshot", "book_snapshot", "trade"]
+    assert pipeline.events[1].bids[0].price == "98"  # type: ignore[attr-defined]
+    assert [message["method"] for message in websocket.sent] == [
+        "subscribe", "subscribe", "unsubscribe", "subscribe",
+    ]
+    assert feed.health.last_error is None
     assert feed.health.last_event_received_ts_ms is not None
