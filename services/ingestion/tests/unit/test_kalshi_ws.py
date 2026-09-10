@@ -62,6 +62,29 @@ def test_normalize_snapshot_and_delta_keep_binary_book_semantics() -> None:
     assert delta is not None and delta.delta_side == "yes" and delta.delta_fp == "-2.00"
 
 
+@pytest.mark.parametrize(
+    ("present_field", "empty_side"),
+    [("yes_dollars_fp", "no_bids"), ("no_dollars_fp", "yes_bids")],
+)
+def test_normalize_snapshot_treats_omitted_book_side_as_empty(
+    present_field: str, empty_side: str,
+) -> None:
+    snapshot = parse_kalshi_message(
+        orjson.dumps({
+            "type": "orderbook_snapshot",
+            "seq": 8,
+            "msg": {
+                "market_ticker": "KXBTCD-TEST-1",
+                present_field: [["0.42", "10.00"]],
+            },
+        }),
+        series_ticker="KXBTCD", event_ticker="KXBTCD-TEST",
+        received_ts_ms=1700000000123,
+    )
+    assert snapshot is not None
+    assert getattr(snapshot, empty_side) == ()
+
+
 def test_malformed_trade_is_rejected() -> None:
     with pytest.raises(KalshiMessageError, match="trade_id"):
         parse_kalshi_message(

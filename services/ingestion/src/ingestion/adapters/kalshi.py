@@ -102,7 +102,8 @@ def parse_kalshi_message(
         return KalshiOrderBookSnapshot(
             event_id=f"kalshi:{market}:book:{int(frame.get('seq', 0))}", event_type="kalshi_orderbook_snapshot", venue="kalshi", instrument=instrument,
             series_ticker=series_ticker, event_ticker=event_ticker, market_ticker=market, sequence=int(frame.get("seq", 0)),
-            yes_bids=_levels(message.get("yes_dollars_fp"), "yes_dollars_fp"), no_bids=_levels(message.get("no_dollars_fp"), "no_dollars_fp"),
+            yes_bids=_levels(message.get("yes_dollars_fp", []), "yes_dollars_fp"),
+            no_bids=_levels(message.get("no_dollars_fp", []), "no_dollars_fp"),
             exchange_ts_ms=None, received_ts_ms=received_ts_ms,
         )
     if event_type == "orderbook_delta":
