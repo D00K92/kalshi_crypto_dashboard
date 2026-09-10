@@ -25,14 +25,29 @@ def test_completed_10s_bucket_uses_equal_weight_synthetic_price():
     assert row.venue_count == 2
 
 
-def test_ewma_state_uses_prior_return_before_update():
+def test_ewma_states_use_matching_completed_candle_returns():
     computer = V2TenSecondFeatureComputer()
-    computer.compute(bar(0, "a", 100), now_ms=10_000)
-    computer.compute(bar(10_000, "a", 101), now_ms=20_000)
-    computer.compute(bar(20_000, "a", 102), now_ms=30_000)
-    row = computer.compute(bar(30_000, "a", 103), now_ms=40_000)
-    first_return = math.log(101 / 100)
-    assert row.ewma_variance == pytest.approx(first_return * first_return)
+    # Emit 90 minutes of 10s primitives. The synthetic close at each matching
+    # boundary becomes the close for its own EWMA candle cadence.
+    row = None
+    for timestamp in range(0, 5_410_000, 10_000):
+        row = computer.compute(bar(timestamp, "a", 100 + timestamp / 10_000), now_ms=timestamp + 10_000)
+    assert row is not None
+    states = row.payload()["values"]["ewma_states"]
+    assert set(states) == {"5m", "15m", "30m"}
+    assert len({states[frequency]["variance"] for frequency in states}) == 3
+
+
+def test_ewma_state_uses_prior_sampled_return_before_update():
+    computer = V2TenSecondFeatureComputer()
+    row = None
+    for timestamp in range(0, 1_820_000, 10_000):
+        row = computer.compute(bar(timestamp, "a", 100 + timestamp / 10_000), now_ms=timestamp + 10_000)
+    assert row is not None
+    # At 15 minutes, the forecast is emitted before ingesting the just-
+    # completed second 15m return, so the prior 15m return is used.
+    variance = row.payload()["values"]["ewma_states"]["15m"]["variance"]
+    assert variance == pytest.approx(math.log(279 / 189) ** 2)
 
 
 def test_ignores_other_frequencies_and_rejects_out_of_order():
@@ -113,16 +128,15 @@ def test_v2_checkpoint_reconstructs_omitted_pending_bucket():
     assert row.synthetic_price == 101
 
 
-def test_zero_ewma_variance_restores_after_flat_prices():
+def test_ewma_state_round_trip_preserves_sampled_variances():
     original = V2TenSecondFeatureComputer()
-    original.compute(bar(0, "a", 100), now_ms=10_000)
-    original.compute(bar(10_000, "a", 100), now_ms=20_000)
-    original.compute(bar(20_000, "a", 100), now_ms=30_000)
-    assert original.snapshot()["ewma_variance"] == 0
+    for timestamp in range(0, 3_610_000, 10_000):
+        original.compute(bar(timestamp, "a", 100), now_ms=timestamp + 10_000)
+    assert set(original.snapshot()["ewma_variances"]) == {"5m", "15m", "30m"}
 
     restored = V2TenSecondFeatureComputer()
     restored.restore(original.snapshot())
-    assert restored.snapshot()["ewma_variance"] == 0
+    assert restored.snapshot()["ewma_variances"] == original.snapshot()["ewma_variances"]
 
 
 def test_payload_declares_v2_10s_contract():

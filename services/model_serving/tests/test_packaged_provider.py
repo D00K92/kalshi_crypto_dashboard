@@ -67,7 +67,7 @@ def test_packaged_provider_routes_only_1h_to_model(tmp_path):
         ForecastRequest(
             "market_features", "v2_10s", now - 10_000, now - 5_000,
             {"synthetic_price": 70_000.0, "log_return": 0.001, "venue_count": 6,
-             "ewma_state": {"frequency": "10s", "variance": 1e-8}},
+             "ewma_states": {h: {"frequency": h, "variance": variance} for h, variance in {"5m": 1e-8, "15m": 2e-8, "30m": 3e-8}.items()}},
             {"features": now - 5_000},
         ),
         now,
@@ -75,7 +75,7 @@ def test_packaged_provider_routes_only_1h_to_model(tmp_path):
         future_skew_ms=2_000,
     )
     assert result.annualized_volatility["1h"] == pytest.approx(0.42)
-    assert len({result.annualized_volatility[h] for h in ("5m", "15m", "30m")}) == 1
+    assert len({result.annualized_volatility[h] for h in ("5m", "15m", "30m")}) == 3
     assert result.model_resources["1h"] == "projects/1/locations/test/models/2@1"
     assert result.model_resources["30m"] == "ewma/v2_10s/30m"
 
@@ -103,7 +103,7 @@ def test_api_becomes_ready_only_after_packaged_bundle_loads(tmp_path):
             "synthetic_price": 70_000.0,
             "log_return": 0.001,
             "venue_count": 6,
-            "ewma_state": {"frequency": "10s", "variance": 1e-8},
+            "ewma_states": {h: {"frequency": h, "variance": variance} for h, variance in {"5m": 1e-8, "15m": 2e-8, "30m": 3e-8}.items()},
         },
         "source_timestamps_ms": {"features": now - 5_000},
     }

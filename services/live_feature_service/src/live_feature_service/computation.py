@@ -8,6 +8,7 @@ from typing import Any
 
 INTERVAL_MS = 10_000
 SUPPORTED_FREQUENCY = "10s"
+EWMA_FREQUENCIES = {"5m": 300_000, "15m": 900_000, "30m": 1_800_000}
 FEATURE_SET = "market_features"
 FEATURE_VERSION = "v2_10s"
 DEFAULT_HISTORY_BARS = 450
@@ -22,12 +23,20 @@ class FeatureRow:
     synthetic_price: float
     log_return: float | None
     venue_count: int
-    ewma_variance: float | None
+    ewma_variances: dict[str, float]
+    legacy_ewma_variance: float | None
 
     def payload(self) -> dict[str, Any]:
         values: dict[str, Any] = {"synthetic_price": self.synthetic_price, "log_return": self.log_return, "venue_count": self.venue_count}
-        if self.ewma_variance is not None:
-            values["ewma_state"] = {"frequency": SUPPORTED_FREQUENCY, "variance": self.ewma_variance}
+        if self.ewma_variances:
+            values["ewma_states"] = {
+                frequency: {"frequency": frequency, "variance": variance}
+                for frequency, variance in self.ewma_variances.items()
+            }
+        if self.legacy_ewma_variance is not None:
+            # Kept for one compatibility release while the sampled states warm
+            # and while pods using the prior model-serving contract roll out.
+            values["ewma_state"] = {"frequency": SUPPORTED_FREQUENCY, "variance": self.legacy_ewma_variance}
         return {
             "schema_version": 1, "event_type": "market_features", "feature_set": FEATURE_SET, "feature_version": FEATURE_VERSION,
             "asset": self.asset, "event_timestamp": datetime.fromtimestamp(self.event_timestamp_ms / 1000, tz=timezone.utc).isoformat(),
@@ -54,7 +63,9 @@ class V2TenSecondFeatureComputer:
         self._last_seen_by_venue: dict[str, int] = {}
         self._last_timestamp_ms: int | None = None
         self._last_price: float | None = None
-        self._ewma_variance: float | None = None
+        self._ewma_variances: dict[str, float | None] = {frequency: None for frequency in EWMA_FREQUENCIES}
+        self._sample_prices: dict[str, float | None] = {frequency: None for frequency in EWMA_FREQUENCIES}
+        self._legacy_ewma_variance: float | None = None
 
     @property
     def history_count(self) -> int:
@@ -97,32 +108,67 @@ class V2TenSecondFeatureComputer:
             prices = self._pending.pop(completed)
             synthetic = math.fsum(prices.values()) / len(prices)
             log_return = None if self._last_price is None else math.log(synthetic / self._last_price)
-            forecast_variance = self._ewma_variance
+            forecast_variances = {
+                frequency: variance for frequency, variance in self._ewma_variances.items()
+                if variance is not None
+            }
+            legacy_forecast_variance = self._legacy_ewma_variance
             if log_return is not None:
                 squared = log_return * log_return
-                self._ewma_variance = squared if self._ewma_variance is None else self.ewma_decay * self._ewma_variance + (1.0 - self.ewma_decay) * squared
+                self._legacy_ewma_variance = squared if self._legacy_ewma_variance is None else self.ewma_decay * self._legacy_ewma_variance + (1.0 - self.ewma_decay) * squared
+            bucket_end = completed + INTERVAL_MS
+            for frequency, interval_ms in EWMA_FREQUENCIES.items():
+                # A sampled close is available only after its full interval has
+                # completed. Forecasts use the previous variance, then update.
+                if bucket_end % interval_ms:
+                    continue
+                previous_sample = self._sample_prices[frequency]
+                if previous_sample is not None:
+                    sample_return = math.log(synthetic / previous_sample)
+                    squared = sample_return * sample_return
+                    prior = self._ewma_variances[frequency]
+                    self._ewma_variances[frequency] = squared if prior is None else self.ewma_decay * prior + (1.0 - self.ewma_decay) * squared
+                self._sample_prices[frequency] = synthetic
             self._last_timestamp_ms, self._last_price = completed, synthetic
-            output = FeatureRow(self.asset, completed, completed + INTERVAL_MS, now_ms, synthetic, log_return, len(prices), forecast_variance)
+            output = FeatureRow(self.asset, completed, completed + INTERVAL_MS, now_ms, synthetic, log_return, len(prices), forecast_variances, legacy_forecast_variance)
         return None if replay else output
 
     def snapshot(self) -> dict[str, Any]:
-        return {"schema_version": 3, "last_timestamp_ms": self._last_timestamp_ms, "last_price": self._last_price,
-                "ewma_variance": self._ewma_variance, "history": {venue: list(values) for venue, values in self._history.items()},
+        return {"schema_version": 4, "last_timestamp_ms": self._last_timestamp_ms, "last_price": self._last_price,
+                "ewma_variance": self._legacy_ewma_variance, "ewma_variances": self._ewma_variances, "sample_prices": self._sample_prices,
+                "history": {venue: list(values) for venue, values in self._history.items()},
                 "last_seen_by_venue": dict(self._last_seen_by_venue),
                 "pending": {str(timestamp): dict(prices) for timestamp, prices in self._pending.items()}}
 
     def restore(self, state: dict[str, Any]) -> None:
-        if state.get("schema_version") not in (1, 2, 3):
+        if state.get("schema_version") not in (1, 2, 3, 4):
             raise ValueError("unsupported feature state")
-        timestamp, price, variance = state.get("last_timestamp_ms"), state.get("last_price"), state.get("ewma_variance")
+        timestamp, price = state.get("last_timestamp_ms"), state.get("last_price")
         timestamp = None if timestamp is None else int(timestamp)
         if price is not None:
             price = float(price)
             if not math.isfinite(price) or price <= 0: raise ValueError("invalid persisted feature price")
-        if variance is not None:
-            variance = float(variance)
-            if not math.isfinite(variance) or variance < 0: raise ValueError("invalid persisted EWMA variance")
-        self._last_timestamp_ms, self._last_price, self._ewma_variance = timestamp, price, variance
+        self._last_timestamp_ms, self._last_price = timestamp, price
+        legacy_variance = state.get("ewma_variance")
+        if legacy_variance is not None:
+            legacy_variance = float(legacy_variance)
+            if not math.isfinite(legacy_variance) or legacy_variance < 0: raise ValueError("invalid persisted EWMA variance")
+        self._legacy_ewma_variance = legacy_variance
+        raw_variances = state.get("ewma_variances") or {}
+        raw_samples = state.get("sample_prices") or {}
+        self._ewma_variances = {}
+        self._sample_prices = {}
+        for frequency in EWMA_FREQUENCIES:
+            variance = raw_variances.get(frequency)
+            sample = raw_samples.get(frequency)
+            if variance is not None:
+                variance = float(variance)
+                if not math.isfinite(variance) or variance < 0: raise ValueError("invalid persisted EWMA variance")
+            if sample is not None:
+                sample = float(sample)
+                if not math.isfinite(sample) or sample <= 0: raise ValueError("invalid persisted EWMA sample price")
+            self._ewma_variances[frequency] = variance
+            self._sample_prices[frequency] = sample
         self._history.clear()
         for venue, values in (state.get("history") or {}).items():
             history = deque(maxlen=self.history_bars)

@@ -24,7 +24,7 @@ def payload(**overrides):
         "feature_set": "market_features",
         "feature_version": "v2_10s",
         "event_timestamp_ms": int(time.time() * 1000),
-        "values": {"synthetic_price": 70_000.0, "venue_count": 6, "ewma_state": {"frequency": "10s", "variance": 1e-6}},
+        "values": {"synthetic_price": 70_000.0, "venue_count": 6, "ewma_states": {h: {"frequency": h, "variance": variance} for h, variance in {"5m": 1e-6, "15m": 2e-6, "30m": 3e-6}.items()}},
         "source_timestamps_ms": {"bar_10s": int(time.time() * 1000)},
     }
     value.update(overrides)
@@ -42,9 +42,19 @@ def test_forecast_returns_complete_term_structure():
     assert response.status_code == 200
     body = response.json()
     assert set(body["annualized_volatility"]) == {"5m", "15m", "30m", "1h"}
-    assert len(set(body["annualized_volatility"].values())) == 1
+    assert len({body["annualized_volatility"][h] for h in ("5m", "15m", "30m")}) == 3
     assert body["model_version"] == "v2_10s"
     assert body["feature_available_ts_ms"] == body["feature_asof_ts_ms"]
+
+
+def test_forecast_uses_legacy_state_until_sampled_states_are_complete():
+    response = client().post("/v1/forecast", json=payload(values={
+        "synthetic_price": 70_000.0, "venue_count": 6,
+        "ewma_states": {"5m": {"frequency": "5m", "variance": 1e-6}},
+        "ewma_state": {"frequency": "10s", "variance": 1e-6},
+    }))
+    assert response.status_code == 200
+    assert len(set(response.json()["annualized_volatility"].values())) == 1
 
 
 def test_forecast_rejects_missing_ewma_state():
@@ -53,7 +63,7 @@ def test_forecast_rejects_missing_ewma_state():
 
 
 def test_forecast_rejects_missing_required_feature():
-    response = client().post("/v1/forecast", json=payload(values={"ewma_state": {"frequency": "10s", "variance": 1e-6}}))
+    response = client().post("/v1/forecast", json=payload(values={"ewma_states": {}}))
     assert response.status_code == 422
 
 
@@ -75,7 +85,7 @@ def test_forecast_uses_availability_timestamp_for_freshness():
 
 
 def test_forecast_rejects_non_finite_variance():
-    response = client().post("/v1/forecast", json=payload(values={"ewma_state": {"frequency": "10s", "variance": "nan"}}))
+    response = client().post("/v1/forecast", json=payload(values={"synthetic_price": 70_000.0, "venue_count": 6, "ewma_states": {"5m": {"frequency": "5m", "variance": "nan"}}}))
     assert response.status_code == 422
 
 

@@ -61,20 +61,7 @@ class EWMAProvider:
             raise ValueError("feature availability timestamp is in the future")
         if now_ms - request.available_timestamp_ms > max_age_ms:
             raise ValueError("feature availability timestamp is stale")
-        state = request.values.get("ewma_state")
-        if not isinstance(state, dict):
-            raise ValueError("ewma_state is required")
-        frequency = state.get("frequency")
-        variance = state.get("variance")
-        frequency_seconds = SUPPORTED_FREQUENCIES.get(frequency) if isinstance(frequency, str) else None
-        if frequency_seconds is None:
-            raise ValueError("unsupported EWMA frequency")
-        try:
-            variance_value = float(variance)
-        except (TypeError, ValueError) as exc:
-            raise ValueError("EWMA variance must be numeric") from exc
-        if not math.isfinite(variance_value) or variance_value <= 0:
-            raise ValueError("EWMA variance must be positive and finite")
+        states = request.values.get("ewma_states")
         source_timestamps = request.source_timestamps_ms
         if not source_timestamps:
             raise ValueError("source timestamps are required")
@@ -83,11 +70,36 @@ class EWMAProvider:
         if source_timestamps and min(source_timestamps.values()) < now_ms - max_age_ms:
             raise ValueError("source input is stale")
 
-        # EWMA variance is expressed per base period. Annualization preserves
-        # the same implied volatility across the requested forecast horizons.
-        annualized = math.sqrt(variance_value * SECONDS_PER_YEAR / frequency_seconds)
-        if not math.isfinite(annualized) or annualized <= 0:
-            raise ValueError("EWMA forecast is invalid")
-        outputs = {horizon: annualized for horizon in HORIZONS}
+        outputs: dict[str, float] = {}
+        if isinstance(states, dict) and set(states) == set(HORIZONS[:-1]):
+            for horizon in HORIZONS[:-1]:
+                state = states[horizon]
+                if not isinstance(state, dict) or state.get("frequency") != horizon:
+                    raise ValueError(f"EWMA state for {horizon} is invalid")
+                try:
+                    variance_value = float(state.get("variance"))
+                except (TypeError, ValueError) as exc:
+                    raise ValueError(f"EWMA variance for {horizon} must be numeric") from exc
+                if not math.isfinite(variance_value) or variance_value <= 0:
+                    raise ValueError(f"EWMA variance for {horizon} must be positive and finite")
+                outputs[horizon] = math.sqrt(variance_value * SECONDS_PER_YEAR / SUPPORTED_FREQUENCIES[horizon])
+        else:
+            state = request.values.get("ewma_state")
+            if not isinstance(state, dict) or state.get("frequency") not in SUPPORTED_FREQUENCIES:
+                raise ValueError("complete ewma_states or legacy ewma_state is required")
+            try:
+                variance_value = float(state.get("variance"))
+            except (TypeError, ValueError) as exc:
+                raise ValueError("legacy EWMA variance must be numeric") from exc
+            frequency_seconds = SUPPORTED_FREQUENCIES[state["frequency"]]
+            if not math.isfinite(variance_value) or variance_value <= 0:
+                raise ValueError("legacy EWMA variance must be positive and finite")
+            annualized = math.sqrt(variance_value * SECONDS_PER_YEAR / frequency_seconds)
+            if not math.isfinite(annualized) or annualized <= 0:
+                raise ValueError("legacy EWMA forecast is invalid")
+            outputs = {horizon: annualized for horizon in HORIZONS[:-1]}
+        # The direct provider uses EWMA for 1h too; packaged production
+        # provider replaces this value with its 1h model prediction.
+        outputs["1h"] = outputs["30m"]
         resources = {horizon: f"ewma/{self.model_version}/{horizon}" for horizon in HORIZONS}
         return ForecastResponse(outputs, request.event_timestamp_ms, now_ms, resources, self.model_version, request.available_timestamp_ms)
