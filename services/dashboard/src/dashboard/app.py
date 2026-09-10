@@ -8,7 +8,7 @@ from dash import Dash, Input, Output, State, dcc, html
 
 from dashboard.data import RedisReader, redis_client_from_env
 from dashboard.kalshi_contracts import contract_table
-from dashboard.kalshi_monitor import kalshi_monitor
+from dashboard.kalshi_monitor import kalshi_market_figure, kalshi_monitor_layout, kalshi_monitor_summary
 from dashboard.plots import candle_figure, volatility_cone_figure, volume_figure
 
 REDIS_PREFIX = os.getenv("AGGREGATOR_OUTPUT_PREFIX", "market")
@@ -23,18 +23,21 @@ def layout() -> html.Div:
         html.Div([html.Div("KALSHI QUANT TERMINAL", className="title"), html.Div(id="status", className="status")], className="header"),
         dcc.Interval(id="market-refresh", interval=250, n_intervals=0),
         dcc.Interval(id="candle-refresh", interval=500, n_intervals=0),
-        dcc.Interval(id="kalshi-refresh", interval=1000, n_intervals=0),
+        dcc.Interval(id="kalshi-monitor-refresh", interval=1000, n_intervals=0),
+        dcc.Interval(id="kalshi-table-refresh", interval=2000, n_intervals=0),
+        dcc.Interval(id="volatility-refresh", interval=10_000, n_intervals=0),
         dcc.Store(id="spot-data"),
         dcc.Store(id="candle-data"),
         dcc.Store(id="forming-candle"),
         dcc.Store(id="volatility-data"),
         dcc.Store(id="status-data"),
-        dcc.Store(id="kalshi-data"),
+        dcc.Store(id="kalshi-monitor-data"),
+        dcc.Store(id="kalshi-table-data"),
         html.Div([
             html.Div([html.H3("BTCUSDT", className="panel-title"), dcc.Graph(id="candles", config={"displayModeBar": False}), dcc.Graph(id="volume", config={"displayModeBar": False}), dcc.Graph(id="volatility-cone", config={"displayModeBar": False})], style=CARD),
-            html.Div([html.H3("Kalshi contract monitor", className="panel-title"), html.Div(id="kalshi-chain")], style=CARD),
+            html.Div([html.H3("Kalshi contract monitor", className="panel-title"), kalshi_monitor_layout()], style=CARD),
         ], className="top-grid"),
-        html.Div([html.H3("Active KXBTCD contracts", className="panel-title"), html.Div(id="kalshi-contracts")], style={**CARD, "marginTop": "14px"}),
+        html.Div([html.H3("Active KXBTCD contracts", className="panel-title"), contract_table()], style={**CARD, "marginTop": "14px"}),
     ], className="shell")
 
 
@@ -72,7 +75,7 @@ def refresh_candle_data(_: int):
     return reader.read_candle_data()["candles"]
 
 
-@app.callback(Output("volatility-data", "data"), Input("kalshi-refresh", "n_intervals"))
+@app.callback(Output("volatility-data", "data"), Input("volatility-refresh", "n_intervals"))
 def refresh_volatility_data(_: int):
     return reader.read_volatility_data()
 
@@ -102,9 +105,18 @@ def update_forming_candle(spot: dict | None, candles: list[dict] | None, previou
     return previous
 
 
-@app.callback(Output("kalshi-data", "data"), Input("kalshi-refresh", "n_intervals"), State("spot-data", "data"))
-def refresh_kalshi_data(_: int, spot_payload: dict | None):
+def _read_kalshi_data(spot_payload: dict | None) -> dict:
     return reader.read_kalshi_data((spot_payload or {}).get("price"))
+
+
+@app.callback(Output("kalshi-monitor-data", "data"), Input("kalshi-monitor-refresh", "n_intervals"), State("spot-data", "data"))
+def refresh_kalshi_monitor_data(_: int, spot_payload: dict | None):
+    return _read_kalshi_data(spot_payload)
+
+
+@app.callback(Output("kalshi-table-data", "data"), Input("kalshi-table-refresh", "n_intervals"), State("spot-data", "data"))
+def refresh_kalshi_table_data(_: int, spot_payload: dict | None):
+    return _read_kalshi_data(spot_payload)
 
 
 def _kalshi_snapshot(payload: dict | None) -> dict:
@@ -126,15 +138,23 @@ def refresh_volatility_cone(payload: dict | None):
     return volatility_cone_figure(payload or {})
 
 
-@app.callback(Output("kalshi-chain", "children"), Input("kalshi-data", "data"))
+@app.callback(
+    Output("kalshi-monitor-summary", "children"),
+    Output("kalshi-market-structure", "figure"),
+    Input("kalshi-monitor-data", "data"),
+)
 def refresh_kalshi_monitor(payload: dict | None):
     data = _kalshi_snapshot(payload)
-    return kalshi_monitor(data["contracts"], {"price": data["spot"]})
+    spot_payload = {"price": data["spot"]}
+    return (
+        kalshi_monitor_summary(data["contracts"], spot_payload),
+        kalshi_market_figure(data["contracts"], data["spot"]),
+    )
 
 
-@app.callback(Output("kalshi-contracts", "children"), Input("kalshi-data", "data"))
+@app.callback(Output("kalshi-contract-grid", "rowData"), Input("kalshi-table-data", "data"))
 def refresh_kalshi_contracts(payload: dict | None):
-    return contract_table(_kalshi_snapshot(payload)["contracts"])
+    return _kalshi_snapshot(payload)["contracts"]
 
 
 @app.callback(Output("status", "children"), Input("status-data", "data"))

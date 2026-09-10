@@ -128,6 +128,10 @@ def test_contract_table_builds_ag_grid():
     assert "sell_yes_edge" not in fields
 
 
+def test_contract_table_can_be_created_without_rows_for_property_updates():
+    assert contract_table().rowData == []
+
+
 def test_select_contract_window_keeps_six_strikes_each_side_of_atm():
     rows = [
         {"strike": float(strike), "market_ticker": f"M-T{strike}"}

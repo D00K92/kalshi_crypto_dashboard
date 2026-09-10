@@ -109,6 +109,34 @@ def test_reader_reads_kalshi_contract_streams():
     assert data.kalshi_contracts[1]["last_trade"] == "42¢"
 
 
+def test_kalshi_reader_reuses_decoded_windows_until_high_water_mark_changes(monkeypatch):
+    clock = [1_700_000_000_000]
+    monkeypatch.setattr(time, "time", lambda: clock[0] / 1000)
+
+    class CachedKalshiRedis(FakeRedis):
+        def __init__(self):
+            self.full_reads = 0
+            self.latest_id = b"10-0"
+
+        def xrevrange(self, stream, count):
+            if count == 1:
+                return [(self.latest_id, {})]
+            self.full_reads += 1
+            return []
+
+    client = CachedKalshiRedis()
+    reader = RedisReader(client, kalshi_cache_ttl_ms=500)
+    reader.read_kalshi_data(100)
+    reader.read_kalshi_data(100)
+    clock[0] += 501
+    reader.read_kalshi_data(100)
+    client.latest_id = b"11-0"
+    clock[0] += 501
+    reader.read_kalshi_data(100)
+
+    assert client.full_reads == 6
+
+
 def test_reader_returns_safe_state_when_redis_is_unavailable():
     class BrokenRedis:
         def mget(self, *keys):

@@ -1,4 +1,4 @@
-from dashboard.kalshi_monitor import kalshi_market_figure, kalshi_monitor
+from dashboard.kalshi_monitor import kalshi_market_figure, kalshi_monitor, kalshi_monitor_layout, kalshi_monitor_summary
 
 
 ROWS = [
@@ -43,3 +43,11 @@ def test_kalshi_monitor_builds_summary_and_chart():
 
     assert component.children[0].className == "kalshi-monitor-strip"
     assert component.children[1].id == "kalshi-market-structure"
+
+
+def test_kalshi_monitor_layout_keeps_chart_identity_stable():
+    component = kalshi_monitor_layout()
+
+    assert component.children[0].id == "kalshi-monitor-summary"
+    assert component.children[1].id == "kalshi-market-structure"
+    assert len(kalshi_monitor_summary(ROWS, {"price": "70050"})) == 6

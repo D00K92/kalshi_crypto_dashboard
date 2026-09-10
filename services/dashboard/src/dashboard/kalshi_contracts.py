@@ -194,10 +194,11 @@ def select_contract_window(
     return rows[max(0, atm_index - lower):atm_index + upper + 1]
 
 
-def contract_table(rows: list[dict[str, Any]]) -> dag.AgGrid:
+def contract_table(rows: list[dict[str, Any]] | None = None) -> dag.AgGrid:
+    """Create the grid once; callbacks replace only its row data."""
     return dag.AgGrid(
         id="kalshi-contract-grid",
-        rowData=rows,
+        rowData=rows or [],
         columnDefs=[
             {"field": "contract", "headerName": "CONTRACT", "minWidth": 150, "pinned": "left"},
             {"field": "bid", "headerName": "BID", "type": "rightAligned", "width": 88, "cellClass": "quote-bid"},

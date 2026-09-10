@@ -105,14 +105,14 @@ def kalshi_market_figure(rows: list[dict[str, Any]], spot: float | None = None) 
     return fig
 
 
-def kalshi_monitor(rows: list[dict[str, Any]], spot_payload: dict[str, Any]) -> html.Div:
+def kalshi_monitor_summary(rows: list[dict[str, Any]], spot_payload: dict[str, Any]) -> list[html.Div]:
     spot = _float(spot_payload.get("price"))
     chart_rows = _chart_rows(rows)
     atm = _atm_row(chart_rows, spot)
     event = rows[0].get("event") if rows else "-"
     best_bid = max((row.get("bid_value") for row in chart_rows if row.get("bid_value") is not None), default=None)
     best_ask = min((row.get("ask_value") for row in chart_rows if row.get("ask_value") is not None), default=None)
-    summary = [
+    return [
         html.Div([html.Span("EVENT"), html.Strong(event)]),
         html.Div([html.Span("SPOT"), html.Strong(_fmt_price(spot))]),
         html.Div([html.Span("ATM"), html.Strong(_fmt_price(atm.get("strike") if atm else None))]),
@@ -120,11 +120,23 @@ def kalshi_monitor(rows: list[dict[str, Any]], spot_payload: dict[str, Any]) -> 
         html.Div([html.Span("BEST BID"), html.Strong(_fmt_prob(best_bid))]),
         html.Div([html.Span("BEST ASK"), html.Strong(_fmt_prob(best_ask))]),
     ]
+
+
+def kalshi_monitor_layout() -> html.Div:
+    """Create the monitor once; callbacks update its properties in place."""
     return html.Div([
-        html.Div(summary, className="kalshi-monitor-strip"),
+        html.Div(id="kalshi-monitor-summary", className="kalshi-monitor-strip"),
         dcc.Graph(
             id="kalshi-market-structure",
-            figure=kalshi_market_figure(rows, spot),
+            figure=kalshi_market_figure([], None),
             config={"displayModeBar": False},
         ),
     ])
+
+
+def kalshi_monitor(rows: list[dict[str, Any]], spot_payload: dict[str, Any]) -> html.Div:
+    """Compatibility helper for callers that need a fully populated monitor."""
+    component = kalshi_monitor_layout()
+    component.children[0].children = kalshi_monitor_summary(rows, spot_payload)
+    component.children[1].figure = kalshi_market_figure(rows, _float(spot_payload.get("price")))
+    return component

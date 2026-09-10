@@ -19,6 +19,17 @@ class DashboardData:
     redis_error: str | None = None
 
 
+@dataclass
+class KalshiStreamCache:
+    """Decoded stream windows shared by the monitor and slower contract table."""
+
+    stream_ids: tuple[str | None, str | None, str | None]
+    tickers: list[dict[str, Any]]
+    trades: list[dict[str, Any]]
+    orderbooks: list[dict[str, Any]]
+    checked_at_ms: int
+
+
 def decode(raw: bytes | str | None, fallback: Any) -> Any:
     if raw is None:
         return fallback
@@ -39,11 +50,14 @@ class RedisReader:
         kalshi_ticker_stream: str = "stream:kalshi_tickers",
         kalshi_trade_stream: str = "stream:kalshi_trades",
         kalshi_orderbook_stream: str = "stream:kalshi_orderbook",
+        kalshi_cache_ttl_ms: int = 500,
     ) -> None:
         self.client, self.prefix, self.instrument = client, prefix, instrument
         self.kalshi_ticker_stream = kalshi_ticker_stream
         self.kalshi_trade_stream = kalshi_trade_stream
         self.kalshi_orderbook_stream = kalshi_orderbook_stream
+        self.kalshi_cache_ttl_ms = kalshi_cache_ttl_ms
+        self._kalshi_cache: KalshiStreamCache | None = None
 
     def read(self) -> DashboardData:
         try:
@@ -138,29 +152,51 @@ class RedisReader:
     def read_kalshi_data(self, spot: Any = None) -> dict[str, Any]:
         """Read and window Kalshi data before sending it to the browser."""
         try:
-            from dashboard.kalshi_contracts import contract_rows, select_contract_window
+            from dashboard.kalshi_contracts import select_contract_window
 
             try:
                 spot_price = float(spot) if spot is not None else None
             except (TypeError, ValueError):
                 spot_price = None
-            rows = self._attach_analytics(contract_rows(
-                self._stream_payloads(self.kalshi_ticker_stream, 600),
-                self._stream_payloads(self.kalshi_trade_stream, 300),
-                self._stream_payloads(self.kalshi_orderbook_stream, 600),
-            ))
+            rows = self._attach_analytics(self._kalshi_contract_rows())
             return {"contracts": select_contract_window(rows, spot_price), "spot": spot, "redis_ok": True, "redis_error": None}
         except redis.RedisError as exc:
             return {"contracts": [], "spot": spot, "redis_ok": False, "redis_error": type(exc).__name__}
 
     def _read_kalshi_contracts(self) -> list[dict[str, Any]]:
+        return self._attach_analytics(self._kalshi_contract_rows())
+
+    def _kalshi_contract_rows(self) -> list[dict[str, Any]]:
+        """Reuse decoded stream windows until their high-water marks advance."""
         from dashboard.kalshi_contracts import contract_rows
 
-        return self._attach_analytics(contract_rows(
-            self._stream_payloads(self.kalshi_ticker_stream, 600),
-            self._stream_payloads(self.kalshi_trade_stream, 300),
-            self._stream_payloads(self.kalshi_orderbook_stream, 600),
-        ))
+        now_ms = int(time.time() * 1000)
+        cache = self._kalshi_cache
+        if cache is None or now_ms - cache.checked_at_ms >= self.kalshi_cache_ttl_ms:
+            stream_ids = tuple(self._latest_stream_id(stream) for stream in (
+                self.kalshi_ticker_stream, self.kalshi_trade_stream, self.kalshi_orderbook_stream,
+            ))
+            if cache is None or cache.stream_ids != stream_ids:
+                cache = KalshiStreamCache(
+                    stream_ids=stream_ids,
+                    tickers=self._stream_payloads(self.kalshi_ticker_stream, 600),
+                    trades=self._stream_payloads(self.kalshi_trade_stream, 300),
+                    orderbooks=self._stream_payloads(self.kalshi_orderbook_stream, 600),
+                    checked_at_ms=now_ms,
+                )
+                self._kalshi_cache = cache
+            else:
+                cache.checked_at_ms = now_ms
+        assert cache is not None
+        # Rebuild rows from cached payloads so age labels continue advancing.
+        return contract_rows(cache.tickers, cache.trades, cache.orderbooks, now_ms=now_ms)
+
+    def _latest_stream_id(self, stream: str) -> str | None:
+        entries = self.client.xrevrange(stream, count=1)
+        if not entries:
+            return None
+        entry_id = entries[0][0]
+        return entry_id.decode() if isinstance(entry_id, bytes) else str(entry_id)
 
     def _attach_analytics(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Join analytics-owned latest keys without changing producer schemas."""
