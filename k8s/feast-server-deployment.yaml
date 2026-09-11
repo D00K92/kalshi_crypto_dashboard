@@ -5,7 +5,9 @@ metadata:
   labels:
     app: feast-server
 spec:
-  replicas: 1
+  # The HTTP server has no live inference consumers. Keep the deployment and
+  # service as a reversible compatibility shell while validating scale-to-zero.
+  replicas: 0
   selector:
     matchLabels:
       app: feast-server
