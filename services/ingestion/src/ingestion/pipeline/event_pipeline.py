@@ -6,6 +6,9 @@ import asyncio
 import logging
 import time
 
+from redis.exceptions import ConnectionError as RedisConnectionError
+from redis.exceptions import TimeoutError as RedisTimeoutError
+
 from ingestion.models import MarketEvent
 from ingestion.pipeline.redis_publisher import RedisPublisher
 
@@ -56,6 +59,7 @@ class EventPipeline:
         while True:
             first = await self._critical_queue.get()
             batch = [first]
+            published = False
             try:
                 deadline = time.monotonic() + self._flush_seconds
                 while len(batch) < self._batch_size:
@@ -66,9 +70,11 @@ class EventPipeline:
                     batch.append(event)
                 self._warn_if_delayed(batch, "critical")
                 await self._publisher.publish_many(batch)
+                published = True
             finally:
-                for _ in batch:
-                    self._critical_queue.task_done()
+                if published:
+                    for _ in batch:
+                        self._critical_queue.task_done()
 
     async def _run_books(self) -> None:
         while True:
@@ -88,7 +94,15 @@ class EventPipeline:
                     if event is not None:
                         events.append(event)
                 self._warn_if_delayed(events, "book")
-                await self._book_publisher.publish_many(events)
+                try:
+                    await self._book_publisher.publish_many(events)
+                except (RedisConnectionError, RedisTimeoutError):
+                    # Books are replaceable snapshots. Drop this stale batch
+                    # after bounded retries so newer coalesced state can flow.
+                    LOGGER.warning(
+                        "ingestion_book_batch_dropped",
+                        extra={"event_count": len(events)},
+                    )
             finally:
                 for _ in keys:
                     self._book_queue.task_done()

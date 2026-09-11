@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 
+from redis.exceptions import TimeoutError as RedisTimeoutError
+
 from ingestion.models import BookSnapshot, Trade
 from ingestion.pipeline.event_pipeline import EventPipeline
 
@@ -15,6 +17,11 @@ class RecordingPublisher:
 
     async def publish_many(self, events: list[object]) -> None:
         self.events.extend(events)
+
+
+class FailingPublisher:
+    async def publish_many(self, events: list[object]) -> None:
+        raise RedisTimeoutError("temporary Redis timeout")
 
 
 async def test_pipeline_delivers_and_drains() -> None:
@@ -63,3 +70,27 @@ async def test_pipeline_separates_trade_and_coalesced_book_snapshot() -> None:
         await asyncio.gather(worker, return_exceptions=True)
     assert publisher.events == [high]
     assert books.events == [newer_low]
+
+
+async def test_failed_book_batch_does_not_stop_critical_publication() -> None:
+    publisher = RecordingPublisher()
+    pipeline = EventPipeline(
+        publisher,
+        maxsize=4,
+        book_publisher=FailingPublisher(),  # type: ignore[arg-type]
+        book_flush_ms=1,
+    )
+    book = BookSnapshot(event_id="book", event_type="book_snapshot", venue="x", instrument="x", sequence=1, bids=(), asks=(), exchange_ts_ms=1, received_ts_ms=2, depth=1)
+    trade = Trade(event_id="trade", event_type="trade", venue="x", instrument="x", trade_id="trade", price="1", quantity="1", taker_side="buy", exchange_ts_ms=1, received_ts_ms=2)
+    worker = asyncio.create_task(pipeline.run())
+    try:
+        await pipeline.put(book)
+        await pipeline.put(trade)
+        await asyncio.wait_for(pipeline.drain(), timeout=1)
+        assert not worker.done()
+    finally:
+        worker.cancel()
+        await asyncio.gather(worker, return_exceptions=True)
+
+    assert publisher.events == [trade]
+    assert pipeline.queued_events == 0

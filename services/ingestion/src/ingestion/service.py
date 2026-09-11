@@ -27,10 +27,13 @@ class IngestionService:
         self._publisher = RedisPublisher(
             settings.redis_url,
             stream_maxlen=settings.stream_maxlen,
+            publisher_name="critical",
         )
         self._book_publisher = RedisPublisher(
             settings.redis_url,
             stream_maxlen=settings.stream_maxlen,
+            retry_limit=3,
+            publisher_name="book",
         )
         self._pipeline = EventPipeline(
             self._publisher,
