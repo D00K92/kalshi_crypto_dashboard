@@ -1,212 +1,137 @@
-# How This Project Deploys Software
+# CI/CD and deployment guide
 
-This document explains how code moves from a developer's computer into the production system. It is written for someone who does not need to know CI/CD terminology already.
+This document describes the current path from a commit on `main` to the GKE
+production workloads.
 
-## The Short Version
-
-When code is pushed to the `main` branch:
-
-1. GitHub Actions checks the code and runs tests.
-2. GitHub Actions builds Docker images for the services.
-3. An isolated staging pipeline deploys the real aggregator and live-feature
-   containers and exercises their Redis contracts, restarts, and recovery.
-4. Only after staging passes can the production deployment begin.
-5. Kubernetes, running in Google Kubernetes Engine (GKE), replaces the old
-   service containers with the new ones.
-
-The normal process is therefore:
+## Workflow chain
 
 ```text
-git push main
-        |
-        v
-GitHub Actions: test and build
-        |
-        v
-GKE staging: isolated end-to-end and recovery gate
-        |
-        v
-GitHub Actions: deploy
-        |
-        +--> Artifact Registry: store Docker images
-        |
-        +--> GKE/Kubernetes: run the new images
+push main
+   |
+   +-> CI
+   |     tests + linux/amd64 build checks for all deployed services
+   |
+   +-> Staging Integration
+   |     isolated Redis, aggregator, live-feature-service, restart/recovery probes
+   |
+   +-> Deploy Services
+         production environment gate
+         build/push commit-SHA images
+         package approved 1h model
+         apply GKE resources
+         verify rollouts, feature parity, and live analytics outputs
 ```
 
-## What CI/CD Means
+`Deploy Services` runs automatically only when the matching Staging
+Integration workflow succeeds on `main`. It can also be dispatched manually.
+The production job has a concurrency lock and uses the GitHub `production`
+environment for any configured approval protection.
 
-**CI** means Continuous Integration. It automatically checks new code when it is pushed. In this project, CI installs the locked dependencies, runs Python tests, and checks that Docker images can be built.
+A separate `ML Pipeline CI` workflow tests Feast and ML code. On a
+main-branch change it publishes immutable `ml-load`, `ml-train`,
+`ml-evaluate`, and `ml-register` task images and a compiled Vertex pipeline
+template. It does not submit training or promote a model automatically.
 
-**CD** means Continuous Delivery or Continuous Deployment. It delivers code to
-the production environment. In this project, successful CI starts the staging
-integration workflow; only a successful staging run starts `Deploy Services`.
-The production job uses the GitHub `production` environment so repository
-owners can require approval before deployment.
+## CI
 
-GitHub Actions is the service that runs both CI and CD. Each workflow runs on a temporary GitHub-hosted VM. The VM is used for testing, building images, and running deployment commands. The application itself does not run permanently on that VM.
+Source: `.github/workflows/ci.yml`.
 
-## What Happens During CI
+CI uses each service's committed `uv.lock` when present, runs its tests, and
+performs a Linux Docker build for:
 
-The CI workflow is:
+- ingestion
+- gcs_exporter
+- aggregator
+- dashboard
+- analytics
+- batch_etl
+- live_feature_service
+- model_serving
+- feast_store
 
-[`.github/workflows/ci.yml`](../.github/workflows/ci.yml)
+The model-serving CI build is structural and may omit a production artifact.
+The production build requires the approved bundle.
 
-For each service, CI:
+## Staging integration
 
-1. Checks out the pushed commit.
-2. Installs the Python version and dependencies from `uv.lock`.
-3. Runs the service's test suite.
-4. Builds the service's Linux Docker image.
+Source: `.github/workflows/integration.yml`.
 
-The current services are:
+The staging job uses isolated resource names and deploys the real aggregator and
+live-feature-service images. It verifies Redis input/output contracts,
+feature generation, consumer-group recovery, and restart behavior. Nothing in
+staging changes production consumer groups or latest-state keys.
 
-- `ingestion`
-- `gcs-exporter`
-- `aggregator`
-- `dashboard`
+A failure stops the workflow chain; production CD is not triggered.
 
-CI builds all service images because this is a monorepo and the deployment workflow deploys the service set together. A Docker build confirms that the image can be assembled; it is not the same as running a full production test.
+## Production deployment
 
-## What Happens During Deploy Services
+Source: `.github/workflows/cd.yml`.
 
-The deployment workflow is:
+CD checks out the exact successful commit and authenticates to Google Cloud via
+OIDC Workload Identity. It builds and pushes commit-SHA images to
+`asia-northeast3-docker.pkg.dev/kalshi-crypto-506614/quant-repo`.
 
-[`.github/workflows/cd.yml`](../.github/workflows/cd.yml)
+Before the model-serving image is built, CD requires:
 
-It starts only after the staging integration completes successfully on `main`.
+- `VOLATILITY_MODEL_1H`: exact immutable Vertex model resource ending in a
+  version such as `@1`.
+- `VOLATILITY_MODEL_1H_ARTIFACT_URI`: immutable GCS directory containing
+  `model.joblib` and `metadata.json`.
+
+CD downloads those two files, validates the v2_10s 1h contract, generates a
+checksum manifest, and builds with `REQUIRE_MODEL_BUNDLE=true`. Model-serving
+therefore needs no Vertex/GCS access at runtime.
 
 The workflow then:
 
-1. Checks out the exact commit that passed CI.
-2. Authenticates to Google Cloud using GitHub's OIDC identity mechanism.
-3. Builds and pushes versioned Docker images to Google Artifact Registry.
-4. Resolves the production Redis endpoint.
-5. Applies the Kubernetes deployment manifests to the GKE cluster.
-6. Waits for every deployment to finish rolling out successfully.
+1. Resolves the Memorystore private endpoint.
+2. Applies the Feast registry with a one-shot Job.
+3. Renders and applies all Deployment, Service, CronJob, and Ingress manifests.
+4. Waits for active Deployments to roll out and confirms the suspended
+   `feast-server` compatibility Deployment is applied at zero replicas.
+5. Confirms the batch and parity CronJobs exist.
+6. Runs an immediate offline/online feature parity Job.
+7. Checks analytics readiness and fresh live Redis outputs.
+8. Verifies the exact approved 1h resource, EWMA short-horizon resources, and
+   at least one available KXBTCD price.
 
-The image tag is the Git commit SHA. This makes it possible to identify exactly which source code is running in production.
+## Required repository and cluster configuration
 
-The workflow verifies these deployments:
+GitHub/GCP identity is configured in the workflows. The mutable deployment
+prerequisites are:
 
-```bash
-kubectl rollout status deployment/gcs-exporter
-kubectl rollout status deployment/ingestion-service
-kubectl rollout status deployment/aggregator
-kubectl rollout status deployment/dashboard
-```
+| Item | Purpose |
+|---|---|
+| GitHub variable `VOLATILITY_MODEL_1H` | Approved immutable 1h Vertex version |
+| GitHub variable `VOLATILITY_MODEL_1H_ARTIFACT_URI` | Matching immutable GCS artifact directory |
+| GitHub variable `ANALYTICS_GCP_SERVICE_ACCOUNT` | Workload Identity annotation for analytics rollback capability |
+| Secret `kalshi-credentials` | Kalshi API key and private key for ingestion/analytics |
+| Secret `coinbase-credentials` | Optional authenticated Coinbase feed |
+| Memorystore instance in `asia-northeast3` | Real-time state and Streams |
+| GCS/BigQuery IAM for `gcs-exporter` and `batch-etl` service accounts | Archive and offline pipelines |
+| Managed certificate, DNS, and static IP | Public dashboard ingress |
 
-## What Kubernetes Does
+Secrets must never be committed or printed in logs.
 
-Kubernetes is the system that keeps the application containers running in GKE.
-
-When the deployment workflow applies an updated manifest, Kubernetes notices that a newer Docker image is required. It starts a new pod using that image, waits for it to become ready, and then removes the old pod. This is called a **rolling update** or **rollout**.
-
-The `kubectl` commands are executed by the temporary GitHub Actions VM, but they control the real GKE cluster. The services run in GKE after the workflow finishes.
-
-## Example: Ingestion Service
-
-The ingestion service is defined in several places because each file has a different responsibility:
-
-- Application source: [`services/ingestion/src`](../services/ingestion/src)
-- Python dependencies: [`services/ingestion/pyproject.toml`](../services/ingestion/pyproject.toml)
-- Docker image instructions: [`services/ingestion/Dockerfile`](../services/ingestion/Dockerfile)
-- Production Kubernetes configuration: [`k8s/ingestion-deployment.yaml`](../k8s/ingestion-deployment.yaml)
-- Deployment workflow step: [`.github/workflows/cd.yml`](../.github/workflows/cd.yml)
-
-For ingestion, the deployment sequence is:
-
-```text
-Change ingestion source code
-        |
-        v
-Push commit to main
-        |
-        v
-Run ingestion tests
-        |
-        v
-Build ingestion Docker image
-        |
-        v
-Push image to Artifact Registry
-        |
-        v
-Apply k8s/ingestion-deployment.yaml
-        |
-        v
-Kubernetes replaces ingestion-service pod
-```
-
-The workflow uses the commit SHA as the image tag, so the Kubernetes deployment can run the exact image produced from the tested commit.
-
-## Staging Integration Test
-
-After successful CI, a required workflow runs an isolated integration test in GKE:
-
-[`.github/workflows/integration.yml`](../.github/workflows/integration.yml)
-
-For each run, staging builds the tested aggregator and live-feature images and
-creates separate Deployments in `quant-staging`. Every Redis stream, key,
-checkpoint, and consumer group has a run-specific `staging:<run>:<attempt>`
-prefix; no production or legacy state is read or overwritten.
-
-The staging gate verifies:
-
-1. Late and corrupting trades cannot create duplicate or regressing primitives.
-2. The live feature is computed from the expected cross-venue price.
-3. Both services restore their checkpoints after a Kubernetes restart.
-4. Entries abandoned by a simulated crashed consumer are recovered with
-   `XAUTOCLAIM` and published exactly once.
-
-Staging resources are deleted after the run, and its isolated Redis keys expire
-after one hour.
-
-## How to Check a Deployment
-
-In GitHub, open the repository's **Actions** tab. The relevant workflows are:
-
-- **CI**: tests and Docker builds
-- **Deploy Services**: production image deployment and Kubernetes rollout verification
-- **Staging Integration**: integration test in GKE
-
-A production deployment is complete only when **CI**, **Staging Integration**,
-and **Deploy Services** all succeed for the same commit SHA.
-
-## Dashboard Access
-
-The dashboard Kubernetes Service remains internal (`ClusterIP`). Its public,
-read-only portfolio URL is served by the GKE external HTTPS load balancer:
-
-```text
-https://crypto-dashboard.kairos-trading.com
-```
-
-The ingress redirects HTTP to HTTPS and uses a Google-managed certificate. The
-Cloudflare DNS record must point at the reserved global address named
-`crypto-dashboard-public-ip`. Keep Cloudflare set to **DNS only** while the
-Google certificate is provisioning. Once the certificate is `Active`, Cloudflare
-may be proxied with SSL/TLS mode set to **Full (strict)**.
-
-For temporary local access, use a port-forward:
+## Operational checks
 
 ```bash
-kubectl port-forward service/dashboard 8052:8050
+gh run list --limit 10
+gh run view <run-id>
+
+kubectl get deployments
+kubectl get cronjobs
+kubectl rollout status deployment/model-serving --timeout=5m
+kubectl rollout status deployment/analytics --timeout=5m
+kubectl logs deployment/analytics --tail=100
 ```
 
-Then open:
+Application readiness:
 
-```text
-http://localhost:8052
-```
+- model-serving: `GET /readyz` only after the packaged provider loads.
+- analytics: `GET /readyz` only after at least one fresh supported price.
+- dashboard: `GET /readyz` only while Redis is reachable.
+- aggregator/live-feature/exporter: pod-local readiness after Redis/state setup.
 
-This forwards a local computer port to the dashboard service inside GKE. It does not change the deployment or expose the dashboard publicly.
-
-## Important Distinction
-
-There are three different environments involved:
-
-- **GitHub Actions VM**: temporary machine used to test, build, and issue deployment commands.
-- **Artifact Registry**: Google Cloud storage for versioned Docker images.
-- **GKE/Kubernetes**: the production environment where the services actually run.
-
-The GitHub Actions VM disappears after the workflow. Artifact Registry keeps the images. GKE keeps the application services running.
+The authoritative interfaces and service ownership boundaries are documented in
+`ARCHITECTURE.md` and each `services/<service>/README.md`.

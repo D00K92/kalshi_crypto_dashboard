@@ -1,65 +1,95 @@
-# ML Pipeline
+# ML pipeline service
 
-`ml_pipeline` owns model training, evaluation, retraining decisions, Kubeflow
-Pipelines, and Vertex AI model lifecycle operations. Feature and target
-generation, Feast definitions, and online-store materialization belong to
-`services/batch_etl`.
+Owns training-data assembly, horizon-specific model training, evaluation,
+promotion decisions, and Vertex AI model registration. It consumes the existing
+BigQuery/Feast contracts and does not compute live features or serve inference.
 
-## Inputs
+## Model contract
 
-Training labels and exact-timestamp features are joined directly from the
-partitioned BigQuery tables declared by the immutable Feast contract. This
-avoids an expensive range join across the feature-view TTL; Feast remains the
-owner of the corresponding offline and online feature definitions.
+| Item | Current value |
+|---|---|
+| Feature set/version | Training default `market_features/v3_10s`; `v2_10s` remains the live rollback contract |
+| Model inputs | Three horizon-specific trailing realized-volatility components |
+| Label table | `training_labels.future_realized_volatility_v2_10s` |
+| Horizons | `5m`, `15m`, `30m`, `1h` |
+| Split | Chronological 70% train / 15% validation / 15% test |
+| Candidate model | Non-negative HAR linear regression per horizon; XGBoost remains selectable |
+| Benchmark | Annualized EWMA, decay `0.96` |
+| Primary metric | QLIKE |
+| Champion metrics | `gs://kalshi-crypto-tick-data/models/v3_har_1/champion_metrics.json` |
 
-Training is point-in-time safe: the loader rejects current-day ranges and only
-uses labels whose future window has completed.
+Training rejects current-day ranges and exact-timestamp joins BigQuery labels to
+the immutable Feast feature contract. Promotion requires a candidate to beat
+EWMA by 2% and be no more than 5% worse than the current champion.
 
-## Structure
+The pipeline can train and register all four horizons. The current online
+`model-serving` release packages only the approved 1h XGBoost artifact; its
+5m/15m/30m outputs use EWMA. Training all horizons preserves evaluation history
+and supports a later serving promotion without changing this service boundary.
+
+## Pipeline DAG
 
 ```text
-src/common/       Shared loading, EWMA benchmark, QLIKE, and model logic
-src/components/   KFP components and local training/evaluation entrypoints
-src/pipelines/    Kubeflow pipeline DAG definition (`pipeline_dag.py`)
-containers/       Four task images: load, train, evaluate, and register
-scripts/          Compile, submit, and event-trigger training workflows
+load point-in-time table
+        |
+        +-- for each 5m / 15m / 30m / 1h in parallel
+                train -> evaluate vs EWMA/champion -> conditional register
 ```
 
-## Training and retraining
+Task images are:
 
-The four horizon models use chronological splits and non-negative predictions.
-Evaluation compares model QLIKE against an annualized EWMA benchmark (`lambda=0.96`).
-`scripts/evaluate_and_trigger.py` records state and can submit the KFP pipeline
-after sustained champion deterioration. The KFP DAG evaluates each candidate on
-the same 15% holdout used for training and registers it only when it beats EWMA
-by 2% and is no more than 5% worse than the current champion. The champion
-metrics artifact is expected at
-`gs://kalshi-crypto-tick-data/models/v1/champion_metrics.json`.
+- `ml-load`
+- `ml-train`
+- `ml-evaluate`
+- `ml-register`
 
-Inference prediction records should be written under
-`gs://kalshi-crypto-tick-data/inference_predictions/date=YYYY-MM-DD/`.
+Registered artifacts contain `model.joblib` and `metadata.json`; metadata
+records the exact horizon, feature set/version, ordered feature columns, label
+version, architecture, row split, and metrics. The `architecture` pipeline
+parameter selects `har` or `xgboost` without changing the DAG.
 
-Compile and submit from the unified repository environment:
+## Run locally
+
+Python 3.12 and GCP credentials are required for BigQuery, GCS, and Vertex
+operations.
 
 ```bash
-uv run --directory services/ml_pipeline python scripts/compile_pipeline.py \
-  --image-tag <immutable-git-sha>
-uv run --directory services/ml_pipeline python scripts/run_pipeline.py ...
+uv sync --locked
+uv run --locked pytest
+
+uv run --locked python scripts/compile_pipeline.py \
+  --output pipeline.yaml --image-tag <immutable-git-sha>
+
+uv run --locked python scripts/run_pipeline.py \
+  --template pipeline.yaml \
+  --project kalshi-crypto-506614 \
+  --location asia-northeast3 \
+  --pipeline-root gs://kalshi-crypto-tick-data/pipeline-root \
+  --start-date 2026-08-31 --end-date 2026-09-02
 ```
 
-`ML Pipeline CI` runs the Feast and ML test suites and, on a `main` change to
-either service, publishes `ml-load`, `ml-train`, `ml-evaluate`, and
-`ml-register` with the immutable commit SHA. It also uploads a compiled Vertex
-template that references those exact images. Image publication does not submit
-or promote a model; use `run_pipeline.py` with a completed training range and
-record the resulting Vertex resources before changing analytics variables.
+Use a service account with the necessary Vertex, BigQuery, GCS, and Artifact
+Registry permissions when submitting production runs. Do not point production
+at a display name or mutable alias; record the exact versioned Vertex resource
+and immutable artifact URI from an approved promotion.
 
-Historical feature retrieval is centralized in
-`src/common/data_io.py::load_training_table_from_feast`; it resolves the model
-contract and performs an exact-timestamp BigQuery join. Feast configuration is
-owned by `services/feast_store`. The legacy GCS loader remains available for
-rollback only.
+## Configuration
 
-Container images are published to Artifact Registry under
-`asia-northeast3-docker.pkg.dev/kalshi-crypto-506614/ml-pipeline/` and referenced
-directly by the Vertex pipeline.
+| Variable | Default / purpose |
+|---|---|
+| `ML_PIPELINE_REGISTRY` | `asia-northeast3-docker.pkg.dev/kalshi-crypto-506614/ml-pipeline` |
+| `ML_PIPELINE_IMAGE_TAG` | Component image tag used by the compiled DAG |
+| `GITHUB_SHA` | Default immutable tag for compilation in CI |
+| Pipeline parameters | Project, location, date range, feature/model version, bucket, and champion metrics URI |
+
+## CI and release relationship
+
+`.github/workflows/ml-pipeline.yml` tests this service and
+`feast_store`. On a main-branch change it publishes all four task images with
+the commit SHA and uploads a compiled Vertex template. Publishing the template
+does not submit a run or promote a model.
+
+After an approved 1h model is registered, production release variables
+`VOLATILITY_MODEL_1H` and `VOLATILITY_MODEL_1H_ARTIFACT_URI` identify the
+exact resource and artifact. The services CD workflow validates and packages
+those bytes into the model-serving image.

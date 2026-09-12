@@ -1,3 +1,10 @@
+# Candidate feature research
+
+> Research backlog, not the deployed model contract. Production
+> `market_features/v2_10s` currently uses only ordered `log_return` and
+> `venue_count`. Promote any feature below only after offline value, leakage,
+> and live/offline parity are proven.
+
 ### Category 1: Microstructure & Order Book Dynamics
 
 * **Weighted Average Price (WAP) & Microprice:**

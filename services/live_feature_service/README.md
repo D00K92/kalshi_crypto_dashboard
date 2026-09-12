@@ -1,29 +1,79 @@
 # Live feature service
 
-Consumes per-venue completed 10-second primitives from `stream:primitives:v1`,
-retains a 450-bar rolling history per venue, and publishes the `market_features/v2_10s`
-contract to `stream:features:v2_10s` plus `market:features:v2_10s:BTCUSD:latest`.
+Owns the low-latency `market_features/v2_10s` calculation. It consumes the
+aggregator's completed per-venue primitives, maintains rolling state, and
+publishes an inference-ready feature envelope without requiring changes to
+upstream event schemas.
 
-The rolling state, including the in-flight bucket, is checkpointed in Redis in
-the same transaction as feature publication and consumer acknowledgement. On
-first startup the service replays the recent primitive stream to warm its
-history; restarts restore the checkpoint and reclaim unacknowledged entries.
-Configure the reclaim threshold with `LIVE_FEATURE_PENDING_IDLE_MS` (default
-`60000`). The primitive stream is retained to approximately 100,000 entries
-(about 48 hours for six venues).
+## Data contract
 
-The v2_10s checkpoint uses `market:features:BTCUSD:state:v2_10s` and consumer
-group `live-features-v2-10s` by default. The former v1 key and group are left
-intact so an emergency rollback can restore the previous deployment.
+Input:
 
-The v2_10s parity formula is:
+- `stream:primitives:v1`
+- consumer group `live-features-v2-10s`
+
+Outputs:
+
+- `stream:features:v2_10s`
+- `market:features:v2_10s:BTCUSD:latest`
+- restart checkpoint `market:features:BTCUSD:state:v2_10s`
+
+The feature formula is:
 
 ```text
-synthetic_price = mean(per-venue p_trade_mean)
-log_return = ln(synthetic_price / previous_synthetic_price)
-venue_count = count(non-null per-venue prices)
+synthetic_price = mean(non-null per-venue p_trade_mean)
+log_return      = ln(synthetic_price / previous_synthetic_price)
+venue_count     = count(non-null per-venue prices)
 ```
 
-The `ewma_state` field is an inference-only extension and is ignored by Feast's
-registered v2_10s fields. Feast's existing live-push bridge consumes the feature
-stream asynchronously.
+The payload also includes source timestamps, event/availability timestamps, and
+an `ewma_states` object containing 5m, 15m, and 30m sampled-candle EWMA
+variances. Feast ignores the inference-only EWMA extension;
+model-serving uses it for the 5m/15m/30m forecasts.
+
+The optional `v3_10s` contract adds annualized trailing realized volatility at
+30s, 1m, 5m, 15m, 30m, 1h, and 3h. It retains 1,100 bars and publishes only after
+the complete three-hour lookback is warm. Select it with `FEATURE_VERSION=v3_10s`;
+versioned Redis keys and defaults are derived automatically.
+
+State, an optional feature publication, and the source ACK commit in one Redis
+transaction. First startup replays recent primitives; restarts restore the
+checkpoint and reclaim abandoned pending entries. Until enough history exists,
+the service warms up rather than inventing values.
+
+## Run and test locally
+
+```bash
+uv sync
+REDIS_URL=redis://localhost:6379/0 uv run python -m live_feature_service
+uv run pytest
+```
+
+## Configuration
+
+| Variable | Default |
+|---|---|
+| `REDIS_URL` | `redis://127.0.0.1:6379/0` |
+| `BARS_STREAM` | `stream:primitives:v1` |
+| `FEATURE_STREAM` | `stream:features:v2_10s` |
+| `FEATURE_KEY` | `market:features:v2_10s:BTCUSD:latest` |
+| `FEATURE_STATE_KEY` | `market:features:BTCUSD:state:v2_10s` |
+| `LIVE_FEATURE_GROUP` | `live-features-v2-10s` |
+| `LIVE_FEATURE_PENDING_IDLE_MS` | `60000` |
+| `EWMA_DECAY` | `0.96` |
+| `MAX_BAR_AGE_MS` | `120000` |
+| `HISTORY_BARS` | `450` |
+| `REPLAY_COUNT` | `5000` |
+| `PRIMITIVE_STREAM_MAXLEN` | `100000` |
+| `HEALTH_PORT` | `8080` |
+
+## Consumers and deployment
+
+Analytics reads the latest feature key. `feast-live-bridge` asynchronously
+consumes the feature stream, and the feature parity job compares recent stream
+history with BigQuery.
+
+Kubernetes runs `deployment/live-feature-service` from
+`k8s/live-feature-service-deployment.yaml`. `GET /healthz` is liveness and
+`GET /readyz` becomes ready after Redis setup and state restoration/replay.
+The probe endpoint is pod-local.

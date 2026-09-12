@@ -1,67 +1,87 @@
-# Aggregator
+# Aggregator service
 
-Consumes normalized trade and top-15 order-book events from Redis Streams and
-publishes reusable market state for the dashboard and downstream ML services.
-The service maintains per-venue books, a consolidated 10-level order book with
-spread/depth/imbalance metrics, a fresh-venue equal-weight synthetic trade
-price, thirty-second OHLCV candles, and completed bars at 1m/5m/10m/15m/30m
-and 1h frequencies. Bars are retained for two hours by default so
-`live_feature_service` has enough context for 1-hour predictions. Aggregator
-does not compute ML feature rows; `live_feature_service` consumes
-`stream:bars:v1` and `stream:orderbook:v1`, computes features/EWMA state, and
-publishes the Feast-compatible feature stream.
+Consumes normalized crypto trades and book snapshots and publishes reusable
+market primitives. It fits the existing ingestion schema and Redis topology; it
+does not connect to exchanges or compute model-specific features.
 
-The canonical per-venue primitive dataset is published on
-`stream:primitives:v1`. Each `primitive_bar` row uses the offline field names,
-one venue/frequency/time bucket, zero-fills flow for empty buckets, forward
-fills the last trade state, and carries the latest order-book levels available
-at the bucket boundary. Configure the stream with `PRIMITIVE_STREAM` and
-`PRIMITIVE_STREAM_MAXLEN`.
+## Inputs
 
-`stream:orderbook:v1` is an event-driven primitive stream: one per-venue
-`market_book` record is emitted for each accepted input order-book snapshot.
-Its cadence depends on the venue feeds and ingestion rate. The `500ms`
-freshness setting is retained for internal state quality and does not throttle
-publication. The old cross-venue `aggregated_orderbook` publication is no
-longer emitted.
+| Stream | Consumer group |
+|---|---|
+| `stream:ticks` | Production: `aggregator_trades_v5` |
+| `stream:orderbook_snapshots` | Production: `aggregator_books_v5` |
 
-Completed records on `stream:bars:v1` retain the existing bar fields and also
-expose additive canonical trade primitives used by the offline resampler
-(`primitive_schema_version=2`): `p_open`, `p_high`, `p_low`, `p_trade`,
-`p_close`, `p_trade_mean`, `v_trade`, `v_buy`, `v_sell`, `cnt_trade`, and
-fill-time statistics. Order-book primitives remain on `stream:orderbook:v1`;
-time-bucketed per-venue book columns are the next compatibility-safe
-expansion.
+The manifest pins these v5 group names as persistent delivery identities.
+The code-level `market_aggregator_*` defaults remain for compatibility only;
+changing a deployed group creates a new group and can replay retained entries.
 
-Run locally with Redis available:
+## Outputs
 
-```bash
-uv sync --group dev
-uv run aggregator
-```
+| Redis interface | Meaning |
+|---|---|
+| `market:book:BTCUSDT:latest` | Most recently processed venue's canonical depth-limited book; last writer wins |
+| `stream:orderbook:v1` | Bounded stream of canonical per-venue book snapshots |
+| `market:spot:BTCUSDT:latest` | Equal-weight mean of fresh per-venue trade prices |
+| `market:aggregated_spot` | Best-effort spot Pub/Sub notification |
+| `stream:primitives:v1` | Completed per-venue 10-second primitive bars |
+| `market:primitive:<venue>:10s:latest` | Latest primitive for diagnostics |
+| `market:candles:BTCUSDT:30s` | Dashboard-facing 30-second candle snapshot |
+| `market:aggregated_candles` | Best-effort candle Pub/Sub notification |
+| `market:candle_state:BTCUSDT:10s` | Atomic restart checkpoint |
+| `market:primitive_watermark:BTCUSDT:10s` | Event-time finalization watermark |
 
-Configuration is environment-based; see `src/aggregator/config.py`.
-Set `AGGREGATOR_OUTPUT_PREFIX` for isolated staging runs; it defaults to
-`market`. Set `AGGREGATION_HISTORY_MS` to increase the retained bar context
-(the default is two hours). Stream names and retention are configurable with
-`AGGREGATED_BARS_STREAM`, `AGGREGATED_ORDERBOOK_STREAM`, and their `*_MAXLEN`
-settings.
+The aggregator does not publish `market_features/v2_10s`. That contract and
+its EWMA state belong to `live_feature_service`.
 
-Primitive buckets close on an event-time watermark. Configure the tolerated
-delay with `AGGREGATOR_ALLOWED_LATENESS_MS` (default `5000`); trades older than
-the finalized watermark are acknowledged and dropped. Unacknowledged Redis
-consumer entries are reclaimed after `AGGREGATOR_PENDING_IDLE_MS` (default
-`60000`). Redis entries older than `AGGREGATOR_REPLAY_MAX_AGE_MS` (default
-`5000`) are acknowledged without updating live state, so a restart drains its
-backlog without replacing fresh spot or book keys with expired observations.
-Keep these values explicit in production manifests.
+Trade buckets close using event time and a configurable allowed-lateness
+watermark. State/output writes and source ACKs share one Redis transaction so a
+restart cannot acknowledge unpersisted work.
 
-Health endpoints listen on `HEALTH_PORT` (default `8080`): `/healthz` reports
-the process and `/readyz` reports Redis/group readiness.
-
-Inspect the latest state and watch live updates:
+## Run and test locally
 
 ```bash
-uv run python scripts/inspect_aggregator.py
-uv run python scripts/inspect_aggregator.py --watch 30
+uv sync --locked
+AGGREGATOR_REDIS_URL=redis://localhost:6379/0 uv run --locked aggregator
+uv run --locked pytest
 ```
+
+The integration harness can exercise isolated stream names against Redis:
+
+```bash
+uv run --locked python scripts/integration_test.py
+```
+
+## Configuration
+
+| Variable | Default / purpose |
+|---|---|
+| `AGGREGATOR_REDIS_URL` | Full Redis URL; legacy `MARKET_AGGREGATOR_REDIS_URL` remains a fallback |
+| `REDIS_HOST`, `REDIS_PORT` | `localhost`, `6379` |
+| `BOOK_STREAM`, `TRADE_STREAM` | `stream:orderbook_snapshots`, `stream:ticks` |
+| `BOOK_CONSUMER_GROUP`, `TRADE_CONSUMER_GROUP` | Persistent group IDs above |
+| `AGGREGATOR_GROUP_START_ID` | `0` |
+| `AGGREGATOR_OUTPUT_PREFIX` | `market` |
+| `PRIMITIVE_STREAM` | `stream:primitives:v1` |
+| `AGGREGATED_ORDERBOOK_STREAM` | `stream:orderbook:v1` |
+| `AGGREGATION_VENUES` | `binance,bitstamp,crypto.com,gemini,coinbase,kraken` |
+| `AGGREGATION_TAKER_FEES` | Comma-separated `venue=rate` map |
+| `AGGREGATION_PRICE_TICK` | `auto`; in-memory consolidated-book tick override; production uses `0.01` |
+| `AGGREGATION_BOOK_DEPTH` | `10` |
+| `AGGREGATION_FRESHNESS_MS` | `500` for book inputs |
+| `FEATURE_TRADE_FRESHNESS_MS` | `60000` for trade state |
+| `AGGREGATOR_ALLOWED_LATENESS_MS` | `5000` |
+| `AGGREGATOR_REPLAY_MAX_AGE_MS` | `5000` |
+| `AGGREGATOR_PENDING_IDLE_MS` | `60000` |
+| `AGGREGATION_HISTORY_MS` | Two hours |
+| `HEALTH_PORT` | `8080` |
+
+`AGGREGATED_BARS_STREAM` remains in configuration for rollout compatibility
+but the current service contract publishes primitives on
+`stream:primitives:v1` and dashboard candles as a latest-state key.
+
+## Deployment and health
+
+Kubernetes runs `deployment/aggregator` from
+`k8s/aggregator-deployment.yaml`. `GET /healthz` is liveness;
+`GET /readyz` becomes ready after Redis, checkpoint restoration, and consumer
+group setup. The probe server is pod-local and has no Kubernetes Service.

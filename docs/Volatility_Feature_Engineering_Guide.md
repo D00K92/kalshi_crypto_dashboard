@@ -1,5 +1,10 @@
 # Feature Engineering & Data Resampling Guide for Multi-Venue High-Frequency Volatility Prediction
 
+> Research reference, not a runtime contract. The deployed contract is
+> `market_features/v2_10s` with `log_return` and `venue_count`; the active
+> forecast horizons are 5m, 15m, 30m, and 1h. Use `ARCHITECTURE.md` and the
+> service READMEs for current implementation details.
+
 A production-grade architectural guide and feature engineering blueprint for modeling multi-horizon (**5-minute, 10-minute, 30-minute, and 1-hour**) realized volatility from tick-level trade data and L2/L3 order book updates across 4 execution venues.
 
 ---

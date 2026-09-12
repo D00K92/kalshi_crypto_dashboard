@@ -1,10 +1,10 @@
-# Analytics Volatility and Kalshi Pricing Plan
+# Analytics volatility and Kalshi pricing design
 
 ## Goal and compatibility rule
 
-Build `services/analytics` as a new consumer and publisher around the current
-architecture. Existing ingestion, aggregator, Feast, ML-training, GCS
-exporter, and dashboard contracts remain unchanged.
+`services/analytics` is a consumer and publisher around the current
+architecture. Existing ingestion, aggregator, live-feature, Feast, ML, GCS
+exporter, model-serving, and dashboard contracts remain independent.
 
 Analytics adapts the data that those services already expose. It must not
 require another service to add a field, rename a Redis key, publish a new
@@ -24,37 +24,21 @@ model is calibrated to the market.
 ## Current service connections
 
 ```text
-crypto exchanges
-      |
-      v
-ingestion (unchanged) ---> Redis trade/book streams
-      |                              |
-      |                              v
-      |                    aggregator (unchanged)
-      |                       |                 |
-                      |                       |                 +--> stream:features:v2_10s
-      |                       |                          |
-      |                       |                          v
-      |                       |                 Feast live bridge/server
-      |                       |                          |
-      |                       |                    (unchanged; remains
-      |                       |                     available to other clients)
-      |                       v
-      |              market:spot:BTCUSDT:latest
-      |              market:features:v2_10s:BTCUSD:latest
-      |                       |
-      +--> stream:kalshi_tickers
-      |              |
-      v              v
-Kalshi REST ----> analytics <---- configured Vertex model artifacts
-                      |
-                      +--> market:volatility:v2_10s:BTCUSD:latest
-                      +--> market:pricing:v1:<market_ticker>
-                      +--> stream:pricing:v1
-                      +--> pub:pricing:v1
-                                |
-                                v
-                     dashboard or other readers (optional)
+crypto venues -> ingestion -> Redis -> aggregator
+                                         |
+                                         +-> spot latest state
+                                         +-> 10s primitives -> live_feature_service
+                                                                  |
+                                                                  +-> v2_10s latest features
+                                                                  +-> feature stream -> Feast bridge
+
+Kalshi WebSocket -> ingestion -> stream:kalshi_tickers -----------+
+Kalshi REST -------------------------------------------------------+-> analytics
+live spot + features ---------------------------------------------+
+analytics -> model-serving /v1/forecast -> four forecasts --------+
+                                                                  |
+                                                                  v
+                              volatility + pricing keys -> Redis -> dashboard
 ```
 
 Analytics uses the same private Redis instance and Kubernetes network as the
@@ -63,24 +47,20 @@ existing services. Each dependency has a narrow purpose:
 | Dependency | Existing interface used by analytics | Purpose | Required upstream change |
 |---|---|---|---|
 | Aggregator | `GET market:spot:BTCUSDT:latest` | Synthetic spot and spot timestamp | None |
-| Live feature service | `GET market:features:v2_10s:BTCUSD:latest` | One timestamped v2_10s model-feature observation | None |
-| Aggregator | `SUBSCRIBE market:aggregated_spot` | Low-latency wake-up only | None |
+| Live feature service | `GET market:features:v2_10s:BTCUSD:latest` | One timestamped v2_10s model-feature observation and EWMA state | None |
 | Ingestion | `stream:kalshi_tickers` | Bid, ask, ticker freshness, event and market identifiers | None |
 | Kalshi REST | Existing authenticated event/market endpoints | Authoritative market definition, strike, settlement/expiry time, and status | None |
-| Vertex AI Model Registry/GCS | Four configured model resource names and their artifact URIs | Load the approved horizon models and `metadata.json` | None |
-| Dashboard | Existing Redis connection; optional read of analytics-owned keys | Display model value and edge later | None |
+| Model serving | `POST http://model-serving:8080/v1/forecast` | Complete 5m/15m/30m/1h term structure | None |
+| Dashboard | Existing Redis connection and analytics-owned pricing keys | Display model value and edge | None |
 
 The v2_10s analytics path reads the versioned timestamped latest-feature
-envelope directly. This guarantees that all four local model calls use exactly
-one observation and lets analytics validate its age. The existing Feast live
-bridge and `feast-server:6566` continue unchanged for their current consumers;
-analytics does not need to put the Feast server on its critical path merely to
-reread the same v2_10s row. A future `ForecastProvider` may use Feast without
-changing the pricing core or any producer.
-
-Pub/Sub is never the source of truth. A spot notification only tells analytics
-to reread `market:spot:BTCUSDT:latest`. A periodic read provides recovery after
-missed notifications.
+envelope directly and forwards it to model-serving. This guarantees that all
+four forecasts use exactly one observation and lets both services validate its
+age. The existing Feast live bridge continues to reconcile the online store.
+The `feast-server:6566` compatibility Service is retained with its Deployment
+at zero replicas; analytics does not put Feast HTTP serving on its critical
+path. A future `ForecastProvider` may use Feast without changing the pricing
+core or any producer.
 
 Analytics uses its own Redis consumer group, `analytics-pricing-v1`, for
 `stream:kalshi_tickers`; it never acknowledges entries for another consumer.
@@ -95,10 +75,10 @@ changing ingestion.
 
 - Ingestion owns exchange and Kalshi WebSocket connections and normalized raw
   Redis streams.
-- Aggregator owns the synthetic spot calculation and live feature
-  publication.
-- Feast store owns feature definitions, the live bridge, and online feature
-  serving.
+- Aggregator owns the synthetic spot and reusable completed primitives.
+- Live feature service owns the v2_10s feature envelope and EWMA state.
+- Feast store owns feature definitions, the live bridge, online storage, and
+  the currently suspended optional HTTP feature-serving boundary.
 - ML pipeline owns training, evaluation, promotion, and registration of one
   model per supported horizon.
 - Dashboard owns presentation. It is not required for analytics readiness.
@@ -108,23 +88,24 @@ changing ingestion.
 - Reading and freshness-checking the existing inputs.
 - Fetching Kalshi market metadata because the existing ticker stream does not
   contain expiry and settlement fields.
-- Loading configured approved model artifacts, ordering features according to
-  each artifact's `metadata.json`, and running online inference.
+- Adapting the feature envelope to the forecast API and validating the complete
+  response. The retained direct provider owns its own rollback-only artifact
+  loading.
 - Combining the four forecasts into one atomic internal term structure.
-- Interpolating variance, computing model probabilities, and publishing the
-  analytics-owned Redis outputs.
+- Interpolating annualized volatility, fitting Kalshi midpoint IV, computing
+  model probabilities, and publishing the analytics-owned Redis outputs.
 - Reporting unavailable states without emitting a tradable-looking stale
   value.
 
 Analytics must not import another service's private Python package at runtime.
-Redis JSON, Kalshi REST, and Vertex/GCS APIs are the service boundaries. Shared
-code can be extracted later, but is not required here.
+Redis JSON, Kalshi REST, and the model-serving HTTP API are its production
+service boundaries.
 
 ## Live inference adapter
 
 The model-serving service owns inference and publishes no Redis data itself.
-Analytics retains a `ForecastProvider` boundary so the HTTP migration can be
-rolled back safely to the direct provider during parity testing.
+Analytics retains a `ForecastProvider` boundary so HTTP can be rolled back to
+the direct Vertex/GCS provider during parity testing.
 
 The production provider calls the private model-serving API for exactly four
 horizons:
@@ -156,10 +137,10 @@ Example:
   "asset": "BTCUSD",
   "model_version": "v2_10s",
   "model_resources": {
-    "5m": "projects/.../models/...",
-    "15m": "projects/.../models/...",
-    "30m": "projects/.../models/...",
-    "1h": "projects/.../models/..."
+    "5m": "ewma/v2_10s/5m",
+    "15m": "ewma/v2_10s/15m",
+    "30m": "ewma/v2_10s/30m",
+    "1h": "projects/.../models/...@1"
   },
   "feature_asof_ts_ms": 1788593790000,
   "generated_ts_ms": 1788593790116,
@@ -172,14 +153,13 @@ Example:
 }
 ```
 
-`BTCUSD` is the live entity emitted by the aggregator. Historical label
-rows currently use `BTC`; analytics does not ask either producer to rename it.
-The mapping is explicit in the adapter, and `asset` is not passed as a numeric
-model feature.
+`BTCUSD` is the live entity emitted by the live feature service. Analytics
+does not ask either producer to rename it, and `asset` is not passed as a
+numeric model feature.
 
-A deterministic fixture provider may be used in tests. An EWMA provider may be
-used for an explicitly labeled non-production benchmark, but it must not be
-reported as an ML model or silently selected when a configured model fails.
+A deterministic fixture provider is used in tests. Production model-serving
+explicitly identifies EWMA resources for 5m/15m/30m and the immutable XGBoost
+resource for 1h; it never silently substitutes one provider after a failure.
 
 ## Forecast validation and freshness
 
@@ -192,7 +172,7 @@ The following are initial configurable limits:
 ```text
 spot maximum age             = 5 seconds
 Kalshi ticker maximum age    = 60 seconds
-live feature maximum age     = 60 seconds
+live feature maximum age     = 90 seconds
 volatility snapshot max age  = 60 seconds
 Kalshi metadata refresh      = 15 seconds while an event is active
 allowed future clock skew    = 2 seconds
@@ -242,37 +222,32 @@ seconds_per_year = 365 * 24 * 60 * 60
 T = tau_seconds / seconds_per_year
 ```
 
-Interpolation is deterministic and uses cumulative total variance, not linear
-volatility interpolation. Let `h0` and `h1` be adjacent supported horizons in
-seconds and let their annualized forecasts be `sigma0` and `sigma1`:
+Interpolation is deterministic and linear in annualized volatility. Let `h0`
+and `h1` be adjacent supported horizons in seconds and let their annualized
+forecasts be `sigma0` and `sigma1`:
 
 ```text
-V0 = sigma0^2 * h0 / seconds_per_year
-V1 = sigma1^2 * h1 / seconds_per_year
 w = (tau_seconds - h0) / (h1 - h0)
-Vtau = (1 - w) * V0 + w * V1
-sigma_tau = sqrt(Vtau / T)
+sigma_tau = (1 - w) * sigma0 + w * sigma1
 ```
 
 Selection is:
 
 | Remaining lifetime | Rule |
 |---|---|
-| `0 < tau < 5m` | Flat short-end variance: `sigma_tau = sigma_5m` |
-| `5m <= tau < 15m` | Interpolate `V5m` and `V15m` |
-| `15m <= tau < 30m` | Interpolate `V15m` and `V30m` |
-| `30m <= tau < 60m` | Interpolate `V30m` and `V1h` |
+| `0 < tau < 5m` | Flat short-end volatility: `sigma_tau = sigma_5m` |
+| `5m <= tau < 15m` | Interpolate `sigma_5m` and `sigma_15m` |
+| `15m <= tau < 30m` | Interpolate `sigma_15m` and `sigma_30m` |
+| `30m <= tau < 60m` | Interpolate `sigma_30m` and `sigma_1h` |
 | `tau = 60m` | Use `sigma_1h` |
 
-For the selected bracket, `V1` must be greater than or equal to `V0`. Because
-the horizons are trained independently, a violation is possible. The initial
-implementation rejects that market calculation with reason
-`non_monotone_total_variance`; it does not silently repair the model outputs.
+Descending and ascending volatility curves are both interpolated as supplied;
+analytics does not repair or flatten model predictions between knots.
 
 The output enum is:
 
 ```text
-interpolation_method = "linear_total_variance_v1"
+interpolation_method = "linear_annualized_volatility_v1"
 ```
 
 ## Initial probability model
@@ -298,6 +273,29 @@ Skewness, kurtosis, and Gram-Charlier terms are outside v1. They must not
 appear as zero-valued inputs because they are not used. A later distribution
 model requires a new version and calibration tests rather than modifying this
 formula in place.
+
+## Kalshi midpoint implied volatility
+
+Analytics also publishes one market-implied annualized volatility for the
+active hourly KXBTCD event. It filters to valid two-sided mids, orders contracts
+by log-moneyness distance from spot, and uses the nearest seven; at least five
+valid contracts are required. Each selected contract receives normalized
+weight:
+
+```text
+weight_i = (open_interest_i + 1) / sum(open_interest_j + 1)
+```
+
+A bounded grid search followed by golden-section refinement minimizes a robust
+Huber loss between observed mids and zero-rate Black-digital probabilities.
+Only the midpoint IV is published; separate bid and ask IVs are not computed.
+When calibration is unavailable, analytics deletes the latest key rather than
+retaining a stale value:
+
+```text
+market:implied_volatility:v1:BTCUSD:latest    # TTL 60 seconds
+method = "robust_black_digital_mid_iv_v1"
+```
 
 ## Kalshi quote and edge definitions
 
@@ -332,6 +330,7 @@ market:pricing:v1:<market_ticker>    # latest state, TTL 60 seconds
 market:pricing:v1:active             # sorted set, score = generated_ts_ms
 stream:pricing:v1                    # durable audit stream, MAXLEN ~ 5,000
 pub:pricing:v1                       # optional wake-up notification
+market:implied_volatility:v1:BTCUSD:latest  # active-event midpoint IV, TTL 60 seconds
 ```
 
 Latest-state payload:
@@ -350,10 +349,11 @@ Latest-state payload:
   "expiry_ts_ms": 1788597390000,
   "pricing_asof_ts_ms": 1788593790000,
   "time_to_expiry_seconds": 3600.0,
+  "time_to_expiry_minutes": 60.0,
   "annualized_volatility": 0.45,
   "volatility_bracket": ["1h", "1h"],
   "volatility_generated_ts_ms": 1788593790116,
-  "interpolation_method": "linear_total_variance_v1",
+  "interpolation_method": "linear_annualized_volatility_v1",
   "distribution_model": "zero_log_return_gaussian_v1",
   "model_probability": 0.61,
   "model_value_dollars": 0.61,
@@ -401,32 +401,27 @@ invalid_strike
 outside_supported_lifetime
 model_inference_failed
 incomplete_term_structure
-non_monotone_total_variance
 invalid_quote
 ```
 
-Invalid quotes prevent edge calculation but do not prevent publishing the
-standalone model probability when every model input is valid. All other
+Invalid or stale quotes prevent edge calculation but do not prevent publishing
+the standalone model probability when every model input is valid. All other
 reasons above make the model price unavailable.
 
-## Delivery sequence
+## Current implementation
 
-1. Implement pure validation, total-variance interpolation, Gaussian
-   probability, and output-schema modules with boundary tests.
-2. Add read-only Redis adapters for aggregator spot and Kalshi ticker state.
-3. Add the Kalshi REST metadata cache and verify strike/expiry semantics
-   against recorded active market responses.
-4. Add the live-feature adapter and configured Vertex/GCS artifact loader; test
-   feature ordering from `metadata.json` and all-or-nothing four-horizon
-   inference.
-5. Add the pricing loop, analytics-owned Redis publisher, health endpoints,
-   and stale-state cleanup.
-6. Deploy analytics into the existing GKE and private Redis network with its
-   own service account permissions and consumer group.
-7. Validate shadow outputs against historical settlements and check probability
-   calibration. Keep the service non-trading during this phase.
-8. Optionally extend the dashboard to read analytics outputs. This is a
-   dashboard enhancement, not a dependency of analytics deployment.
+- Pure validation, linear annualized-volatility interpolation, Gaussian
+  probability, and
+  boundary tests are implemented in the analytics package.
+- Redis adapters recover spot, live features, and Kalshi ticker state without
+  relying on Pub/Sub.
+- The Kalshi REST cache resolves active-market strike and expiry semantics.
+- Production uses the bounded HTTP provider and validates an all-or-nothing
+  four-horizon response. Direct Vertex/GCS inference remains a rollback path.
+- Redis publication, health/readiness, stale cleanup, GKE deployment, dashboard
+  integration, and CD smoke checks are active.
+- Historical probability calibration and any execution policy remain separate
+  future work. The service remains non-trading.
 
 ## Acceptance checks
 
@@ -434,8 +429,9 @@ reasons above make the model price unavailable.
    change for analytics to run.
 2. Analytics can recover current spot and Kalshi ticker state after restart
    without relying on Pub/Sub delivery.
-3. Exactly the configured `5m`, `15m`, `30m`, and `1h` artifacts produce
-   one atomic volatility snapshot from one feature observation.
+3. Exactly the `5m`, `15m`, `30m`, and `1h` forecasts produce one
+   atomic volatility snapshot from one feature observation; production
+   identifies EWMA short horizons and the approved immutable 1h model.
 4. Annualization occurs in training only; pricing converts lifetime to year
    fraction once.
 5. Interpolation and pricing are deterministic at `0`, `5m`, `15m`, `30m`,

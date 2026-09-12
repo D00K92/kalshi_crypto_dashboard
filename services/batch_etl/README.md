@@ -1,176 +1,107 @@
-# Batch ETL
+# Batch ETL service
 
-`batch_etl` owns expensive Dask jobs that read raw tick and order-book Parquet
-from GCS, resample them onto regular time grids, compute v1 predictor features
-and future-volatility targets, and write processed Parquet back to GCS.
+Builds the offline data used for model training and feature parity. Production
+lands archived GCS Parquet in BigQuery, replaces canonical 10-second bar
+partitions, and computes active `v2_10s`/`v3_10s` features plus
+future-volatility labels.
+It does not own live features, Feast declarations, or model selection.
 
-Raw input layout:
+## Production pipeline
 
-```text
-gs://<bucket>/ticks/venue=<venue>/instrument=<instrument>/date=<yyyy-mm-dd>/hour=<hh>/*.parquet
-gs://<bucket>/books/venue=<venue>/instrument=<instrument>/date=<yyyy-mm-dd>/hour=<hh>/*.parquet
-```
+| Schedule (UTC) | Kubernetes resource | Command | Output |
+|---|---|---|---|
+| Minute 15 hourly | `cronjob/batch-etl` | `scripts/run_bigquery_hourly.py` | Raw landing tables and `market_data.bars` |
+| Minute 30 hourly | `cronjob/batch-etl-features` | `scripts/run_bigquery_features.py --feature-version active` | `feature_store.realized_volatility_v2_10s` and `realized_volatility_v3_10s` |
+| Minute 45 hourly | `cronjob/batch-etl-targets` | `scripts/run_bigquery_targets.py` | `training_labels.future_realized_volatility_v2_10s` |
 
-Default processed output layout:
+The target job defaults to a two-hour delay so each forward window has completed.
+All jobs operate on an explicit UTC hour and use partition/slice replacement or
+MERGE semantics so retries are idempotent.
 
-```text
-gs://<bucket>/processed/resampled_market_data/frequency=<10s>/date=<yyyy-mm-dd>/hour=<hh>/venue=<venue>/*.parquet
-```
-
-The resampling job applies these data semantics:
-
-- one row per `timestamp` and `venue`
-- trade prices: `last` for `p_trade`, `max` for `p_high`, `min` for `p_low`, then forward-fill
-- trade volumes: `sum` for `v_trade`, `v_buy`, and `v_sell`, then zero-fill
-- trade count: `cnt_trade` counts positive-volume trades in each period, then zero-fill
-- fill timing: `dt_fill_mean_ms`, `dt_fill_max_ms`, and `dt_fill_min_ms`
-  aggregate milliseconds between consecutive positive-volume trades whose
-  current trade lands in the period
-- order-book prices: `last` for `p_bid_1` through `p_bid_10` and `p_ask_1` through `p_ask_10`, then forward-fill
-- order-book quote volumes: `sum` for `q_bid_1` through `q_bid_10` and `q_ask_1` through `q_ask_10`, then zero-fill
-- multi-venue jobs concatenate venue rows instead of prefixing venue names into columns
-
-## Hourly Kubernetes job
-
-The production CronJob runs at minute 15 of every UTC hour and processes the
-previous complete hour for all configured venues and frequencies. Each task
-also reads the preceding raw hour so the first fill interval and forward-filled
-prices at the target-hour boundary are correct. Only rows from the target hour
-are written.
-
-Each `date/hour/venue` partition is replaced independently and compacted to one
-Parquet file. A retry is therefore idempotent and cannot delete sibling hours,
-venues, or frequencies.
+Raw sources:
 
 ```text
-schedule: 15 * * * * (Etc/UTC)
-target at 09:15 UTC: 08:00:00 through 08:59:59 UTC
-source context: 07:00:00 through 08:59:59 UTC
+gs://<bucket>/ticks/venue=<venue>/instrument=<instrument>/date=<date>/hour=<hour>/*.parquet
+gs://<bucket>/books/venue=<venue>/instrument=<instrument>/date=<date>/hour=<hour>/*.parquet
 ```
 
-Run a specific hour manually from the unified development environment:
+Current production venues are Binance, Bitstamp, Coinbase, Crypto.com, Gemini,
+and Kraken. The canonical live/offline cadence is 10 seconds.
+
+## Data semantics
+
+`market_data.bars` contains one row per event timestamp, venue, instrument,
+and frequency. Trade columns include open/last/mean/high/low, buy/sell/total
+volume, count, and fill intervals. Book columns retain the latest ten bid/ask
+prices and aggregated quantities. The resampler reads the prior hour for
+boundary continuity but writes only the requested target hour.
+
+The `v2_10s` feature job derives the same model-facing
+`synthetic_price`, `log_return`, and `venue_count` contract used online.
+The additive `v3_10s` table derives the seven causal trailing realized-
+volatility inputs used by the HAR research/training default; production serving
+still uses `v2_10s`.
+The label job creates `target_rv_1m`, `target_rv_5m`,
+`target_rv_15m`, `target_rv_30m`, and `target_rv_1h`. The 1m column is
+retained in the offline table for compatibility; the active training and
+serving horizons are 5m, 15m, 30m, and 1h.
+
+Legacy Dask/GCS scripts remain available for bounded validation and rollback;
+they are not the active production feature/label path.
+
+## Run and test locally
+
+Cloud commands require Application Default Credentials with GCS and BigQuery
+access.
 
 ```bash
-../../.venv/bin/python scripts/run_hourly_resampling.py \
+uv sync --locked
+uv run --locked pytest
+
+uv run --locked python scripts/run_bigquery_hourly.py \
   --target-hour 2026-09-01T08:00:00Z \
-  --venues binance \
-  --frequencies 10s
+  --venues binance --frequencies 10s
+
+uv run --locked python scripts/run_bigquery_features.py \
+  --target-hour 2026-09-01T08:00:00Z --feature-version v2_10s
+
+uv run --locked python scripts/run_bigquery_targets.py \
+  --target-hour 2026-09-01T08:00:00Z --label-version v2_10s
 ```
 
-`BATCH_ETL_VENUES`, `BATCH_ETL_FREQUENCIES`, `GCS_BUCKET_NAME`, and
-`BATCH_ETL_OUTPUT_DATASET` provide the corresponding container configuration.
-
-### One-time Workload Identity setup
-
-The dedicated `batch-etl` Kubernetes service account needs bucket-scoped object
-read/write/delete access. This is required because retries replace only their
-target partition.
+Use `--dry-run` on feature/target jobs to validate SQL without writing.
+For a resumable range repair:
 
 ```bash
-export PROJECT_ID="kalshi-crypto-506614"
-export PROJECT_NUMBER="$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')"
-export BUCKET="kalshi-crypto-tick-data"
-export NAMESPACE="default"
-export KSA_NAME="batch-etl"
-
-gcloud storage buckets add-iam-policy-binding "gs://$BUCKET" \
-  --role="roles/storage.objectUser" \
-  --member="principal://iam.googleapis.com/projects/$PROJECT_NUMBER/locations/global/workloadIdentityPools/$PROJECT_ID.svc.id.goog/subject/ns/$NAMESPACE/sa/$KSA_NAME" \
-  --condition=None
-```
-
-The CD workflow builds an immutable `batch-etl` image, applies
-`k8s/batch-etl-cronjob.yaml`, and confirms that the CronJob exists. The manifest
-uses `concurrencyPolicy: Forbid`; a run that exceeds 55 minutes is terminated so
-jobs cannot overlap.
-
-Physical Parquet columns:
-
-```text
-timestamp
-p_open
-p_trade
-p_close
-p_trade_mean
-p_high
-p_low
-v_trade
-v_buy
-v_sell
-cnt_trade
-dt_fill_mean_ms
-dt_fill_max_ms
-dt_fill_min_ms
-p_bid_1 ... p_bid_10
-p_ask_1 ... p_ask_10
-q_bid_1 ... q_bid_10
-q_ask_1 ... q_ask_10
-```
-
-`date`, `hour`, and `venue` are Hive partition keys encoded only in directory
-names. They are not duplicated in the Parquet file payload. Reading from the
-dataset root with Hive partition discovery reconstructs all three as logical
-columns.
-
-Build one cadence:
-
-```bash
-UV_CACHE_DIR=/tmp/kalshi-batch-etl-uv-cache uv run \
-  python scripts/build_resampled_market_data.py \
-  --start-date 2026-09-01 --end-date 2026-09-01 \
-  --venue binance --frequency 1s --overwrite
-```
-
-Run a bounded local validation output:
-
-```bash
-UV_CACHE_DIR=/tmp/kalshi-batch-etl-uv-cache uv run \
-  python scripts/build_resampled_market_data.py \
-  --start-date 2026-09-01 --end-date 2026-09-01 \
-  --venue binance --hour 08 --frequency 5s \
-  --output /tmp/kalshi-resampled-binance-5s --overwrite
-```
-
-Validate a live GCS slice before a backfill:
-
-```bash
-UV_CACHE_DIR=/tmp/kalshi-batch-etl-uv-cache uv run \
-  python scripts/validate_gcs_dask.py \
-  --date 2026-09-01 --dataset all --venue binance --sample-rows 1
-```
-
-Run tests:
-
-```bash
-UV_CACHE_DIR=/tmp/kalshi-batch-etl-uv-cache uv run pytest
-```
-
-Open data structure questions:
-
-- Whether `frequency` should remain a path component or become a Hive partition
-  column at the same level as `date` and `hour`.
-
-### Hourly features and Feast sync
-
-After resampling completes, build the single venue-agnostic feature partition:
-
-```bash
-python scripts/build_features.py --target-hour 2026-09-01T08:00:00Z
-```
-
-The job writes `features/v1/date=YYYY-MM-DD/features.parquet`. Feast
-Feature computation remains owned by this service. Feast definitions and
-materialization are owned by the standalone `services/feast_store/` service.
-
-### Resumable backfill
-
-Backfill any bounded UTC range; `--resume` skips partitions already present:
-
-```bash
-python scripts/backfill_features_targets.py \
+uv run --locked python scripts/backfill_bigquery.py \
   --start-hour 2026-08-31T08:00:00Z \
-  --end-hour 2026-09-02T23:00:00Z \
-  --resume
+  --end-hour 2026-09-02T23:00:00Z
 ```
 
-Use `--features-only` or `--targets-only` to retry one side independently.
+The targeted v2 feature/label repair utility is
+`scripts/backfill_v2_10s_features_targets.py` (now defaults to `v3_10s`; pass
+`--feature-version v2_10s` for rollback data).
+
+## Configuration
+
+| Variable | Default / purpose |
+|---|---|
+| `GCP_PROJECT_ID` | `kalshi-crypto-506614` |
+| `GCS_BUCKET_NAME` | `kalshi-crypto-tick-data` |
+| `BATCH_ETL_TARGET_HOUR` | Previous complete hour when omitted |
+| `BATCH_ETL_VENUES` | Six production crypto venues |
+| `BATCH_ETL_FREQUENCIES` | `10s` |
+| `BATCH_ETL_PARALLELISM` | `1`; raw BigQuery writes are intentionally serialized |
+| `FEATURE_VERSION` | Script default `v2_10s`; production CronJob uses `active` to build v2 and v3 |
+| `LABEL_VERSION` | `v2_10s` |
+| `BATCH_ETL_BACKFILL_STATE` | Local resume-state path for range backfills |
+| `BATCH_ETL_BACKFILL_LOCK` | `/tmp/kalshi-bigquery-resample.lock` |
+
+## Deployment
+
+CD builds one immutable `batch-etl` image and applies
+`k8s/batch-etl-cronjob.yaml` plus
+`k8s/batch-etl-feature-cronjobs.yaml`. The `batch-etl` Kubernetes service
+account needs GCS read access and BigQuery job/table permissions. CronJobs use
+`concurrencyPolicy: Forbid`; inspect Job status and logs rather than an HTTP
+health endpoint.

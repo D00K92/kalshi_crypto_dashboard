@@ -1,122 +1,119 @@
 # Analytics pricing service
 
-Analytics consumes the live feature snapshot and Kalshi ticker stream, calls the
-internal model-serving API, and publishes model probabilities and quote-relative
-edges. It never emits orders or trading decisions. Direct Vertex artifact loading
-remains available only as a rollback/parity path.
+Prices active Kalshi KXBTCD contracts from existing live market data. Analytics
+reads Redis, obtains authoritative Kalshi metadata, calls model-serving, and
+publishes model probabilities, fair values, and quote-relative edges. It does
+not modify upstream schemas and never submits orders.
 
-## Inputs and outputs
+## Inputs
 
-Inputs are `market:spot:BTCUSDT:latest`,
-`market:features:v2_10s:BTCUSD:latest`, and `stream:kalshi_tickers`. The service owns
-consumer group `analytics-pricing-v1`; startup uses `XREVRANGE` and abandoned
-pending entries are recovered with `XAUTOCLAIM`, so Pub/Sub is not required for
-recovery. Kalshi REST supplies authoritative above-strike market metadata.
+| Interface | Owner | Use |
+|---|---|---|
+| `market:spot:BTCUSDT:latest` | `aggregator` | Current synthetic BTC spot |
+| `market:features:v2_10s:BTCUSD:latest` | `live_feature_service` | Current model feature envelope and EWMA state |
+| `stream:kalshi_tickers` | `ingestion` | Current KXBTCD quotes |
+| Kalshi REST events/markets | Kalshi | Strike, expiry, event, and open status |
+| `POST model-serving:8080/v1/forecast` | `model-serving` | Four-horizon annualized volatility |
 
-Successful cycles write:
+The service owns Redis group `analytics-pricing-v1`, bootstraps recent tickers
+with `XREVRANGE`, and reclaims abandoned pending entries. Pub/Sub is not
+required for recovery.
 
-- `market:volatility:v2_10s:BTCUSD:latest` (60-second TTL)
-- `market:pricing:v1:<market_ticker>` (60-second TTL)
-- `market:pricing:v1:active`, `stream:pricing:v1`, and `pub:pricing:v1`
+## Outputs
 
-Invalid or stale inputs delete the latest price and write a short-lived
-`market:pricing:v1:status:<market_ticker>` diagnostic. Invalid quotes only make
-the quote/edge fields null; the standalone model probability remains available.
-
-## Required runtime configuration
-
-| Variable | Meaning |
+| Redis interface | Retention / consumer |
 |---|---|
-| `REDIS_HOST`, `REDIS_PORT` | Existing private Redis endpoint; `ANALYTICS_REDIS_URL` may override both locally. |
-| `KALSHI_API_KEY`, `KALSHI_PRIVATE_KEY` | Existing authenticated REST credentials. |
-| `GCP_PROJECT_ID`, `GCP_REGION` | Vertex/GCS project and region. |
-| `FORECAST_PROVIDER` | `http` (production) or `direct` (rollback/parity); defaults to `http`. |
-| `MODEL_SERVING_URL`, `MODEL_SERVING_TIMEOUT_MS` | Internal model-serving URL and bounded request timeout. |
-| `VOLATILITY_MODEL_5M`, `VOLATILITY_MODEL_15M`, `VOLATILITY_MODEL_30M`, `VOLATILITY_MODEL_1H` | Exact immutable Vertex resource names for the direct rollback provider. |
-| `FEATURE_VERSION` | Expected live feature contract; defaults to `v2_10s`. |
-| `VOLATILITY_MODEL_VERSION` | Expected artifact/label version; defaults to `v2_10s`. |
-| `CONSUMER_NAME` | Redis consumer identity; defaults to the pod hostname. |
-| `HEALTH_PORT` | HTTP probe port; defaults to `8080`. |
-| `SPOT_MAX_AGE_MS`, `TICKER_MAX_AGE_MS`, `FEATURE_MAX_AGE_MS`, `VOLATILITY_MAX_AGE_MS` | Freshness limits; defaults are 5, 60, 90, and 60 seconds. |
-| `ALLOWED_FUTURE_SKEW_MS`, `KALSHI_METADATA_REFRESH_MS` | Clock-skew allowance and active metadata refresh; defaults are 2 and 15 seconds. |
+| `market:volatility:v2_10s:BTCUSD:latest` | 60-second TTL; operations and CD smoke check |
+| `market:implied_volatility:v1:BTCUSD:latest` | 60-second TTL; dashboard volatility cone |
+| `market:pricing:v1:<market_ticker>` | 60-second TTL; dashboard |
+| `market:pricing:v1:status:<market_ticker>` | Short-lived unavailable reason |
+| `market:pricing:v1:active` | Sorted set used for expiry/cleanup |
+| `stream:pricing:v1` | Bounded publication history |
+| `pub:pricing:v1` | Best-effort notification |
 
-Do not configure a display name, alias such as `latest`, or a model-family name.
-Each exact resource must resolve to an artifact directory containing
-`model.joblib` and `metadata.json`. Metadata must contain the matching `horizon`
-and non-empty ordered `feature_columns`; Vertex labels `horizon` and `version`
-are checked when present. All four artifacts must load and infer from one feature
-observation or readiness stays false.
+Analytics linearly interpolates annualized volatility to the contract expiry, applies the
+documented Gaussian above-strike model, and calculates fair value plus
+bid/mid/ask edges. See `volatility_term_structure.md` for the pricing rules.
 
-The training pipeline serializes an `xgboost.XGBRegressor` with joblib. The
-analytics image therefore includes joblib, XGBoost, pandas, NumPy (transitive),
-and scikit-learn using the same supported major formats. Promotion must upload
-both files from each horizon bundle. A rollout using artifacts created by an
-incompatible future XGBoost/joblib major version deliberately remains not ready;
-retrain or align the analytics dependency bounds instead of substituting a
-fallback.
+For the active hourly event, analytics selects the five to seven valid KXBTCD
+contracts nearest spot and fits one midpoint Black-digital implied volatility.
+Weights are `(open interest + 1)` normalized across the selected contracts;
+the robust fit limits the influence of one dislocated quote. The IV key is
+deleted when fewer than five valid contracts are available.
 
-### Champion-selection deployment prerequisite
+Missing, stale, future-skewed, malformed, or incomplete model inputs fail
+closed: the available price is removed and a status record is written. Invalid
+or stale quotes leave quote/edge fields unavailable while preserving a valid
+standalone model probability and fair value.
 
-The repository does not contain the four promoted champion resource IDs, so CD
-cannot infer them safely. Copy the `vertex_resource` values from an approved
-promotion report into the four GitHub variables. Before doing so, verify that
-each model's `artifactUri` is horizon-specific and immutable.
+## Forecast providers
 
-The current promotion script uploads to
-`gs://<bucket>/models/<version>/candidate/<horizon>` before registration. A later
-promotion using the same version can overwrite that path, so an old numeric
-Vertex resource ID alone does not prove that its backing bytes are still the
-approved champion. Production deployment therefore requires either four models
-already registered from immutable per-promotion artifact paths, or an operator
-copy/re-registration of each approved bundle at such a path. Analytics validates
-the exact configured resource, horizon/version labels, metadata, and loadability,
-but cannot reconstruct the intended champion from a mutable bucket prefix. Until
-this prerequisite is satisfied, leave the model variables unset; CD will fail
-with a prerequisite message and analytics readiness will not be claimed.
+`FORECAST_PROVIDER=http` is production. It forwards the current v2_10s
+observation to model-serving and validates response horizons, timestamps,
+version, values, and resources.
 
-## Kubernetes and CI/CD prerequisites
+`FORECAST_PROVIDER=direct` is retained only for rollback/parity. It loads four
+exact Vertex/GCS artifacts in-process and therefore requires the
+`VOLATILITY_MODEL_5M`, `15M`, `30M`, and `1H` resource variables plus
+artifact-read IAM. Do not configure display names or mutable aliases.
 
-Create the existing secret (never commit either value):
+## Run and test locally
+
+Production-style HTTP mode requires Redis, model-serving, GCP project metadata,
+and Kalshi credentials:
 
 ```bash
-kubectl create secret generic kalshi-credentials \
-  --from-literal=api-key="$KALSHI_API_KEY" \
-  --from-file=private-key=/secure/path/kalshi-private.pem
+uv sync --locked
+GCP_PROJECT_ID=kalshi-crypto-506614 \
+ANALYTICS_REDIS_URL=redis://localhost:6379/0 \
+MODEL_SERVING_URL=http://127.0.0.1:8080 \
+KALSHI_API_KEY=... KALSHI_PRIVATE_KEY=... \
+  uv run --locked analytics
+
+uv run --locked pytest
+uv run --locked ruff check src tests
 ```
 
-Configure these GitHub repository variables:
+## Configuration
 
-- `ANALYTICS_GCP_SERVICE_ACCOUNT`: GCP service-account email used by the
-  Kubernetes `analytics` service account through Workload Identity.
-- All four `VOLATILITY_MODEL_*` exact resource names listed above when using
-  the direct rollback provider.
+| Variable | Default / purpose |
+|---|---|
+| `ANALYTICS_REDIS_URL` | Optional full URL; otherwise `REDIS_HOST:REDIS_PORT` |
+| `KALSHI_REST_URL` | `https://external-api.kalshi.com` |
+| `KALSHI_API_KEY`, `KALSHI_PRIVATE_KEY` | Authenticated REST credentials |
+| `GCP_PROJECT_ID` | Required by current settings in both provider modes |
+| `GCP_REGION` | `asia-northeast3` |
+| `FORECAST_PROVIDER` | `http` |
+| `MODEL_SERVING_URL` | `http://model-serving:8080` |
+| `MODEL_SERVING_TIMEOUT_MS` | `1000` |
+| `FEATURE_VERSION`, `VOLATILITY_MODEL_VERSION` | `v2_10s` |
+| `CONSUMER_NAME` | `analytics-$HOSTNAME` |
+| `SPOT_MAX_AGE_MS` | `5000` |
+| `TICKER_MAX_AGE_MS` | `60000` |
+| `FEATURE_MAX_AGE_MS` | `90000` |
+| `VOLATILITY_MAX_AGE_MS` | `60000` |
+| `ALLOWED_FUTURE_SKEW_MS` | `2000` |
+| `KALSHI_METADATA_REFRESH_MS` | `15000` |
+| `HEALTH_PORT` | `8080` |
 
-The GCP service account needs `aiplatform.models.get` on the configured Vertex
-models and `storage.objects.get` on their artifact objects. Grant
-`roles/iam.workloadIdentityUser` on that GCP account to
-`serviceAccount:<project>.svc.id.goog[default/analytics]`. Prefer resource- or
-bucket-scoped custom roles/grants over project-wide access.
+## Deployment and verification
 
-CI tests analytics on Python 3.12 and builds its linux/amd64 image. CD checks out
-the exact successful CI commit, builds/pushes the image, renders the manifest,
-waits for readiness, then verifies the HTTP endpoint and fresh Redis volatility
-and pricing records. A running pod that is not ready is reported with logs and
-the likely missing live/model/IAM prerequisites; it is never reported as a
-successful deployment.
+Kubernetes runs `deployment/analytics` and internal
+`service/analytics:8080` from `k8s/analytics-deployment.yaml`. Kalshi
+credentials come from `secret/kalshi-credentials`.
+`ANALYTICS_GCP_SERVICE_ACCOUNT` supplies the Workload Identity annotation
+needed by the retained direct provider.
 
-## Verification
+`GET /healthz` means the process is alive. `GET /readyz` succeeds only when
+the forecast provider is ready, Redis is reachable, and at least one supported
+market has a fresh published price.
 
 ```bash
-UV_CACHE_DIR=/tmp/kalshi-analytics-uv-cache uv sync --locked
-UV_CACHE_DIR=/tmp/kalshi-analytics-uv-cache uv run --locked pytest
-UV_CACHE_DIR=/tmp/kalshi-analytics-uv-cache uv run --locked ruff check src tests
-
 kubectl rollout status deployment/analytics --timeout=5m
 kubectl port-forward service/analytics 18080:8080
 curl --fail http://127.0.0.1:18080/readyz
 ```
 
-`/healthz` proves the process is alive. `/readyz` succeeds only after models are
-loaded and at least one supported market has a fresh published price. Inspect
-`market:volatility:v2_10s:BTCUSD:latest`, `market:pricing:v1:active`, and matching
-`market:pricing:v1:KXBTCD-*` keys for post-deploy evidence.
+CD additionally asserts a fresh v2_10s volatility snapshot, the exact approved
+1h resource, EWMA resources for 5m/15m/30m, positive values, and at least one
+fresh KXBTCD pricing key.
