@@ -9,6 +9,7 @@ import logging
 import math
 import time
 from typing import Any
+from uuid import uuid4
 
 import orjson
 from websockets.asyncio.client import connect
@@ -72,6 +73,7 @@ class KrakenBook:
         self.bids: dict[str, str] = {}
         self.asks: dict[str, str] = {}
         self.sequence = 0
+        self.event_id_generation = uuid4().hex
 
     def apply(self, event: dict[str, Any], received_ts_ms: int) -> BookSnapshot | None:
         event_type = event.get("type")
@@ -101,7 +103,10 @@ class KrakenBook:
         timestamp = event.get("timestamp")
         exchange_ts = _timestamp(timestamp) if timestamp else None
         return BookSnapshot(
-            event_id=f"{VENUE}:{self.symbol}:book:{self.sequence}",
+            # Sequence restarts whenever the local book is rebuilt after a
+            # resync or process restart. A per-book generation prevents the
+            # rebuilt stream from reusing IDs still held by consumers.
+            event_id=f"{VENUE}:{self.symbol}:book:{self.event_id_generation}:{self.sequence}",
             event_type="book_snapshot",
             venue=VENUE,
             instrument=self.symbol,

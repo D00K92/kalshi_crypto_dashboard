@@ -43,6 +43,21 @@ def test_kraken_book_snapshot_and_update() -> None:
     assert updated.depth <= 15
 
 
+def test_kraken_book_event_id_is_unique_after_book_rebuild() -> None:
+    event = {
+        "type": "snapshot",
+        "bids": [{"price": "99", "qty": "1"}],
+        "asks": [{"price": "101", "qty": "1"}],
+    }
+
+    before = KrakenBook("BTC/USD").apply(event, 1_000)
+    after = KrakenBook("BTC/USD").apply(event, 2_000)
+
+    assert before and after
+    assert before.sequence == after.sequence == 1
+    assert before.event_id != after.event_id
+
+
 def test_kraken_parser_rejects_malformed_book_levels() -> None:
     book = KrakenBook("BTC/USD")
     try:
@@ -140,6 +155,7 @@ async def test_crossed_book_resubscribes_book_without_interrupting_trade(monkeyp
     await feed.run()
 
     assert [event.event_type for event in pipeline.events] == ["book_snapshot", "book_snapshot", "trade"]
+    assert pipeline.events[0].event_id != pipeline.events[1].event_id  # type: ignore[attr-defined]
     assert pipeline.events[1].bids[0].price == "98"  # type: ignore[attr-defined]
     assert [message["method"] for message in websocket.sent] == [
         "subscribe", "subscribe", "unsubscribe", "subscribe",
