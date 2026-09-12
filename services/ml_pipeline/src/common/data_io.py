@@ -96,6 +96,8 @@ def load_training_table_from_feast(
     from google.cloud import bigquery
 
     contract = resolve_contract(feature_version)
+    selected_features = tuple(dict.fromkeys(("log_return", "venue_count", *contract.feature_columns)))
+    feature_select = ",\n        ".join(f"f.`{column}`" for column in selected_features)
 
     client = bigquery.Client(project=project, location="asia-northeast3")
     query = f"""
@@ -103,8 +105,7 @@ def load_training_table_from_feast(
         f.asset,
         f.event_timestamp,
         f.synthetic_price,
-        f.log_return,
-        f.venue_count,
+        {feature_select},
         l.market_id,
         l.prediction_timestamp,
         l.label_window_end,

@@ -29,12 +29,14 @@ def load_container(
 
 @dsl.container_component
 def train_container(
-    dataset: Input[Dataset], horizon: str, feature_version: str, model: Output[Model]
+    dataset: Input[Dataset], horizon: str, feature_version: str, architecture: str,
+    model: Output[Model],
 ):
     return dsl.ContainerSpec(
         image=TRAIN_IMAGE, command=["python", "/app/main.py"],
         args=["--dataset", dataset.path, "--horizon", horizon,
-              "--feature-version", feature_version, "--output", model.path],
+              "--feature-version", feature_version, "--architecture", architecture,
+              "--output", model.path],
     )
 
 
@@ -55,11 +57,12 @@ def evaluate_container(
 def register_container(
     model: Input[Model], promote: Input[Dataset], project: str, location: str,
     bucket: str, model_version: str, feature_version: str, horizon: str,
+    architecture: str,
 ):
     return dsl.ContainerSpec(
         image=REGISTER_IMAGE, command=["python", "/app/main.py"],
         args=["--artifact-uri", model.uri, "--promote-file", promote.path,
               "--project", project, "--location", location, "--bucket", bucket,
               "--model-version", model_version, "--feature-version", feature_version,
-              "--horizon", horizon],
+              "--horizon", horizon, "--architecture", architecture],
     )

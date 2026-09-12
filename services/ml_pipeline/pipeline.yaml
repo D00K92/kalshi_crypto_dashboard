@@ -1,6 +1,7 @@
 # PIPELINE DEFINITION
-# Name: crypto-volatility-training-v2-10s
+# Name: crypto-volatility-training
 # Inputs:
+#    architecture: str [Default: 'xgboost']
 #    bucket: str [Default: 'kalshi-crypto-tick-data']
 #    champion_metrics_uri: str [Default: 'gs://kalshi-crypto-tick-data/models/v2_10s/champion_metrics.json']
 #    end_date: str [Default: '2026-09-02']
@@ -83,6 +84,8 @@ components:
                   outputArtifactKey: promote
                   producerTask: evaluate-container
             parameters:
+              architecture:
+                componentInputParameter: pipelinechannel--architecture
               bucket:
                 componentInputParameter: pipelinechannel--bucket
               feature_version:
@@ -107,6 +110,8 @@ components:
               dataset:
                 componentInputArtifact: pipelinechannel--load-container-output_dataset
             parameters:
+              architecture:
+                componentInputParameter: pipelinechannel--architecture
               feature_version:
                 componentInputParameter: pipelinechannel--feature_version
               horizon:
@@ -120,6 +125,8 @@ components:
             schemaTitle: system.Dataset
             schemaVersion: 0.0.1
       parameters:
+        pipelinechannel--architecture:
+          parameterType: STRING
         pipelinechannel--bucket:
           parameterType: STRING
         pipelinechannel--champion_metrics_uri:
@@ -169,6 +176,8 @@ components:
             schemaTitle: system.Dataset
             schemaVersion: 0.0.1
       parameters:
+        architecture:
+          parameterType: STRING
         bucket:
           parameterType: STRING
         feature_version:
@@ -190,6 +199,8 @@ components:
             schemaTitle: system.Dataset
             schemaVersion: 0.0.1
       parameters:
+        architecture:
+          parameterType: STRING
         feature_version:
           parameterType: STRING
         horizon:
@@ -261,6 +272,8 @@ deploymentSpec:
         - '{{$.inputs.parameters[''feature_version'']}}'
         - --horizon
         - '{{$.inputs.parameters[''horizon'']}}'
+        - --architecture
+        - '{{$.inputs.parameters[''architecture'']}}'
         command:
         - python
         - /app/main.py
@@ -274,6 +287,8 @@ deploymentSpec:
         - '{{$.inputs.parameters[''horizon'']}}'
         - --feature-version
         - '{{$.inputs.parameters[''feature_version'']}}'
+        - --architecture
+        - '{{$.inputs.parameters[''architecture'']}}'
         - --output
         - '{{$.outputs.artifacts[''model''].path}}'
         command:
@@ -281,7 +296,7 @@ deploymentSpec:
         - /app/main.py
         image: asia-northeast3-docker.pkg.dev/kalshi-crypto-506614/ml-pipeline/ml-train:v1
 pipelineInfo:
-  name: crypto-volatility-training-v2-10s
+  name: crypto-volatility-training
 root:
   dag:
     tasks:
@@ -297,6 +312,8 @@ root:
                 outputArtifactKey: output_dataset
                 producerTask: load-container
           parameters:
+            pipelinechannel--architecture:
+              componentInputParameter: architecture
             pipelinechannel--bucket:
               componentInputParameter: bucket
             pipelinechannel--champion_metrics_uri:
@@ -340,6 +357,10 @@ root:
           name: load-container
   inputDefinitions:
     parameters:
+      architecture:
+        defaultValue: xgboost
+        isOptional: true
+        parameterType: STRING
       bucket:
         defaultValue: kalshi-crypto-tick-data
         isOptional: true

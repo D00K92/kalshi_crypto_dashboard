@@ -9,7 +9,23 @@ from xgboost import XGBRegressor
 
 from src.common.contracts import CURRENT_CONTRACT_VERSION, resolve_contract
 
-LIVE_FEATURE_COLUMNS = resolve_contract().feature_columns
+SUPPORTED_ARCHITECTURES = ("xgboost",)
+
+
+def _build_model(architecture: str, seed: int):
+    if architecture == "xgboost":
+        return XGBRegressor(
+            n_estimators=500,
+            max_depth=6,
+            learning_rate=.05,
+            subsample=.8,
+            colsample_bytree=.8,
+            objective="reg:squarederror",
+            eval_metric="rmse",
+            random_state=seed,
+            n_jobs=-1,
+        )
+    raise ValueError(f"unsupported model architecture: {architecture}")
 
 
 def train_horizon(
@@ -18,17 +34,19 @@ def train_horizon(
     seed: int = 42,
     *,
     feature_version: str = CURRENT_CONTRACT_VERSION,
-) -> tuple[XGBRegressor, dict]:
+    architecture: str | None = None,
+) -> tuple[object, dict]:
     """Train against the exact feature contract available to live analytics."""
     contract = resolve_contract(feature_version)
+    architecture = architecture or contract.default_architecture
     target = f"target_rv_{horizon}"
     if target not in table:
         raise ValueError(f"missing target column: {target}")
 
-    missing_features = [column for column in contract.feature_columns if column not in table]
+    columns = list(contract.columns_for(horizon))
+    missing_features = [column for column in columns if column not in table]
     if missing_features:
         raise ValueError(f"training data missing live features: {missing_features}")
-    columns = list(contract.feature_columns)
     usable = table.dropna(subset=[target, *columns]).sort_values("timestamp").reset_index(drop=True)
 
     n = len(usable)
@@ -39,11 +57,12 @@ def train_horizon(
     
     X, y = usable[columns], usable[target]
 
-    model = XGBRegressor(n_estimators=500, max_depth=6, learning_rate=.05, subsample=.8,
-                         colsample_bytree=.8, objective="reg:squarederror", eval_metric="rmse",
-                         random_state=seed, n_jobs=-1)
-    model.fit(X.iloc[:train_end], y.iloc[:train_end],
-              eval_set=[(X.iloc[train_end:valid_end], y.iloc[train_end:valid_end])], verbose=False)
+    model = _build_model(architecture, seed)
+    if architecture == "xgboost":
+        model.fit(X.iloc[:train_end], y.iloc[:train_end],
+                  eval_set=[(X.iloc[train_end:valid_end], y.iloc[train_end:valid_end])], verbose=False)
+    else:
+        model.fit(X.iloc[:train_end], y.iloc[:train_end])
     
     prediction = np.maximum(model.predict(X.iloc[valid_end:]), 0.0)
     actual = y.iloc[valid_end:].to_numpy()
@@ -53,6 +72,7 @@ def train_horizon(
     
     metadata = {
         "horizon": horizon, "target": target, "feature_columns": columns,
+        "architecture": architecture,
         "feature_set": contract.feature_set,
         "feature_version": contract.feature_version,
         "feature_view": contract.feature_view,

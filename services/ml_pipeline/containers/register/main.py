@@ -16,6 +16,7 @@ def main() -> None:
     p.add_argument("--model-version", default="v2_10s")
     p.add_argument("--feature-version", default="v2_10s")
     p.add_argument("--horizon", required=True)
+    p.add_argument("--architecture", choices=("har", "xgboost"), default="xgboost")
     p.add_argument("--promote-file")
     a = p.parse_args()
     if a.promote_file and Path(a.promote_file).read_text(encoding="utf-8").strip().lower() != "true":
@@ -25,12 +26,17 @@ def main() -> None:
     model = aiplatform.Model.upload(
         display_name=f"crypto-volatility-{a.model_version}-{a.horizon}",
         artifact_uri=a.artifact_uri,
-        serving_container_image_uri="us-docker.pkg.dev/vertex-ai/prediction/xgboost-cpu.1-7:latest",
+        serving_container_image_uri=(
+            "us-docker.pkg.dev/vertex-ai/prediction/sklearn-cpu.1-5:latest"
+            if a.architecture == "har"
+            else "us-docker.pkg.dev/vertex-ai/prediction/xgboost-cpu.1-7:latest"
+        ),
         labels={
             "version": a.model_version,
             "feature_version": a.feature_version,
             "stage": "champion",
             "horizon": a.horizon,
+            "architecture": a.architecture,
         },
     )
     print(model.resource_name, flush=True)

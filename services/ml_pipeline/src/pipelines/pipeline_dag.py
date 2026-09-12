@@ -2,12 +2,17 @@
 
 from kfp import dsl
 
-from src.components.kfp_components import evaluate_container, load_container, register_container, train_container
+from src.components.kfp_components import (
+    evaluate_container,
+    load_container,
+    register_container,
+    train_container,
+)
 
 HORIZONS = ("5m", "15m", "30m", "1h")
 
 
-@dsl.pipeline(name="crypto-volatility-training-v2-10s")
+@dsl.pipeline(name="crypto-volatility-training")
 def volatility_training_pipeline(
     feast_repo: str = "/app/feast_store",
     target_table: str = "kalshi-crypto-506614.training_labels.future_realized_volatility_v2_10s",
@@ -17,6 +22,7 @@ def volatility_training_pipeline(
     location: str = "asia-northeast3",
     model_version: str = "v2_10s",
     feature_version: str = "v2_10s",
+    architecture: str = "xgboost",
     champion_metrics_uri: str = "gs://kalshi-crypto-tick-data/models/v2_10s/champion_metrics.json",
     bucket: str = "kalshi-crypto-tick-data",
 ) -> None:
@@ -27,10 +33,11 @@ def volatility_training_pipeline(
         trained = train_container(
             dataset=data.outputs["output_dataset"], horizon=horizon,
             feature_version=feature_version,
+            architecture=architecture,
         )
         evaluated = evaluate_container(dataset=data.outputs["output_dataset"], model=trained.outputs["model"],
                                        horizon=horizon, champion_metrics_uri=champion_metrics_uri)
         register_container(model=trained.outputs["model"], promote=evaluated.outputs["promote"],
                            project=project, location=location, bucket=bucket,
                            model_version=model_version, feature_version=feature_version,
-                           horizon=horizon)
+                           horizon=horizon, architecture=architecture)

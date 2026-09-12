@@ -56,6 +56,8 @@ def _register(bundle: Path, args) -> str:
     from google.cloud import storage
 
     client = storage.Client(project=args.project)
+    metadata = json.loads((bundle / "metadata.json").read_text(encoding="utf-8"))
+    architecture = metadata.get("architecture", "xgboost")
     prefix = f"models/{args.model_version}/candidate"
     for file in bundle.iterdir():
         client.bucket(args.bucket).blob(f"{prefix}/{bundle.name}/{file.name}").upload_from_filename(file)
@@ -63,8 +65,13 @@ def _register(bundle: Path, args) -> str:
     model = vertex.Model.upload(
         display_name=f"crypto-volatility-{args.model_version}-{bundle.name}",
         artifact_uri=f"gs://{args.bucket}/{prefix}/{bundle.name}",
-        serving_container_image_uri="us-docker.pkg.dev/vertex-ai/prediction/xgboost-cpu.1-7:latest",
-        labels={"version": args.model_version, "stage": "candidate", "horizon": bundle.name},
+        serving_container_image_uri=(
+            "us-docker.pkg.dev/vertex-ai/prediction/sklearn-cpu.1-5:latest"
+            if architecture == "har"
+            else "us-docker.pkg.dev/vertex-ai/prediction/xgboost-cpu.1-7:latest"
+        ),
+        labels={"version": args.model_version, "stage": "candidate", "horizon": bundle.name,
+                "architecture": architecture},
     )
     return model.resource_name
 

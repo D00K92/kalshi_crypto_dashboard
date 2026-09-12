@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+HORIZONS = ("5m", "15m", "30m", "1h")
+
 
 @dataclass(frozen=True, slots=True)
 class ModelFeatureContract:
@@ -14,6 +16,15 @@ class ModelFeatureContract:
     offline_table: str
     label_version: str
     feature_columns: tuple[str, ...]
+    default_architecture: str = "xgboost"
+    horizon_feature_columns: tuple[tuple[str, tuple[str, ...]], ...] = ()
+
+    def columns_for(self, horizon: str) -> tuple[str, ...]:
+        """Return the ordered model inputs for one forecast horizon."""
+        if horizon not in HORIZONS:
+            raise ValueError(f"unsupported forecast horizon: {horizon}")
+        configured = dict(self.horizon_feature_columns)
+        return configured.get(horizon, self.feature_columns)
 
 
 CONTRACTS = {

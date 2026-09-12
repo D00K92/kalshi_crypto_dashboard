@@ -13,21 +13,26 @@ from .inference_service import HORIZONS, EWMAProvider, ForecastRequest, Forecast
 
 
 class PackagedHybridProvider:
-    """Serve one packaged 1h champion with EWMA for the other horizons."""
+    """Serve packaged horizon models, with EWMA entries kept for rollback."""
 
     def __init__(
         self,
         *,
         ewma: EWMAProvider,
-        model: Any,
-        feature_columns: tuple[str, ...],
-        model_resource: str,
+        models: dict[str, Any],
+        feature_columns: dict[str, tuple[str, ...]],
+        model_resources: dict[str, str],
     ) -> None:
         self.ewma = ewma
-        self.model = model
+        self.models = models
         self.feature_columns = feature_columns
-        self.model_resource = model_resource
+        self.model_resources = model_resources
         self.ready = True
+
+    @property
+    def model_resource(self) -> str:
+        """Legacy verifier compatibility for the 1h resource."""
+        return self.model_resources["1h"]
 
     @classmethod
     def load(
@@ -50,47 +55,56 @@ class PackagedHybridProvider:
         horizons = manifest.get("horizons")
         if not isinstance(horizons, dict) or set(horizons) != set(HORIZONS):
             raise ValueError("model bundle must configure exactly four horizons")
-        for horizon in HORIZONS[:-1]:
-            expected_resource = f"ewma/{model_version}/{horizon}"
-            entry = horizons[horizon]
-            if not isinstance(entry, dict) or entry.get("kind") != "ewma" or entry.get("resource") != expected_resource:
-                raise ValueError(f"invalid EWMA bundle entry for {horizon}")
-
-        entry = horizons["1h"]
-        if not isinstance(entry, dict) or entry.get("kind") != "xgboost":
-            raise ValueError("1h bundle entry must be xgboost")
-        resource = entry.get("resource")
-        artifact_uri = entry.get("artifact_uri")
-        if not isinstance(resource, str) or not resource.startswith("projects/") or "@" not in resource:
-            raise ValueError("1h model resource must be an immutable Vertex version")
-        if not isinstance(artifact_uri, str) or not artifact_uri.startswith("gs://"):
-            raise ValueError("1h artifact URI must use gs://")
-
         root = manifest_file.parent
-        model_file = _bundle_file(root, entry.get("model_path"))
-        metadata_file = _bundle_file(root, entry.get("metadata_path"))
-        _verify_sha256(model_file, entry.get("model_sha256"))
-        _verify_sha256(metadata_file, entry.get("metadata_sha256"))
-
-        metadata = _load_json(metadata_file)
-        if metadata.get("horizon") != "1h":
-            raise ValueError("packaged model horizon mismatch")
-        if metadata.get("feature_set") != "market_features" or metadata.get("feature_version") != feature_version:
-            raise ValueError("packaged model feature contract mismatch")
-        columns = metadata.get("feature_columns")
-        if columns != ["log_return", "venue_count"]:
-            raise ValueError("packaged model has unexpected feature columns")
-
-        model = joblib.load(model_file)
-        if not callable(getattr(model, "predict", None)):
-            raise ValueError("packaged model does not implement predict")
+        models: dict[str, Any] = {}
+        feature_columns: dict[str, tuple[str, ...]] = {}
+        model_resources: dict[str, str] = {}
+        for horizon in HORIZONS:
+            entry = horizons[horizon]
+            if not isinstance(entry, dict):
+                raise ValueError(f"invalid bundle entry for {horizon}")
+            if entry.get("kind") == "ewma":
+                expected_resource = f"ewma/{model_version}/{horizon}"
+                if entry.get("resource") != expected_resource:
+                    raise ValueError(f"invalid EWMA bundle entry for {horizon}")
+                model_resources[horizon] = expected_resource
+                continue
+            resource = entry.get("resource")
+            artifact_uri = entry.get("artifact_uri")
+            if not isinstance(resource, str) or not resource.startswith("projects/") or "@" not in resource:
+                raise ValueError(f"{horizon} model resource must be an immutable Vertex version")
+            if not isinstance(artifact_uri, str) or not artifact_uri.startswith("gs://"):
+                raise ValueError(f"{horizon} artifact URI must use gs://")
+            model_file = _bundle_file(root, entry.get("model_path"))
+            metadata_file = _bundle_file(root, entry.get("metadata_path"))
+            _verify_sha256(model_file, entry.get("model_sha256"))
+            _verify_sha256(metadata_file, entry.get("metadata_sha256"))
+            metadata = _load_json(metadata_file)
+            if metadata.get("horizon") != horizon:
+                raise ValueError("packaged model horizon mismatch")
+            if metadata.get("feature_set") != "market_features" or metadata.get("feature_version") != feature_version:
+                raise ValueError("packaged model feature contract mismatch")
+            columns = metadata.get("feature_columns")
+            if not isinstance(columns, list) or not columns or any(not isinstance(column, str) for column in columns):
+                raise ValueError("packaged model has invalid feature columns")
+            architecture = metadata.get("architecture", entry.get("kind"))
+            if architecture != entry.get("kind"):
+                raise ValueError("packaged model architecture mismatch")
+            model = joblib.load(model_file)
+            if not callable(getattr(model, "predict", None)):
+                raise ValueError("packaged model does not implement predict")
+            models[horizon] = model
+            feature_columns[horizon] = tuple(columns)
+            model_resources[horizon] = resource
         provider = cls(
             ewma=EWMAProvider(model_version=model_version, feature_version=feature_version, decay=decay),
-            model=model,
-            feature_columns=tuple(columns),
-            model_resource=resource,
+            models=models,
+            feature_columns=feature_columns,
+            model_resources=model_resources,
         )
-        provider._predict({"log_return": 0.0, "venue_count": 1})
+        smoke_values = {column: 1.0 for columns in feature_columns.values() for column in columns}
+        for horizon in models:
+            provider._predict(horizon, smoke_values)
         return provider
 
     def forecast(
@@ -108,9 +122,10 @@ class PackagedHybridProvider:
             future_skew_ms=future_skew_ms,
         )
         outputs = dict(baseline.annualized_volatility)
-        outputs["1h"] = self._predict(request.values)
+        for horizon in self.models:
+            outputs[horizon] = self._predict(horizon, request.values)
         resources = dict(baseline.model_resources)
-        resources["1h"] = self.model_resource
+        resources.update(self.model_resources)
         return ForecastResponse(
             outputs,
             baseline.feature_asof_ts_ms,
@@ -120,17 +135,18 @@ class PackagedHybridProvider:
             baseline.feature_available_ts_ms,
         )
 
-    def _predict(self, values: dict[str, object]) -> float:
+    def _predict(self, horizon: str, values: dict[str, object]) -> float:
         try:
-            row = [float(values[column]) for column in self.feature_columns]
+            columns = self.feature_columns[horizon]
+            row = [float(values[column]) for column in columns]
         except (KeyError, TypeError, ValueError) as exc:
-            raise ValueError("feature payload missing valid 1h model inputs") from exc
+            raise ValueError(f"feature payload missing valid {horizon} model inputs") from exc
         if not all(math.isfinite(value) for value in row):
-            raise ValueError("1h model inputs must be finite")
-        prediction = self.model.predict(pd.DataFrame([row], columns=self.feature_columns, dtype=float))
+            raise ValueError(f"{horizon} model inputs must be finite")
+        prediction = self.models[horizon].predict(pd.DataFrame([row], columns=columns, dtype=float))
         value = max(float(prediction[0]), 0.0)
         if not math.isfinite(value) or value <= 0:
-            raise ValueError("1h model prediction must be positive and finite")
+            raise ValueError(f"{horizon} model prediction must be positive and finite")
         return value
 
 
