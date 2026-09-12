@@ -1,14 +1,14 @@
 # PIPELINE DEFINITION
 # Name: crypto-volatility-training
 # Inputs:
-#    architecture: str [Default: 'xgboost']
+#    architecture: str [Default: 'har']
 #    bucket: str [Default: 'kalshi-crypto-tick-data']
-#    champion_metrics_uri: str [Default: 'gs://kalshi-crypto-tick-data/models/v2_10s/champion_metrics.json']
+#    champion_metrics_uri: str [Default: 'gs://kalshi-crypto-tick-data/models/v3_har_1/champion_metrics.json']
 #    end_date: str [Default: '2026-09-02']
 #    feast_repo: str [Default: '/app/feast_store']
-#    feature_version: str [Default: 'v2_10s']
+#    feature_version: str [Default: 'v3_10s']
 #    location: str [Default: 'asia-northeast3']
-#    model_version: str [Default: 'v2_10s']
+#    model_version: str [Default: 'v3_har_1']
 #    project: str [Default: 'kalshi-crypto-506614']
 #    start_date: str [Default: '2026-08-31']
 #    target_table: str [Default: 'kalshi-crypto-506614.training_labels.future_realized_volatility_v2_10s']
@@ -358,7 +358,7 @@ root:
   inputDefinitions:
     parameters:
       architecture:
-        defaultValue: xgboost
+        defaultValue: har
         isOptional: true
         parameterType: STRING
       bucket:
@@ -366,7 +366,7 @@ root:
         isOptional: true
         parameterType: STRING
       champion_metrics_uri:
-        defaultValue: gs://kalshi-crypto-tick-data/models/v2_10s/champion_metrics.json
+        defaultValue: gs://kalshi-crypto-tick-data/models/v3_har_1/champion_metrics.json
         isOptional: true
         parameterType: STRING
       end_date:
@@ -378,7 +378,7 @@ root:
         isOptional: true
         parameterType: STRING
       feature_version:
-        defaultValue: v2_10s
+        defaultValue: v3_10s
         isOptional: true
         parameterType: STRING
       location:
@@ -386,7 +386,7 @@ root:
         isOptional: true
         parameterType: STRING
       model_version:
-        defaultValue: v2_10s
+        defaultValue: v3_har_1
         isOptional: true
         parameterType: STRING
       project:

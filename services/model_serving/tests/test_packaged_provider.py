@@ -21,6 +21,16 @@ class ConstantModel:
         return np.array([0.42])
 
 
+class HorizonModel:
+    def __init__(self, columns, prediction):
+        self.columns = columns
+        self.prediction = prediction
+
+    def predict(self, frame):
+        assert list(frame.columns) == self.columns
+        return np.array([self.prediction])
+
+
 def build_bundle(tmp_path, *, checksum="valid"):
     model_dir = tmp_path / "1h"
     model_dir.mkdir()
@@ -58,6 +68,47 @@ def build_bundle(tmp_path, *, checksum="valid"):
     return manifest_path
 
 
+def build_v3_bundle(tmp_path):
+    columns = {
+        "5m": ["realized_vol_30s", "realized_vol_1m", "realized_vol_5m"],
+        "15m": ["realized_vol_5m", "realized_vol_15m", "realized_vol_1h"],
+        "30m": ["realized_vol_5m", "realized_vol_30m", "realized_vol_1h"],
+        "1h": ["realized_vol_15m", "realized_vol_1h", "realized_vol_3h"],
+    }
+    entries = {}
+    for index, horizon in enumerate(("5m", "15m", "30m", "1h"), start=1):
+        model_dir = tmp_path / horizon
+        model_dir.mkdir()
+        model_path = model_dir / "model.joblib"
+        metadata_path = model_dir / "metadata.json"
+        joblib.dump(HorizonModel(columns[horizon], index / 10), model_path)
+        metadata_path.write_text(json.dumps({
+            "horizon": horizon,
+            "feature_set": "market_features",
+            "feature_version": "v3_10s",
+            "feature_columns": columns[horizon],
+            "architecture": "har",
+        }))
+        digest = lambda path: hashlib.sha256(path.read_bytes()).hexdigest()
+        entries[horizon] = {
+            "kind": "har",
+            "resource": f"projects/1/locations/test/models/{index}@1",
+            "artifact_uri": f"gs://bucket/{horizon}",
+            "model_path": f"{horizon}/model.joblib",
+            "metadata_path": f"{horizon}/metadata.json",
+            "model_sha256": digest(model_path),
+            "metadata_sha256": digest(metadata_path),
+        }
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps({
+        "schema_version": 1,
+        "model_version": "v3_har_1",
+        "feature_version": "v3_10s",
+        "horizons": entries,
+    }))
+    return manifest_path
+
+
 def test_packaged_provider_routes_only_1h_to_model(tmp_path):
     provider = PackagedHybridProvider.load(
         build_bundle(tmp_path), model_version="v2_10s", feature_version="v2_10s", decay=0.96
@@ -78,6 +129,30 @@ def test_packaged_provider_routes_only_1h_to_model(tmp_path):
     assert len({result.annualized_volatility[h] for h in ("5m", "15m", "30m")}) == 3
     assert result.model_resources["1h"] == "projects/1/locations/test/models/2@1"
     assert result.model_resources["30m"] == "ewma/v2_10s/30m"
+
+
+def test_packaged_provider_routes_all_v3_horizons_to_har_models(tmp_path):
+    provider = PackagedHybridProvider.load(
+        build_v3_bundle(tmp_path), model_version="v3_har_1", feature_version="v3_10s", decay=0.96
+    )
+    now = int(time.time() * 1000)
+    realized = {
+        f"realized_vol_{window}": 0.2
+        for window in ("30s", "1m", "5m", "15m", "30m", "1h", "3h")
+    }
+    result = provider.forecast(
+        ForecastRequest(
+            "market_features", "v3_10s", now - 10_000, now - 5_000,
+            {"synthetic_price": 70_000.0, "venue_count": 6, **realized,
+             "ewma_states": {h: {"frequency": h, "variance": 1e-8} for h in ("5m", "15m", "30m")}},
+            {"features": now - 5_000},
+        ),
+        now,
+        max_age_ms=90_000,
+        future_skew_ms=2_000,
+    )
+    assert result.annualized_volatility == pytest.approx({"5m": 0.1, "15m": 0.2, "30m": 0.3, "1h": 0.4})
+    assert all(resource.startswith("projects/") for resource in result.model_resources.values())
 
 
 def test_packaged_provider_rejects_modified_model(tmp_path):

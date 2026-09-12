@@ -41,6 +41,18 @@ def test_v2_10s_contract_has_independent_feast_resources():
     validate_feature_schema(feature_frame(), version="v2_10s")
 
 
+def test_v3_contract_registers_all_har_components():
+    from registry import resolve_feature_spec
+
+    spec = resolve_feature_spec("market_features", "v3_10s")
+    assert spec.feature_view == "v3_10s_market_features"
+    assert spec.push_source == "v3_10s_market_features_push"
+    assert {
+        "realized_vol_30s", "realized_vol_1m", "realized_vol_5m", "realized_vol_15m",
+        "realized_vol_30m", "realized_vol_1h", "realized_vol_3h",
+    }.issubset(spec.required_fields)
+
+
 def test_backfill_materializes_only_the_registered_feature_view(monkeypatch):
     calls = []
 

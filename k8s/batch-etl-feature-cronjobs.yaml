@@ -29,6 +29,8 @@ spec:
               value: "${GCS_BUCKET_NAME}"
             - name: GCP_PROJECT_ID
               value: "${GCP_PROJECT_ID}"
+            - name: FEATURE_VERSION
+              value: "active"
             resources:
               requests: {cpu: "100m", memory: "128Mi", ephemeral-storage: "100Mi"}
               limits: {cpu: "2000m", memory: "4Gi", ephemeral-storage: "1Gi"}

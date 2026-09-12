@@ -41,7 +41,7 @@ def test_feast_loader_creates_nested_artifact_parent(tmp_path, monkeypatch):
     assert len(pd.read_parquet(output)) == 1
 
 
-def test_feast_loader_passes_v2_10s_contract_by_default(tmp_path, monkeypatch):
+def test_feast_loader_passes_v3_10s_contract_by_default(tmp_path, monkeypatch):
     module = _load_module()
     calls = []
 
@@ -58,5 +58,5 @@ def test_feast_loader_passes_v2_10s_contract_by_default(tmp_path, monkeypatch):
 
     module.main()
 
-    assert calls[0]["feature_version"] == "v2_10s"
+    assert calls[0]["feature_version"] == "v3_10s"
     assert calls[0]["target_table"].endswith("future_realized_volatility_v2_10s")

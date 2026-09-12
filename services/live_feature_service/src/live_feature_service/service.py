@@ -9,7 +9,7 @@ import orjson
 import redis.asyncio as redis
 from redis.exceptions import ResponseError
 
-from .computation import V2TenSecondFeatureComputer
+from .computation import V2TenSecondFeatureComputer, V3TenSecondFeatureComputer
 from .config import Settings
 from .health import HealthServer
 
@@ -20,7 +20,13 @@ class LiveFeatureService:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self.client = redis.Redis.from_url(settings.redis_url, decode_responses=False, health_check_interval=30)
-        self.computer = V2TenSecondFeatureComputer(
+        computer_type = {
+            "v2_10s": V2TenSecondFeatureComputer,
+            "v3_10s": V3TenSecondFeatureComputer,
+        }.get(settings.feature_version)
+        if computer_type is None:
+            raise ValueError(f"unsupported live feature version: {settings.feature_version}")
+        self.computer = computer_type(
             ewma_decay=settings.ewma_decay,
             max_bar_age_ms=settings.max_bar_age_ms,
             history_bars=settings.history_bars,
@@ -81,8 +87,8 @@ class LiveFeatureService:
             except (ValueError, TypeError, KeyError, orjson.JSONDecodeError):
                 continue
         await self.client.set(self.settings.state_key, orjson.dumps(self.computer.snapshot()))
-        if self.computer.history_count < 361:
-            LOGGER.warning("live_feature_warmup_incomplete history_bars=%s required=361", self.computer.history_count)
+        if self.computer.history_count < self.computer.required_history_bars:
+            LOGGER.warning("live_feature_warmup_incomplete history_bars=%s required=%s", self.computer.history_count, self.computer.required_history_bars)
 
     async def _process_entries(self, entries: list[tuple[Any, Any]]) -> None:
         for entry_id, fields in entries:

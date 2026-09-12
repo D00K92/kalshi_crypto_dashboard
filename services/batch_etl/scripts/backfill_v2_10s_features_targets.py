@@ -1,4 +1,4 @@
-"""Backfill v2_10s features and labels with bounded concurrent BigQuery jobs."""
+"""Backfill a 10-second feature contract and v2 labels with bounded BigQuery jobs."""
 from __future__ import annotations
 
 import argparse
@@ -11,6 +11,10 @@ from google.cloud import bigquery
 
 
 SQL_DIR = Path(__file__).resolve().parents[1] / "sql"
+FEATURE_SQL = {
+    "v2_10s": "014_compute_v2_10s_features.sql",
+    "v3_10s": "016_compute_v3_10s_features.sql",
+}
 
 
 def parse_date(value: str) -> date:
@@ -45,12 +49,13 @@ def main() -> None:
     parser.add_argument("--parallelism", type=int, default=2)
     parser.add_argument("--maximum-bytes-billed", type=int, default=None)
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--feature-version", choices=FEATURE_SQL, default="v3_10s")
     args = parser.parse_args()
     if args.end_date <= args.start_date:
         parser.error("--end-date must be after --start-date")
     if not 1 <= args.parallelism <= 4:
         parser.error("--parallelism must be between 1 and 4")
-    feature_sql = (SQL_DIR / "014_compute_v2_10s_features.sql").read_text().replace("${project}", args.project)
+    feature_sql = (SQL_DIR / FEATURE_SQL[args.feature_version]).read_text().replace("${project}", args.project)
     target_sql = (SQL_DIR / "015_compute_v2_10s_targets.sql").read_text().replace("${project}", args.project)
     # Each SQL file declares its own annualization constant. Wrap the second
     # file in a block so its DECLARE remains legal in one BigQuery script.

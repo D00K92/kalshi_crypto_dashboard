@@ -48,9 +48,35 @@ CONTRACTS = {
         label_version="v2_10s",
         feature_columns=("log_return", "venue_count"),
     ),
+    "v3_10s": ModelFeatureContract(
+        feature_set="market_features",
+        feature_version="v3_10s",
+        feature_view="v3_10s_market_features",
+        feature_service="volatility_v3_10s",
+        offline_table="kalshi-crypto-506614.feature_store.realized_volatility_v3_10s",
+        # The future windows are unchanged; v3 changes predictors only.
+        label_version="v2_10s",
+        feature_columns=(
+            "realized_vol_30s",
+            "realized_vol_1m",
+            "realized_vol_5m",
+            "realized_vol_15m",
+            "realized_vol_30m",
+            "realized_vol_1h",
+            "realized_vol_3h",
+        ),
+        default_architecture="har",
+        # HAR uses a short, horizon-scale, and longer regime component.
+        horizon_feature_columns=(
+            ("5m", ("realized_vol_30s", "realized_vol_1m", "realized_vol_5m")),
+            ("15m", ("realized_vol_5m", "realized_vol_15m", "realized_vol_1h")),
+            ("30m", ("realized_vol_5m", "realized_vol_30m", "realized_vol_1h")),
+            ("1h", ("realized_vol_15m", "realized_vol_1h", "realized_vol_3h")),
+        ),
+    ),
 }
 
-CURRENT_CONTRACT_VERSION = "v2_10s"
+CURRENT_CONTRACT_VERSION = "v3_10s"
 
 
 def resolve_contract(version: str = CURRENT_CONTRACT_VERSION) -> ModelFeatureContract:

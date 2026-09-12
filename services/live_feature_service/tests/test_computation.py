@@ -4,7 +4,7 @@ import math
 
 import pytest
 
-from live_feature_service.computation import V2TenSecondFeatureComputer
+from live_feature_service.computation import SECONDS_PER_YEAR, V2TenSecondFeatureComputer, V3TenSecondFeatureComputer
 
 
 def bar(ts, venue, price, frequency="10s"):
@@ -146,3 +146,33 @@ def test_payload_declares_v2_10s_contract():
 
     assert row.payload()["feature_set"] == "market_features"
     assert row.payload()["feature_version"] == "v2_10s"
+
+
+def test_v3_emits_complete_trailing_har_features_after_three_hour_warmup():
+    computer = V3TenSecondFeatureComputer()
+    row = None
+    for index in range(1_082):
+        row = computer.compute(
+            bar(index * 10_000, "a", math.exp(index * 0.001)),
+            now_ms=(index + 1) * 10_000,
+        )
+
+    assert row is not None
+    values = row.payload()["values"]
+    assert row.payload()["feature_version"] == "v3_10s"
+    assert {
+        "realized_vol_30s", "realized_vol_1m", "realized_vol_5m", "realized_vol_15m",
+        "realized_vol_30m", "realized_vol_1h", "realized_vol_3h",
+    }.issubset(values)
+    expected = math.sqrt(0.001 ** 2 * SECONDS_PER_YEAR / 10)
+    assert values["realized_vol_1m"] == pytest.approx(expected)
+    assert values["realized_vol_30s"] == pytest.approx(expected)
+    assert values["realized_vol_3h"] == pytest.approx(expected)
+
+
+def test_v3_does_not_publish_partial_har_feature_rows():
+    computer = V3TenSecondFeatureComputer()
+    row = None
+    for index in range(100):
+        row = computer.compute(bar(index * 10_000, "a", 100 + index), now_ms=(index + 1) * 10_000)
+    assert row is None

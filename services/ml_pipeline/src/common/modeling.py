@@ -4,15 +4,20 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from xgboost import XGBRegressor
 
 from src.common.contracts import CURRENT_CONTRACT_VERSION, resolve_contract
 
-SUPPORTED_ARCHITECTURES = ("xgboost",)
+SUPPORTED_ARCHITECTURES = ("har", "xgboost")
 
 
 def _build_model(architecture: str, seed: int):
+    if architecture == "har":
+        # HAR is intentionally a transparent baseline: non-negative coefficients
+        # combine short-, horizon-, and long-regime realized volatility.
+        return LinearRegression(positive=True)
     if architecture == "xgboost":
         return XGBRegressor(
             n_estimators=500,

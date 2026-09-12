@@ -4,6 +4,7 @@ from feast import BigQuerySource
 PROJECT = "kalshi-crypto-506614"
 REALIZED_VOLATILITY_TABLE = f"{PROJECT}.feature_store.realized_volatility_v1"
 V2_10S_MARKET_FEATURE_TABLE = f"{PROJECT}.feature_store.realized_volatility_v2_10s"
+V3_10S_MARKET_FEATURE_TABLE = f"{PROJECT}.feature_store.realized_volatility_v3_10s"
 
 
 def build_market_feature_source():
@@ -21,6 +22,16 @@ def build_v2_10s_market_feature_source():
     return BigQuerySource(
         name="v2_10s_realized_volatility_source",
         table=V2_10S_MARKET_FEATURE_TABLE,
+        timestamp_field="event_timestamp",
+        created_timestamp_column="created_timestamp",
+    )
+
+
+def build_v3_10s_market_feature_source():
+    """Return the source containing trailing HAR volatility components."""
+    return BigQuerySource(
+        name="v3_10s_realized_volatility_source",
+        table=V3_10S_MARKET_FEATURE_TABLE,
         timestamp_field="event_timestamp",
         created_timestamp_column="created_timestamp",
     )

@@ -38,6 +38,22 @@ FEATURE_REGISTRY: dict[tuple[str, str], FeatureSpec] = {
         fields=("synthetic_price", "log_return", "venue_count"),
         required_fields=("synthetic_price", "venue_count"),
     ),
+    ("market_features", "v3_10s"): FeatureSpec(
+        feature_set="market_features",
+        version="v3_10s",
+        feature_view="v3_10s_market_features",
+        push_source="v3_10s_market_features_push",
+        fields=(
+            "synthetic_price", "log_return", "venue_count",
+            "realized_vol_30s", "realized_vol_1m", "realized_vol_5m", "realized_vol_15m",
+            "realized_vol_30m", "realized_vol_1h", "realized_vol_3h",
+        ),
+        required_fields=(
+            "synthetic_price", "venue_count", "realized_vol_30s", "realized_vol_1m",
+            "realized_vol_5m", "realized_vol_15m", "realized_vol_30m",
+            "realized_vol_1h", "realized_vol_3h",
+        ),
+    ),
 }
 
 
