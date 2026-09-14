@@ -35,6 +35,7 @@ from .schemas import (
 
 LOGGER = logging.getLogger(__name__)
 OPEN_STATUSES = {"open", "active"}
+QUOTE_LOG_INTERVAL_MS = 60_000
 
 
 class AnalyticsService:
@@ -49,6 +50,7 @@ class AnalyticsService:
         self.ready = False
         self._last_forecast_available_ts_ms: int | None = None
         self._cached_volatility: VolatilitySnapshot | None = None
+        self._last_quote_summary_log_ts_ms: int | None = None
 
     async def start(self) -> None:
         await self.market_data.ensure_group()
@@ -91,6 +93,7 @@ class AnalyticsService:
         known_events = {item.event_ticker for item in metadata.values()}
         await self._publish_kalshi_iv(metadata, spot, now_ms)
         active: set[str] = set()
+        unavailable_quote_counts: dict[str, int] = {}
         for ticker in list(self.tickers.values()):
             market_metadata = metadata.get(ticker.market_ticker)
             result = await self._price(ticker, market_metadata, spot, volatility, now_ms)
@@ -98,13 +101,20 @@ class AnalyticsService:
                 active.add(ticker.market_ticker)
                 await self.publisher.publish_price(ticker.market_ticker, result.payload)
                 if result.quote_reason is not None:
-                    LOGGER.info("pricing_quote_unavailable reason=%s market=%s", result.quote_reason.value, ticker.market_ticker)
+                    reason = result.quote_reason.value
+                    unavailable_quote_counts[reason] = unavailable_quote_counts.get(reason, 0) + 1
             else:
                 await self.publisher.unavailable(ticker.market_ticker, result.value, now_ms)
                 expired = market_metadata is not None and market_metadata.expiry_ts_ms <= now_ms
                 inactive_event = bool(metadata) and ticker.event_ticker not in known_events
                 if expired or inactive_event:
                     self.tickers.pop(ticker.market_ticker, None)
+        if unavailable_quote_counts and (
+            self._last_quote_summary_log_ts_ms is None
+            or now_ms - self._last_quote_summary_log_ts_ms >= QUOTE_LOG_INTERVAL_MS
+        ):
+            LOGGER.info("pricing_quotes_unavailable counts=%s", unavailable_quote_counts)
+            self._last_quote_summary_log_ts_ms = now_ms
         await self.publisher.expire_inactive(active, now_ms)
         if entries:
             await self.market_data.acknowledge([entry_id for entry_id, _ in entries])

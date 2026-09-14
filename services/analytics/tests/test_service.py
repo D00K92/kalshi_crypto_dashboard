@@ -1,3 +1,5 @@
+import logging
+
 import pytest
 
 from kalshi_crypto_analytics.schemas import (
@@ -100,6 +102,29 @@ async def test_stale_quote_still_publishes_fair_price_without_edges(delta):
     assert out.prices[0]["time_to_expiry_minutes"] == pytest.approx(5)
     assert out.prices[0]["volatility_bracket"] == ["5m", "15m"]
     assert out.prices[0]["market_mid_probability"] is None
+
+
+async def test_stale_quote_logging_is_aggregated_and_rate_limited(caplog):
+    items = [ticker(f"KXBTCD-E-T{strike}", ts=NOW - 60_001) for strike in range(98, 105)]
+    metadata = {
+        item.market_ticker: MarketMetadata(item.market_ticker, item.event_ticker, 100, NOW + 300_000, "open")
+        for item in items
+    }
+    clock = [NOW]
+    service = AnalyticsService(
+        Data(bootstrap=items), Meta(metadata), Forecast(), Publisher(),
+        clock_ms=lambda: clock[0],
+    )
+    await service.start()
+
+    with caplog.at_level(logging.INFO, logger="kalshi_crypto_analytics.service"):
+        await service.cycle()
+        clock[0] += 1_000
+        await service.cycle()
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert messages == ["pricing_quotes_unavailable counts={'stale_ticker': 7}"]
+    assert all("market=" not in message for message in messages)
 
 
 async def test_rollover_removes_old_and_prices_new_event():
