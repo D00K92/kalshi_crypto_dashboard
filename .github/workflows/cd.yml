@@ -138,7 +138,10 @@ jobs:
         IMAGE_TAG: ${{ github.event.workflow_run.head_sha || github.sha }}
       run: |
         set -euo pipefail
-        docker build --platform linux/amd64 --build-arg REQUIRE_MODEL_BUNDLE=true \
+        docker build --platform linux/amd64 \
+          --build-arg REQUIRE_MODEL_BUNDLE=true \
+          --build-arg MODEL_VERSION=v4_volume_har_1 \
+          --build-arg FEATURE_VERSION=v4_10s \
           -t "${IMAGE_URI}:${IMAGE_TAG}" services/model_serving
         docker push "${IMAGE_URI}:${IMAGE_TAG}"
 

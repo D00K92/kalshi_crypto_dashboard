@@ -9,7 +9,10 @@ RUN uv pip install --system --no-cache -r pyproject.toml \
         --shell /usr/sbin/nologin model-serving
 COPY --chown=10001:10001 src/ ./src/
 COPY --chown=10001:10001 model_bundle/ /models/
-ENV PYTHONUNBUFFERED=1 PYTHONPATH=/app/src MODEL_BUNDLE_MANIFEST=/models/manifest.json
+ARG MODEL_VERSION=v2_10s
+ARG FEATURE_VERSION=v2_10s
+ENV PYTHONUNBUFFERED=1 PYTHONPATH=/app/src MODEL_BUNDLE_MANIFEST=/models/manifest.json \
+    MODEL_VERSION=${MODEL_VERSION} FEATURE_VERSION=${FEATURE_VERSION}
 ARG REQUIRE_MODEL_BUNDLE=false
 RUN if [ "${REQUIRE_MODEL_BUNDLE}" = "true" ]; then python -m model_serving.verify_bundle; fi
 USER 10001:10001
