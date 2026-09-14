@@ -45,31 +45,32 @@ for the complete service and interface catalog.
 |---|---|---|
 | `services/ingestion` | Normalize exchange and Kalshi events into Redis Streams. Omitted Kalshi book sides become empty sides; malformed values remain rejected. | GKE Deployment `ingestion-service` |
 | `services/aggregator` | Build synthetic BTC spot state, canonical per-venue books, and completed 10-second venue primitives. | GKE Deployment `aggregator` |
-| `services/live_feature_service` | Turn primitives into the live `market_features/v2_10s` contract and EWMA state. | GKE Deployment `live-feature-service` |
+| `services/live_feature_service` | Turn primitives into rollback `v2_10s` and active `v4_10s` live feature contracts. | GKE Deployments `live-feature-service` and `live-feature-service-v4` |
 | `services/gcs_exporter` | Archive five normalized Redis Streams to partitioned Parquet in GCS. | GKE Deployment `gcs-exporter` |
 | `services/batch_etl` | Land raw data, build 10-second bars, features, and future-volatility labels in BigQuery. | GKE CronJobs |
 | `services/feast_store` | Own Feast definitions, registry, online writes, optional feature serving, and parity checks. | GKE `feast-live-bridge` and Jobs/CronJobs; `feast-server` is retained at zero replicas |
 | `services/ml_pipeline` | Train, evaluate, and register four horizon volatility candidates. | Vertex AI Pipelines task images |
-| `services/model_serving` | Serve 5m/15m/30m EWMA forecasts plus the packaged promoted 1h XGBoost model. | GKE Deployment and Service `model-serving` |
+| `services/model_serving` | Serve packaged 5m/15m/30m HAR forecasts plus the promoted 1h XGBoost model. | GKE Deployment and Service `model-serving` |
 | `services/analytics` | Price active KXBTCD contracts from live spot, features, forecasts, and Kalshi metadata. | GKE Deployment and Service `analytics` |
 | `services/dashboard` | Render live BTC state, the Kalshi market/model curves, fair values, midpoint edges, and trade-aware activity age. | GKE Deployment, Service, and public Ingress `dashboard` |
 
 Each service README documents its exact inputs, outputs, configuration,
 development commands, and deployment boundary.
 
-## Canonical v2_10s contract
+## Canonical 10-second contracts
 
-The active model contract is genuinely versioned as `v2_10s`; it does not
-reuse the legacy v1 feature definition.
+`v2_10s` remains the canonical rollback and parity contract. Active inference
+uses its additive `v4_10s` superset, which includes HAR realized-volatility
+windows and buyer-volume features.
 
 | Layer | Contract |
 |---|---|
 | Raw archive | Partitioned crypto and Kalshi Parquet in GCS |
 | Canonical bars | BigQuery `market_data.bars`, frequency `10s` |
-| Offline features | BigQuery `feature_store.realized_volatility_v2_10s` |
+| Offline features | BigQuery `feature_store.realized_volatility_v2_10s` and active `realized_volatility_v4_10s` |
 | Offline targets | BigQuery `training_labels.future_realized_volatility_v2_10s` |
 | Live primitives | Redis `stream:primitives:v1` |
-| Live features | Redis `market:features:v2_10s:BTCUSD:latest` |
+| Live features | Redis rollback `market:features:v2_10s:BTCUSD:latest` and active `market:features:v4_10s:BTCUSD:latest` |
 | Feast feature view | `market_features`, version `v2_10s` |
 | Volatility output | Redis `market:volatility:v2_10s:BTCUSD:latest` |
 | Contract pricing | Redis `market:pricing:v1:<KXBTCD market ticker>` |
@@ -80,15 +81,15 @@ BigQuery rows with both the live calculation and Feast online values. The
 offline label table retains `target_rv_1m` for compatibility, but 1m is not an
 active training or serving horizon.
 
-The additive `v3_10s` HAR research contract is implemented in offline, live,
-Feast, and ML code, but production manifests and serving remain on `v2_10s`.
+The active v4 producer runs beside v2 so deployment and rollback can overlap
+without changing the primitive stream or removing existing data.
 
 ## Forecasting and Kalshi pricing
 
 The supported horizons are `5m`, `15m`, `30m`, and `1h`. The first three use
-deterministic EWMA from the live 10-second variance state. The 1h forecast uses
-the immutable promoted XGBoost artifact packaged into the model-serving image
-after CI validates its metadata and checksums. The running model-serving pod
+immutable promoted HAR artifacts packaged into the model-serving image. The 1h
+forecast uses the immutable promoted XGBoost artifact after CI validates model
+metadata and checksums. The running model-serving pod
 therefore needs no Vertex AI, GCS, Redis, Feast, or Kalshi access.
 
 For each active KXBTCD contract, analytics computes time to expiry in minutes,

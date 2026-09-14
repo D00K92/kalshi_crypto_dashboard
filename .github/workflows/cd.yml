@@ -105,32 +105,46 @@ jobs:
         MODEL_ARTIFACT_URI_1H: ${{ vars.VOLATILITY_MODEL_1H_ARTIFACT_URI }}
         MODEL_RESOURCE_5M: ${{ vars.VOLATILITY_MODEL_5M_V4 }}
         MODEL_ARTIFACT_URI_5M: ${{ vars.VOLATILITY_MODEL_5M_ARTIFACT_URI_V4 }}
+        MODEL_RESOURCE_15M: ${{ vars.VOLATILITY_MODEL_15M_V3 }}
+        MODEL_ARTIFACT_URI_15M: ${{ vars.VOLATILITY_MODEL_15M_ARTIFACT_URI_V3 }}
+        MODEL_RESOURCE_30M: ${{ vars.VOLATILITY_MODEL_30M_V3 }}
+        MODEL_ARTIFACT_URI_30M: ${{ vars.VOLATILITY_MODEL_30M_ARTIFACT_URI_V3 }}
       run: |
         set -euo pipefail
         if [[ -z "${MODEL_RESOURCE_1H}" || -z "${MODEL_ARTIFACT_URI_1H}" || \
-              -z "${MODEL_RESOURCE_5M}" || -z "${MODEL_ARTIFACT_URI_5M}" ]]; then
-          echo "The approved 5m v4 and 1h model resources and artifact URIs are required." >&2
+              -z "${MODEL_RESOURCE_5M}" || -z "${MODEL_ARTIFACT_URI_5M}" || \
+              -z "${MODEL_RESOURCE_15M}" || -z "${MODEL_ARTIFACT_URI_15M}" || \
+              -z "${MODEL_RESOURCE_30M}" || -z "${MODEL_ARTIFACT_URI_30M}" ]]; then
+          echo "Approved model resources and artifact URIs are required for all horizons." >&2
           exit 1
         fi
-        artifact_uri_1h="${MODEL_ARTIFACT_URI_1H%/}"
-        artifact_uri_5m="${MODEL_ARTIFACT_URI_5M%/}"
-        artifact_dir_1h="$(mktemp -d)"
-        artifact_dir_5m="$(mktemp -d)"
-        gcloud storage cp "${artifact_uri_1h}/model.joblib" "${artifact_dir_1h}/model.joblib"
-        gcloud storage cp "${artifact_uri_1h}/metadata.json" "${artifact_dir_1h}/metadata.json"
-        gcloud storage cp "${artifact_uri_5m}/model.joblib" "${artifact_dir_5m}/model.joblib"
-        gcloud storage cp "${artifact_uri_5m}/metadata.json" "${artifact_dir_5m}/metadata.json"
+        artifact_root="$(mktemp -d)"
+        resource_map="${artifact_root}/resources.json"
+        for horizon in 5M 15M 30M 1H; do
+          uri_var="MODEL_ARTIFACT_URI_${horizon}"
+          artifact_uri="${!uri_var%/}"
+          target="${artifact_root}/${horizon,,}"
+          mkdir -p "${target}"
+          gcloud storage cp "${artifact_uri}/model.joblib" "${target}/model.joblib"
+          gcloud storage cp "${artifact_uri}/metadata.json" "${target}/metadata.json"
+        done
+        jq -n \
+          --arg r5 "${MODEL_RESOURCE_5M}" --arg u5 "${MODEL_ARTIFACT_URI_5M%/}" \
+          --arg r15 "${MODEL_RESOURCE_15M}" --arg u15 "${MODEL_ARTIFACT_URI_15M%/}" \
+          --arg r30 "${MODEL_RESOURCE_30M}" --arg u30 "${MODEL_ARTIFACT_URI_30M%/}" \
+          --arg r1h "${MODEL_RESOURCE_1H}" --arg u1h "${MODEL_ARTIFACT_URI_1H%/}" \
+          '{
+            "5m": {"resource": $r5, "artifact_uri": $u5, "trained_feature_version": "v4_10s"},
+            "15m": {"resource": $r15, "artifact_uri": $u15, "trained_feature_version": "v3_10s"},
+            "30m": {"resource": $r30, "artifact_uri": $u30, "trained_feature_version": "v3_10s"},
+            "1h": {"resource": $r1h, "artifact_uri": $u1h, "trained_feature_version": "v2_10s", "architecture": "xgboost"}
+          }' > "${resource_map}"
         python services/model_serving/scripts/prepare_bundle.py \
-          --artifact-dir "${artifact_dir_1h}" \
+          --artifact-dir "${artifact_root}" \
           --output-dir services/model_serving/model_bundle \
           --model-version v4_volume_har_1 \
           --feature-version v4_10s \
-          --artifact-feature-version v2_10s \
-          --resource-name "${MODEL_RESOURCE_1H}" \
-          --artifact-uri "${artifact_uri_1h}" \
-          --five-minute-artifact-dir "${artifact_dir_5m}" \
-          --five-minute-resource-name "${MODEL_RESOURCE_5M}" \
-          --five-minute-artifact-uri "${artifact_uri_5m}"
+          --resource-map "${resource_map}"
 
     - name: Build and push model serving image
       env:
@@ -289,11 +303,15 @@ jobs:
       env:
         EXPECTED_MODEL_RESOURCE_1H: ${{ vars.VOLATILITY_MODEL_1H }}
         EXPECTED_MODEL_RESOURCE_5M: ${{ vars.VOLATILITY_MODEL_5M_V4 }}
+        EXPECTED_MODEL_RESOURCE_15M: ${{ vars.VOLATILITY_MODEL_15M_V3 }}
+        EXPECTED_MODEL_RESOURCE_30M: ${{ vars.VOLATILITY_MODEL_30M_V3 }}
       run: |
         set -euo pipefail
         kubectl exec deployment/analytics -- env \
           "EXPECTED_MODEL_RESOURCE_1H=${EXPECTED_MODEL_RESOURCE_1H}" \
-          "EXPECTED_MODEL_RESOURCE_5M=${EXPECTED_MODEL_RESOURCE_5M}" python -c '
+          "EXPECTED_MODEL_RESOURCE_5M=${EXPECTED_MODEL_RESOURCE_5M}" \
+          "EXPECTED_MODEL_RESOURCE_15M=${EXPECTED_MODEL_RESOURCE_15M}" \
+          "EXPECTED_MODEL_RESOURCE_30M=${EXPECTED_MODEL_RESOURCE_30M}" python -c '
         import asyncio, json, os, time, urllib.request
         import redis.asyncio as redis
         async def check():
@@ -316,8 +334,8 @@ jobs:
             resources = volatility["model_resources"]
             assert resources["1h"] == os.environ["EXPECTED_MODEL_RESOURCE_1H"], "1h champion is not live"
             assert resources["5m"] == os.environ["EXPECTED_MODEL_RESOURCE_5M"], "5m volume HAR is not live"
-            for horizon in ("15m", "30m"):
-                assert resources[horizon] == f"ewma/v4_volume_har_1/{horizon}", f"wrong {horizon} provider"
+            assert resources["15m"] == os.environ["EXPECTED_MODEL_RESOURCE_15M"], "15m HAR is not live"
+            assert resources["30m"] == os.environ["EXPECTED_MODEL_RESOURCE_30M"], "30m HAR is not live"
             assert all(float(value) > 0 for value in volatility["annualized_volatility"].values()), "invalid volatility"
             keys = [key async for key in client.scan_iter(match="market:pricing:v1:KXBTCD-*")]
             fresh = []

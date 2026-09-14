@@ -175,6 +175,37 @@ def test_packaged_provider_routes_all_v3_horizons_to_har_models(tmp_path):
     assert all(resource.startswith("projects/") for resource in result.model_resources.values())
 
 
+def test_packaged_provider_loads_mixed_v4_v3_v2_bundle(tmp_path):
+    manifest_path = build_v3_bundle(tmp_path)
+    manifest = json.loads(manifest_path.read_text())
+    manifest["model_version"] = "v4_volume_har_1"
+    manifest["feature_version"] = "v4_10s"
+    trained_contracts = {"5m": "v4_10s", "15m": "v3_10s", "30m": "v3_10s", "1h": "v2_10s"}
+    for horizon, feature_version in trained_contracts.items():
+        metadata_path = tmp_path / horizon / "metadata.json"
+        metadata = json.loads(metadata_path.read_text())
+        metadata["feature_version"] = feature_version
+        if horizon == "1h":
+            metadata["architecture"] = "xgboost"
+        metadata_path.write_text(json.dumps(metadata))
+        entry = manifest["horizons"][horizon]
+        if horizon == "1h":
+            entry["kind"] = "xgboost"
+        entry["metadata_sha256"] = hashlib.sha256(metadata_path.read_bytes()).hexdigest()
+        if feature_version != "v4_10s":
+            entry["trained_feature_version"] = feature_version
+    manifest_path.write_text(json.dumps(manifest))
+
+    provider = PackagedHybridProvider.load(
+        manifest_path,
+        model_version="v4_volume_har_1",
+        feature_version="v4_10s",
+        decay=0.96,
+    )
+
+    assert set(provider.models) == {"5m", "15m", "30m", "1h"}
+
+
 def test_packaged_provider_rejects_modified_model(tmp_path):
     with pytest.raises(ValueError, match="checksum mismatch"):
         PackagedHybridProvider.load(

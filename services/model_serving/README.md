@@ -6,8 +6,8 @@ annualized forecasts for `5m`, `15m`, `30m`, and `1h`.
 
 Production is a hybrid provider:
 
-- 5m, 15m, and 30m: deterministic EWMAs from matching 5-, 15-, and
-  30-minute synthetic-candle return states.
+- 5m: the immutable promoted v4 buyer-volume HAR artifact.
+- 15m and 30m: immutable promoted v3 HAR artifacts.
 - 1h: the immutable promoted XGBoost artifact packaged into the image.
 
 The `v3_10s` bundle format can instead package one HAR or XGBoost artifact for
@@ -24,20 +24,30 @@ contract probabilities, or expose a public endpoint.
 |---|---|
 | `GET /healthz` | Process is alive |
 | `GET /readyz` | Bundle is loaded and the provider is ready |
-| `POST /v1/forecast` | Validate one `market_features/v2_10s` observation and return all four forecasts |
+| `POST /v1/forecast` | Validate one `market_features/v4_10s` observation and return all four forecasts |
 
 Example request:
 
 ```json
 {
   "feature_set": "market_features",
-  "feature_version": "v2_10s",
+  "feature_version": "v4_10s",
   "event_timestamp_ms": 1760000000000,
   "available_timestamp_ms": 1760000000100,
   "values": {
     "synthetic_price": 70000.0,
     "log_return": 0.0002,
     "venue_count": 6,
+    "realized_vol_30s": 0.20,
+    "realized_vol_1m": 0.21,
+    "realized_vol_5m": 0.22,
+    "realized_vol_15m": 0.23,
+    "realized_vol_30m": 0.24,
+    "realized_vol_1h": 0.25,
+    "realized_vol_3h": 0.26,
+    "log_buy_volume_30s": 1.5,
+    "log_buy_volume_5m": 2.8,
+    "log_buy_volume_10m": 3.4,
     "ewma_states": {
       "5m": {"frequency": "5m", "variance": 0.000001},
       "15m": {"frequency": "15m", "variance": 0.000002},
@@ -65,8 +75,10 @@ the 1h artifact's original training contract while serving it from the
 compatible v4 superset. For a full multi-horizon bundle, pass an artifact root
 containing `5m/`, `15m/`, `30m/`, and `1h/` directories
 plus `--resource-map`, a JSON mapping each horizon to its immutable Vertex
-`resource` and `artifact_uri`. It validates metadata and writes checksums for
-all four models.
+`resource`, `artifact_uri`, optional `trained_feature_version`, and an optional
+legacy `architecture` default. Production
+uses this map for the v4 5m HAR, v3 15m/30m HAR models, and v2 1h model. It
+validates metadata and writes checksums for all four models.
 
 Startup rechecks the manifest, paths, checksums, metadata, model interface, and
 a smoke prediction. The running pod needs no Vertex/GCS IAM because release CI

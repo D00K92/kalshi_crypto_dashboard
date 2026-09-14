@@ -94,6 +94,8 @@ def main() -> None:
                 resource=resources[horizon]["resource"],
                 artifact_uri=resources[horizon]["artifact_uri"],
                 feature_version=args.feature_version,
+                default_architecture=resources[horizon].get("architecture"),
+                artifact_feature_version=resources[horizon].get("trained_feature_version"),
             )
             for horizon in HORIZONS
         }

@@ -24,8 +24,8 @@ Promotion requires a candidate to beat
 EWMA by 2% and be no more than 5% worse than the current champion.
 
 The pipeline can train and register all four horizons. The online
-`model-serving` bundle packages the v4 5m HAR and the approved 1h XGBoost;
-15m/30m use EWMA.
+`model-serving` bundle packages the v4 5m HAR, approved v3 15m/30m HAR models,
+and the approved 1h XGBoost model.
 
 `v4_10s` adds
 `log(1 + buyer volume)` over 30-second, 5-minute, and 10-minute trailing windows

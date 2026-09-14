@@ -17,7 +17,7 @@ push main
    +-> Deploy Services
          production environment gate
          build/push commit-SHA images
-         package approved 1h model
+         package approved four-horizon model bundle
          apply GKE resources
          verify rollouts, feature parity, and live analytics outputs
 ```
@@ -71,28 +71,30 @@ CD checks out the exact successful commit and authenticates to Google Cloud via
 OIDC Workload Identity. It builds and pushes commit-SHA images to
 `asia-northeast3-docker.pkg.dev/kalshi-crypto-506614/quant-repo`.
 
-Before the model-serving image is built, CD requires:
+Before the model-serving image is built, CD requires exact immutable Vertex
+resources and matching artifact URIs for:
 
-- `VOLATILITY_MODEL_1H`: exact immutable Vertex model resource ending in a
-  version such as `@1`.
-- `VOLATILITY_MODEL_1H_ARTIFACT_URI`: immutable GCS directory containing
-  `model.joblib` and `metadata.json`.
+- v4 5m HAR (`VOLATILITY_MODEL_5M_V4`),
+- v3 15m and 30m HAR (`VOLATILITY_MODEL_15M_V3` and
+  `VOLATILITY_MODEL_30M_V3`), and
+- the approved 1h model (`VOLATILITY_MODEL_1H`).
 
-CD downloads those two files, validates the v2_10s 1h contract, generates a
-checksum manifest, and builds with `REQUIRE_MODEL_BUNDLE=true`. Model-serving
-therefore needs no Vertex/GCS access at runtime.
+Each corresponding `*_ARTIFACT_URI*` directory must contain `model.joblib` and
+`metadata.json`. CD records each artifact's training contract, validates the
+compatible v4/v3/v2 bundle, generates checksums, and builds with
+`REQUIRE_MODEL_BUNDLE=true`. Model-serving therefore needs no Vertex/GCS access
+at runtime.
 
 The workflow then:
 
 1. Resolves the Memorystore private endpoint.
-2. Applies the Feast registry with a one-shot Job.
-3. Renders and applies all Deployment, Service, CronJob, and Ingress manifests.
-4. Waits for active Deployments to roll out and confirms the suspended
+2. Renders and applies all Deployment, Service, CronJob, and Ingress manifests.
+3. Waits for active Deployments to roll out and confirms the suspended
    `feast-server` compatibility Deployment is applied at zero replicas.
-5. Confirms the batch and parity CronJobs exist.
-6. Runs an immediate offline/online feature parity Job.
-7. Checks analytics readiness and fresh live Redis outputs.
-8. Verifies the exact approved 1h resource, EWMA short-horizon resources, and
+4. Confirms the batch and parity CronJobs exist.
+5. Runs an immediate offline/online feature parity Job.
+6. Checks analytics readiness and fresh live Redis outputs.
+7. Verifies the exact approved model resource for every horizon and
    at least one available KXBTCD price.
 
 ## Required repository and cluster configuration
@@ -104,6 +106,9 @@ prerequisites are:
 |---|---|
 | GitHub variable `VOLATILITY_MODEL_1H` | Approved immutable 1h Vertex version |
 | GitHub variable `VOLATILITY_MODEL_1H_ARTIFACT_URI` | Matching immutable GCS artifact directory |
+| GitHub variables `VOLATILITY_MODEL_5M_V4` and `VOLATILITY_MODEL_5M_ARTIFACT_URI_V4` | Approved immutable v4 5m HAR |
+| GitHub variables `VOLATILITY_MODEL_15M_V3` and `VOLATILITY_MODEL_15M_ARTIFACT_URI_V3` | Approved immutable v3 15m HAR |
+| GitHub variables `VOLATILITY_MODEL_30M_V3` and `VOLATILITY_MODEL_30M_ARTIFACT_URI_V3` | Approved immutable v3 30m HAR |
 | GitHub variable `ANALYTICS_GCP_SERVICE_ACCOUNT` | Workload Identity annotation for analytics rollback capability |
 | Secret `kalshi-credentials` | Kalshi API key and private key for ingestion/analytics |
 | Secret `coinbase-credentials` | Optional authenticated Coinbase feed |

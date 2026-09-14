@@ -16,14 +16,14 @@ report:
 
 | Contract item | Production value |
 |---|---|
-| Feature contract | `market_features/v2_10s` |
-| Ordered ML inputs | `log_return`, `venue_count` |
+| Feature contract | `market_features/v4_10s` with compatible v2/v3 artifact metadata |
+| Ordered ML inputs | Horizon-specific realized volatility; 5m also uses buyer-volume windows |
 | Entity | `BTCUSD` |
-| Offline features | `feature_store.realized_volatility_v2_10s` |
+| Offline features | `feature_store.realized_volatility_v4_10s` |
 | Labels | `training_labels.future_realized_volatility_v2_10s` |
 | Forecast horizons | `5m`, `15m`, `30m`, `1h` |
-| Production learned model | Approved 1h model packaged into `model-serving` |
-| Short-horizon production model | EWMA for 5m, 15m, and 30m |
+| Production learned model | Approved 5m/15m/30m HAR and 1h XGBoost models packaged into `model-serving` |
+| Short-horizon rollback model | Horizon-specific EWMA |
 | Primary promotion metric | QLIKE against EWMA and the current champion |
 | Serving output | Positive, finite, annualized volatility |
 
