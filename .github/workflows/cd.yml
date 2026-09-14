@@ -199,18 +199,6 @@ jobs:
           | bq query --project_id="${GCP_PROJECT_ID}" \
               --location="${GCP_REGION}" --use_legacy_sql=false
 
-    - name: Apply Feast v2_10s registry
-      env:
-        FEAST_STORE_IMAGE: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/feast-store:${{ github.event.workflow_run.head_sha || github.sha }}
-        FEAST_APPLY_ID: ${{ github.run_id }}-${{ github.run_attempt }}
-      run: |
-        set -euo pipefail
-        envsubst '${FEAST_STORE_IMAGE} ${FEAST_APPLY_ID}' \
-          < k8s/feast-apply-job.yaml \
-          | kubectl apply -f -
-        kubectl wait --for=condition=complete \
-          "job/feast-apply-${FEAST_APPLY_ID}" --timeout=10m
-
     - name: Apply Kubernetes manifests
       env:
         GCS_EXPORTER_IMAGE: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/${{ env.IMAGE_NAME }}:${{ github.event.workflow_run.head_sha || github.sha }}

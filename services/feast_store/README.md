@@ -90,7 +90,7 @@ Add a new version by registering an immutable `FeatureSpec`, defining its
 BigQuery/PushSource/FeatureView/FeatureService, applying the registry, and only
 then deploying a producer. Do not edit a deployed contract in place.
 
-CD builds `feast-store`, runs the one-shot high-memory apply Job, deploys the
+CD builds `feast-store`, preserves the existing v2 registry, deploys the
 bridge, applies the suspended server compatibility manifest, and applies the
 parity CronJob. These resources use the `batch-etl` Kubernetes service account
 and are not publicly exposed.
