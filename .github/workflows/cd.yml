@@ -81,7 +81,7 @@ jobs:
         docker build --platform linux/amd64 -t "${IMAGE_URI}:${IMAGE_TAG}" services/aggregator
         docker push "${IMAGE_URI}:${IMAGE_TAG}"
 
-    - name: Build and push Feast live bridge image
+    - name: Build and push feature parity image
       env:
         IMAGE_URI: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/feast-store
         IMAGE_TAG: ${{ github.event.workflow_run.head_sha || github.sha }}
@@ -234,14 +234,11 @@ jobs:
         envsubst '${LIVE_FEATURE_SERVICE_IMAGE} ${REDIS_HOST} ${REDIS_PORT}' \
           < k8s/live-feature-service-deployment.yaml \
           | kubectl apply -f -
-        envsubst '${FEAST_STORE_IMAGE} ${REDIS_HOST}' \
-          < k8s/feast-live-bridge-deployment.yaml \
-          | kubectl apply -f -
         envsubst '${FEAST_STORE_IMAGE}' \
           < k8s/feast-server-deployment.yaml \
           | kubectl apply -f -
         envsubst '${FEAST_STORE_IMAGE} ${REDIS_HOST}' \
-          < k8s/feature-parity-cronjob.yaml \
+          < k8s/feature-parity-v4-cronjob.yaml \
           | kubectl apply -f -
         envsubst '${DASHBOARD_IMAGE} ${REDIS_HOST} ${REDIS_PORT}' \
           < k8s/dashboard-deployment.yaml \
@@ -271,9 +268,7 @@ jobs:
         kubectl rollout status deployment/gcs-exporter --timeout=5m
         kubectl rollout status deployment/ingestion-service --timeout=5m
         kubectl rollout status deployment/aggregator --timeout=5m
-        kubectl rollout status deployment/live-feature-service --timeout=5m
         kubectl rollout status deployment/live-feature-service-v4 --timeout=5m
-        kubectl rollout status deployment/feast-live-bridge --timeout=5m
         kubectl rollout status deployment/feast-server --timeout=5m
         kubectl rollout status deployment/model-serving --timeout=5m
         kubectl rollout status deployment/dashboard --timeout=5m
@@ -284,14 +279,14 @@ jobs:
           exit 1
         fi
         kubectl get cronjob/batch-etl
-        kubectl get cronjob/batch-etl-features cronjob/batch-etl-targets cronjob/feature-parity-v2-10s
+        kubectl get cronjob/batch-etl-features cronjob/batch-etl-targets cronjob/feature-parity-v4-10s
 
     - name: Gate deployment on offline-online feature parity
       env:
         PARITY_JOB: feature-parity-deploy-${{ github.run_id }}-${{ github.run_attempt }}
       run: |
         set -euo pipefail
-        kubectl create job "${PARITY_JOB}" --from=cronjob/feature-parity-v2-10s
+        kubectl create job "${PARITY_JOB}" --from=cronjob/feature-parity-v4-10s
         if ! kubectl wait --for=condition=complete "job/${PARITY_JOB}" --timeout=5m; then
           kubectl logs "job/${PARITY_JOB}" --all-containers=true || true
           exit 1

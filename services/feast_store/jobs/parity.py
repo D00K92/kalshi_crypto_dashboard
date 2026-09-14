@@ -1,4 +1,4 @@
-"""Fail when recent Redis v2_10s features disagree with BigQuery offline features."""
+"""Fail when recent Redis features disagree with their BigQuery contract."""
 
 from __future__ import annotations
 
@@ -14,11 +14,11 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import redis.asyncio as redis
-from feast import FeatureStore
 from google.cloud import bigquery
 
 
-DEFAULT_TABLE = "kalshi-crypto-506614.feature_store.realized_volatility_v2_10s"
+DEFAULT_FEATURE_VERSION = "v4_10s"
+DEFAULT_TABLE = "kalshi-crypto-506614.feature_store.realized_volatility_v4_10s"
 TABLE_PATTERN = re.compile(r"^[A-Za-z0-9_-]+\.[A-Za-z0-9_]+\.[A-Za-z0-9_]+$")
 
 
@@ -36,15 +36,14 @@ class ParityReport:
     checked: int
     missing_online: int
     mismatched: int
-    feast_mismatched: int
     latest_online_age_seconds: float
     latest_offline_age_seconds: float
     errors: tuple[dict[str, Any], ...]
 
 
-def point_from_payload(payload: dict[str, Any]) -> FeaturePoint:
-    if payload.get("feature_set") != "market_features" or payload.get("feature_version") != "v2_10s":
-        raise ValueError("online payload is not market_features/v2_10s")
+def point_from_payload(payload: dict[str, Any], *, feature_version: str) -> FeaturePoint:
+    if payload.get("feature_set") != "market_features" or payload.get("feature_version") != feature_version:
+        raise ValueError(f"online payload is not market_features/{feature_version}")
     values = payload.get("values")
     if not isinstance(values, dict):
         raise ValueError("online payload values must be an object")
@@ -102,7 +101,8 @@ def compare_points(
 
 
 def load_offline_points(
-    *, client: bigquery.Client, table: str, cutoff: datetime, sample_size: int
+    *, client: bigquery.Client, table: str, feature_version: str,
+    cutoff: datetime, sample_size: int
 ) -> list[FeaturePoint]:
     if not TABLE_PATTERN.fullmatch(table):
         raise ValueError(f"invalid BigQuery table identifier: {table!r}")
@@ -110,7 +110,7 @@ def load_offline_points(
       SELECT event_timestamp, synthetic_price, log_return, venue_count
       FROM `{table}`
       WHERE asset = 'BTCUSD'
-        AND feature_version = 'v2_10s'
+        AND feature_version = @feature_version
         AND event_timestamp >= @cutoff
         AND synthetic_price IS NOT NULL
         AND venue_count > 0
@@ -118,6 +118,7 @@ def load_offline_points(
       LIMIT @sample_size
     """
     config = bigquery.QueryJobConfig(query_parameters=[
+        bigquery.ScalarQueryParameter("feature_version", "STRING", feature_version),
         bigquery.ScalarQueryParameter("cutoff", "TIMESTAMP", cutoff),
         bigquery.ScalarQueryParameter("sample_size", "INT64", sample_size),
     ])
@@ -132,92 +133,16 @@ def load_offline_points(
     ]
 
 
-def load_feast_online_point(*, repo_path: str) -> FeaturePoint:
-    response = FeatureStore(repo_path=repo_path).get_online_features(
-        features=[
-            "v2_10s_market_features:synthetic_price",
-            "v2_10s_market_features:log_return",
-            "v2_10s_market_features:venue_count",
-        ],
-        entity_rows=[{"asset": "BTCUSD"}],
-        full_feature_names=False,
-    ).to_dict()
-
-    def first(name: str) -> Any:
-        values = response.get(name)
-        if not values:
-            raise RuntimeError(f"Feast online response missing {name}")
-        return values[0]
-
-    log_return = first("log_return")
-    return FeaturePoint(
-        # Feast's online API does not return the feature event timestamp. The
-        # caller matches these values to a recent immutable stream point.
-        timestamp_ms=0,
-        synthetic_price=float(first("synthetic_price")),
-        log_return=None if log_return is None else float(log_return),
-        venue_count=int(first("venue_count")),
-    )
-
-
-def compare_feast_online(
-    feast: FeaturePoint,
-    online: dict[int, FeaturePoint],
-    *,
-    max_lag_ms: int,
-    relative_tolerance: float,
-    absolute_tolerance: float,
-) -> tuple[int, list[dict[str, Any]]]:
-    if not online:
-        return 1, [{"error": "feast_online_mismatch", "detail": "online stream is empty"}]
-    matching_timestamps = []
-    for timestamp, point in online.items():
-        candidate = FeaturePoint(timestamp, feast.synthetic_price, feast.log_return, feast.venue_count)
-        _, mismatched, _ = compare_points(
-            [point],
-            {timestamp: candidate},
-            relative_tolerance=relative_tolerance,
-            absolute_tolerance=absolute_tolerance,
-        )
-        if not mismatched:
-            matching_timestamps.append(timestamp)
-    latest_timestamp = max(online)
-    if matching_timestamps:
-        matched_timestamp = max(matching_timestamps)
-        lag_ms = latest_timestamp - matched_timestamp
-        if lag_ms <= max_lag_ms:
-            return 0, []
-        return 1, [{
-            "error": "feast_online_mismatch",
-            "detail": "stale_feast_online",
-            "lag_ms": lag_ms,
-            "matched_timestamp_ms": matched_timestamp,
-            "latest_timestamp_ms": latest_timestamp,
-        }]
-
-    latest = online[latest_timestamp]
-    feast_at_latest = FeaturePoint(
-        latest_timestamp, feast.synthetic_price, feast.log_return, feast.venue_count
-    )
-    _, _, errors = compare_points(
-        [latest],
-        {latest_timestamp: feast_at_latest},
-        relative_tolerance=relative_tolerance,
-        absolute_tolerance=absolute_tolerance,
-    )
-    for error in errors:
-        error["error"] = "feast_online_mismatch"
-    return 1, errors
-
-
-async def load_online_points(client: Any, *, stream: str, search_count: int) -> dict[int, FeaturePoint]:
+async def load_online_points(
+    client: Any, *, stream: str, feature_version: str, search_count: int
+) -> dict[int, FeaturePoint]:
     points: dict[int, FeaturePoint] = {}
     for _, fields in await client.xrevrange(stream, max="+", min="-", count=search_count):
         raw = fields.get(b"payload") or fields.get("payload")
         if raw is None:
             continue
         try:
-            point = point_from_payload(json.loads(raw))
+            point = point_from_payload(json.loads(raw), feature_version=feature_version)
         except (ValueError, TypeError, KeyError, json.JSONDecodeError):
             continue
         points.setdefault(point.timestamp_ms, point)
@@ -230,20 +155,24 @@ async def run_check(args: argparse.Namespace) -> ParityReport:
         load_offline_points,
         client=bigquery.Client(project=args.project, location=args.location),
         table=args.offline_table,
+        feature_version=args.feature_version,
         cutoff=now - timedelta(hours=args.lookback_hours),
         sample_size=args.sample_size,
-    )
-    feast_online = await asyncio.to_thread(
-        load_feast_online_point,
-        repo_path=args.repo_path,
     )
     redis_client = redis.Redis.from_url(args.redis_url, decode_responses=False)
     try:
         latest_raw = await redis_client.get(args.feature_key)
         if not latest_raw:
             raise RuntimeError(f"missing online feature key {args.feature_key}")
-        latest_online = point_from_payload(json.loads(latest_raw))
-        online = await load_online_points(redis_client, stream=args.feature_stream, search_count=args.search_count)
+        latest_online = point_from_payload(
+            json.loads(latest_raw), feature_version=args.feature_version
+        )
+        online = await load_online_points(
+            redis_client,
+            stream=args.feature_stream,
+            feature_version=args.feature_version,
+            search_count=args.search_count,
+        )
     finally:
         await redis_client.aclose()
 
@@ -258,14 +187,6 @@ async def run_check(args: argparse.Namespace) -> ParityReport:
         relative_tolerance=args.relative_tolerance,
         absolute_tolerance=args.absolute_tolerance,
     )
-    feast_mismatched, feast_errors = compare_feast_online(
-        feast_online,
-        online,
-        max_lag_ms=args.max_feast_lag_seconds * 1_000,
-        relative_tolerance=args.relative_tolerance,
-        absolute_tolerance=args.absolute_tolerance,
-    )
-    errors.extend(feast_errors)
     if latest_online_age > args.max_online_age_seconds:
         errors.append({"error": "stale_online", "age_seconds": latest_online_age})
     if latest_offline_age > args.max_offline_age_seconds:
@@ -278,7 +199,6 @@ async def run_check(args: argparse.Namespace) -> ParityReport:
         checked=len(offline),
         missing_online=missing,
         mismatched=mismatched,
-        feast_mismatched=feast_mismatched,
         latest_online_age_seconds=round(latest_online_age, 3),
         latest_offline_age_seconds=round(latest_offline_age, 3),
         errors=tuple(errors[:20]),
@@ -290,17 +210,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--project", default=os.getenv("GCP_PROJECT_ID", "kalshi-crypto-506614"))
     parser.add_argument("--location", default=os.getenv("GCP_REGION", "asia-northeast3"))
     parser.add_argument("--offline-table", default=os.getenv("PARITY_OFFLINE_TABLE", DEFAULT_TABLE))
-    parser.add_argument("--repo-path", default=os.getenv("FEAST_REPO_PATH", "/app/feast_store"))
+    parser.add_argument("--feature-version", default=os.getenv("FEATURE_VERSION", DEFAULT_FEATURE_VERSION))
     parser.add_argument("--redis-url", default=os.getenv("REDIS_URL", "redis://127.0.0.1:6379/0"))
-    parser.add_argument("--feature-stream", default=os.getenv("FEATURE_STREAM", "stream:features:v2_10s"))
-    parser.add_argument("--feature-key", default=os.getenv("FEATURE_KEY", "market:features:v2_10s:BTCUSD:latest"))
+    parser.add_argument("--feature-stream", default=os.getenv("FEATURE_STREAM", "stream:features:v4_10s"))
+    parser.add_argument("--feature-key", default=os.getenv("FEATURE_KEY", "market:features:v4_10s:BTCUSD:latest"))
     parser.add_argument("--lookback-hours", type=int, default=6)
     parser.add_argument("--sample-size", type=int, default=30)
     parser.add_argument("--minimum-matches", type=int, default=12)
     parser.add_argument("--search-count", type=int, default=5_000)
     parser.add_argument("--max-online-age-seconds", type=int, default=180)
     parser.add_argument("--max-offline-age-seconds", type=int, default=10_800)
-    parser.add_argument("--max-feast-lag-seconds", type=int, default=60)
     parser.add_argument("--relative-tolerance", type=float, default=1e-9)
     parser.add_argument("--absolute-tolerance", type=float, default=1e-10)
     args = parser.parse_args()

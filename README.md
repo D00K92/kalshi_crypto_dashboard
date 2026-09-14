@@ -20,9 +20,9 @@ Crypto + Kalshi APIs
         |                                      |
         v                                      v
       Redis -> aggregator -> live_feature_service     batch_etl -> BigQuery
-        |                         |                         |
-        |                         +-> feast-live-bridge     v
-        |                                                   ml_pipeline
+        |                                                   |
+        |                                                   v
+        |                                              ml_pipeline
         |                                                        |
         |                                                  Vertex AI + GCS
         |                                                        |
@@ -45,10 +45,10 @@ for the complete service and interface catalog.
 |---|---|---|
 | `services/ingestion` | Normalize exchange and Kalshi events into Redis Streams. Omitted Kalshi book sides become empty sides; malformed values remain rejected. | GKE Deployment `ingestion-service` |
 | `services/aggregator` | Build synthetic BTC spot state, canonical per-venue books, and completed 10-second venue primitives. | GKE Deployment `aggregator` |
-| `services/live_feature_service` | Turn primitives into rollback `v2_10s` and active `v4_10s` live feature contracts. | GKE Deployments `live-feature-service` and `live-feature-service-v4` |
+| `services/live_feature_service` | Turn primitives into the active `v4_10s` live feature contract. | GKE Deployment `live-feature-service-v4` |
 | `services/gcs_exporter` | Archive five normalized Redis Streams to partitioned Parquet in GCS. | GKE Deployment `gcs-exporter` |
 | `services/batch_etl` | Land raw data, build 10-second bars, features, and future-volatility labels in BigQuery. | GKE CronJobs |
-| `services/feast_store` | Own Feast definitions, registry, online writes, optional feature serving, and parity checks. | GKE `feast-live-bridge` and Jobs/CronJobs; `feast-server` is retained at zero replicas |
+| `services/feast_store` | Own Feast definitions and the direct Redis-to-BigQuery feature parity check. | GKE Jobs/CronJobs; `feast-server` is retained at zero replicas |
 | `services/ml_pipeline` | Train, evaluate, and register four horizon volatility candidates. | Vertex AI Pipelines task images |
 | `services/model_serving` | Serve packaged 5m/15m/30m HAR forecasts plus the promoted 1h XGBoost model. | GKE Deployment and Service `model-serving` |
 | `services/analytics` | Price active KXBTCD contracts from live spot, features, forecasts, and Kalshi metadata. | GKE Deployment and Service `analytics` |
@@ -59,9 +59,9 @@ development commands, and deployment boundary.
 
 ## Canonical 10-second contracts
 
-`v2_10s` remains the canonical rollback and parity contract. Active inference
-uses its additive `v4_10s` superset, which includes HAR realized-volatility
-windows and buyer-volume features.
+`v2_10s` remains the historical base contract. Active inference and parity use
+its additive `v4_10s` superset, which includes HAR realized-volatility windows
+and buyer-volume features.
 
 | Layer | Contract |
 |---|---|
@@ -70,19 +70,16 @@ windows and buyer-volume features.
 | Offline features | BigQuery `feature_store.realized_volatility_v2_10s` and active `realized_volatility_v4_10s` |
 | Offline targets | BigQuery `training_labels.future_realized_volatility_v2_10s` |
 | Live primitives | Redis `stream:primitives:v1` |
-| Live features | Redis rollback `market:features:v2_10s:BTCUSD:latest` and active `market:features:v4_10s:BTCUSD:latest` |
-| Feast feature view | `market_features`, version `v2_10s` |
+| Live features | Redis `market:features:v4_10s:BTCUSD:latest` |
+| Feast definitions | Historical/research contracts; not on the live inference path |
 | Volatility output | Redis `market:volatility:v2_10s:BTCUSD:latest` |
 | Contract pricing | Redis `market:pricing:v1:<KXBTCD market ticker>` |
 
 Offline and online features share the same event-time meaning, 10-second
-cadence, names, and model-facing values. The parity job compares recent
-BigQuery rows with both the live calculation and Feast online values. The
+cadence, names, and model-facing values. The v4 parity job compares recent
+BigQuery rows directly with immutable Redis stream observations. The
 offline label table retains `target_rv_1m` for compatibility, but 1m is not an
 active training or serving horizon.
-
-The active v4 producer runs beside v2 so deployment and rollback can overlap
-without changing the primitive stream or removing existing data.
 
 ## Forecasting and Kalshi pricing
 

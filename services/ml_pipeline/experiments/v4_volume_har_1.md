@@ -46,7 +46,9 @@ Across five expanding chronological test windows, buyer volume improved QLIKE
 in three and worsened it in two. QLIKE changes versus the same-row baseline were
 `+0.16%`, `-0.38%`, `-0.11%`, `+0.71%`, and `+0.43%` (positive means better).
 The mixed rolling result remains a monitoring risk despite operator-approved
-promotion; retain the v2 producer and prior model bundle as rollback paths.
+promotion. The v2 producer was retained during the rollout window; after v4
+parity and production inference were established, the deployed v2 producer was
+retired. The prior immutable model bundle remains available for rollback.
 
 The live release validates all three buyer-volume fields and freshness before
 the deployment passes. Consider replacing absolute cross-venue volume with a normalized

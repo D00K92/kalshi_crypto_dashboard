@@ -1,9 +1,9 @@
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: feature-parity-v2-10s
+  name: feature-parity-v4-10s
   labels:
-    app: feature-parity-v2-10s
+    app: feature-parity-v4-10s
 spec:
   schedule: "*/15 * * * *"
   concurrencyPolicy: Forbid
@@ -16,7 +16,7 @@ spec:
       template:
         metadata:
           labels:
-            app: feature-parity-v2-10s
+            app: feature-parity-v4-10s
         spec:
           restartPolicy: Never
           serviceAccountName: batch-etl
@@ -37,14 +37,16 @@ spec:
               value: "kalshi-crypto-506614"
             - name: GCP_REGION
               value: "asia-northeast3"
-            - name: FEAST_REPO_PATH
-              value: "/app/feast_store"
             - name: REDIS_URL
               value: "redis://${REDIS_HOST}:6379/0"
+            - name: FEATURE_VERSION
+              value: "v4_10s"
             - name: FEATURE_STREAM
-              value: "stream:features:v2_10s"
+              value: "stream:features:v4_10s"
             - name: FEATURE_KEY
-              value: "market:features:v2_10s:BTCUSD:latest"
+              value: "market:features:v4_10s:BTCUSD:latest"
+            - name: PARITY_OFFLINE_TABLE
+              value: "kalshi-crypto-506614.feature_store.realized_volatility_v4_10s"
             resources:
               requests: {cpu: "100m", memory: "256Mi", ephemeral-storage: "100Mi"}
               limits: {cpu: "500m", memory: "512Mi", ephemeral-storage: "1Gi"}

@@ -21,9 +21,9 @@
         |                                      |
         v                                      v
       Redis -> aggregator -> live_feature_service     batch_etl -> BigQuery
-        |                         |                         |
-        |                         +-> feast-live-bridge     v
-        |                                                   ml_pipeline
+        |                                                   |
+        |                                                   v
+        |                                              ml_pipeline
         |                                                        |
         |                                                  Vertex AI + GCS
         |                                                        |
@@ -46,10 +46,10 @@ API는 내부 `POST /v1/forecast` 엔드포인트를 사용하는
 |---|---|---|
 | `services/ingestion` | 거래소 및 Kalshi 이벤트를 정규화해 Redis Streams에 기록합니다. 생략된 Kalshi 오더북 한쪽 면은 빈 면으로 처리하고, 잘못된 값은 계속 거부합니다. | GKE Deployment `ingestion-service` |
 | `services/aggregator` | 합성 BTC 현물 상태, 거래소별 표준 오더북 및 완료된 10초 거래소 프리미티브를 생성합니다. | GKE Deployment `aggregator` |
-| `services/live_feature_service` | 프리미티브를 실시간 `market_features/v2_10s` 계약과 EWMA 상태로 변환합니다. | GKE Deployment `live-feature-service` |
+| `services/live_feature_service` | 프리미티브를 활성 실시간 `market_features/v4_10s` 계약으로 변환합니다. | GKE Deployment `live-feature-service-v4` |
 | `services/gcs_exporter` | 정규화된 Redis Stream 5개를 파티션된 Parquet으로 GCS에 보관합니다. | GKE Deployment `gcs-exporter` |
 | `services/batch_etl` | 원천 데이터를 적재하고 BigQuery에서 10초 바, 피처 및 미래 변동성 라벨을 생성합니다. | GKE CronJobs |
-| `services/feast_store` | Feast 정의, 레지스트리, 온라인 쓰기, 선택적 피처 서빙 및 동등성 검증을 담당합니다. | GKE `feast-live-bridge` 및 Jobs/CronJobs. `feast-server`는 0개 replica로 유지됩니다. |
+| `services/feast_store` | Feast 정의와 Redis-BigQuery 직접 동등성 검증을 담당합니다. | GKE Jobs/CronJobs. `feast-server`는 0개 replica로 유지됩니다. |
 | `services/ml_pipeline` | 4개 주기의 변동성 모델 후보를 학습, 평가 및 등록합니다. | Vertex AI Pipelines 태스크 이미지 |
 | `services/model_serving` | 5분/15분/30분 EWMA 예측과 이미지에 패키징된 프로모션 1시간 XGBoost 모델을 제공합니다. | GKE Deployment 및 Service `model-serving` |
 | `services/analytics` | 실시간 현물, 피처, 예측 및 Kalshi 메타데이터로 활성 KXBTCD 계약 가격을 계산합니다. | GKE Deployment 및 Service `analytics` |
@@ -58,30 +58,30 @@ API는 내부 `POST /v1/forecast` 엔드포인트를 사용하는
 각 서비스 README에는 정확한 입력, 출력, 설정, 개발 명령 및 배포 경계가
 설명되어 있습니다.
 
-## 표준 v2_10s 계약
+## 표준 10초 계약
 
-현재 모델 계약은 `v2_10s`로 명확하게 버전 관리되며 레거시 v1 피처 정의를
-재사용하지 않습니다.
+`v2_10s`는 과거 기본 계약으로 유지됩니다. 활성 추론과 동등성 검증은 HAR
+변동성 및 매수 거래량 피처를 추가한 `v4_10s`를 사용합니다.
 
 | 계층 | 계약 |
 |---|---|
 | 원천 아카이브 | GCS에 파티션된 암호화폐 및 Kalshi Parquet |
 | 표준 바 | BigQuery `market_data.bars`, 주기 `10s` |
-| 오프라인 피처 | BigQuery `feature_store.realized_volatility_v2_10s` |
+| 오프라인 피처 | BigQuery `feature_store.realized_volatility_v2_10s` 및 활성 `realized_volatility_v4_10s` |
 | 오프라인 타깃 | BigQuery `training_labels.future_realized_volatility_v2_10s` |
 | 실시간 프리미티브 | Redis `stream:primitives:v1` |
-| 실시간 피처 | Redis `market:features:v2_10s:BTCUSD:latest` |
-| Feast 피처 뷰 | `market_features`, 버전 `v2_10s` |
+| 실시간 피처 | Redis `market:features:v4_10s:BTCUSD:latest` |
+| Feast 정의 | 과거/연구 계약이며 실시간 추론 경로에서는 사용하지 않음 |
 | 변동성 출력 | Redis `market:volatility:v2_10s:BTCUSD:latest` |
 | 계약 가격 | Redis `market:pricing:v1:<KXBTCD market ticker>` |
 
 오프라인과 온라인 피처는 동일한 이벤트 시간 의미, 10초 주기, 이름 및 모델
-입력값을 공유합니다. 동등성 검증 작업은 최근 BigQuery 행을 실시간 계산 결과
-및 Feast 온라인 값과 비교합니다. 오프라인 라벨 테이블은 호환성을 위해
+입력값을 공유합니다. v4 동등성 검증 작업은 최근 BigQuery 행을 변경 불가능한
+Redis Stream 관측값과 직접 비교합니다. 오프라인 라벨 테이블은 호환성을 위해
 `target_rv_1m`을 유지하지만, 1분은 현재 학습 또는 서빙 대상 주기가 아닙니다.
 
-추가형 `v3_10s` HAR 연구 계약은 오프라인, 실시간, Feast 및 ML 코드에
-구현되어 있지만, 프로덕션 매니페스트와 서빙은 계속 `v2_10s`를 사용합니다.
+v2/v3 Feast 정의는 연구 및 과거 재현을 위해 유지되지만 프로덕션 추론 경로에는
+Feast 서버나 live bridge가 없습니다.
 
 ## 예측 및 Kalshi 가격 산정
 
@@ -149,11 +149,11 @@ uv run --directory services/<service> --locked pytest
 
 ## 현재 프로덕션 계약
 
-- 피처 계약: `market_features/v2_10s`
+- 피처 계약: `market_features/v4_10s`
 - 예측 주기: `5m`, `15m`, `30m`, `1h`
 - 오프라인 전용 `target_rv_1m` 열은 호환성을 위해 유지하지만 1분 예측은
   서빙하지 않습니다.
-- 실시간 피처 키: `market:features:v2_10s:BTCUSD:latest`
+- 실시간 피처 키: `market:features:v4_10s:BTCUSD:latest`
 - 변동성 키: `market:volatility:v2_10s:BTCUSD:latest`
 - Kalshi IV 키: `market:implied_volatility:v1:BTCUSD:latest`
 - 가격 키: `market:pricing:v1:<KXBTCD market ticker>`

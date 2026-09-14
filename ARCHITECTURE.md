@@ -20,7 +20,6 @@ flowchart LR
     GCS[(Cloud Storage)]
     Batch[batch-etl]
     BQ[(BigQuery)]
-    FeastBridge[feast-live-bridge]
     FeastServer[feast-server Service<br/>Deployment suspended]
     ML[ml-pipeline]
     Vertex[Vertex AI Model Registry]
@@ -36,15 +35,13 @@ flowchart LR
     Redis -->|crypto trades + books| Aggregator
     Aggregator -->|spot, book, 10s primitives| Redis
     Redis -->|10s primitives| LiveFeatures
-    LiveFeatures -->|v2_10s features + EWMA state| Redis
+    LiveFeatures -->|v4_10s HAR + volume features| Redis
 
     Redis -->|five source streams| Exporter
     Exporter -->|partitioned Parquet| GCS
     GCS --> Batch
     Batch -->|raw rows, 10s bars, features, labels| BQ
 
-    Redis -->|feature stream| FeastBridge
-    FeastBridge -->|Feast PushSource| Redis
     BQ -.->|optional offline serving| FeastServer
     Redis -.->|optional online serving| FeastServer
 
@@ -54,7 +51,7 @@ flowchart LR
     Vertex -->|resolve approved 1h resource during release| Serving
     GCS -->|package approved 1h bytes during release| Serving
 
-    Redis -->|spot, v2_10s features, Kalshi tickers| Analytics
+    Redis -->|spot, v4_10s features, Kalshi tickers| Analytics
     Analytics -->|POST /v1/forecast| Serving
     Kalshi -->|active market metadata| Analytics
     Analytics -->|volatility + pricing| Redis
@@ -64,8 +61,8 @@ flowchart LR
 
 The real-time path is asynchronous through Redis except for the bounded
 `analytics -> model-serving` HTTP call. Feast is deliberately outside that
-synchronous pricing path; it provides contract registration, offline retrieval,
-online reconciliation, and parity checks.
+synchronous pricing path; it provides contract registration and offline
+retrieval. The production parity gate compares Redis and BigQuery directly.
 
 ## Service responsibilities
 
@@ -73,10 +70,10 @@ online reconciliation, and parity checks.
 |---|---|---|
 | `ingestion` | Exchange connectivity, Kalshi discovery/subscriptions, event normalization, durable Redis Stream publication, best-effort Pub/Sub notification. | Aggregation, feature computation, archival, inference, pricing. |
 | `aggregator` | Crypto stream consumption, per-venue freshness, canonical per-venue book publication, equal-weight fresh-venue spot, completed 10-second per-venue primitives, 30-second dashboard candles, restart checkpoints. | Venue connections, model features, forecasts, Kalshi pricing, archival. |
-| `live_feature_service` | Rolling primitive history, `market_features/v2_10s` calculation, EWMA variance state, atomic checkpoint/output/ACK, restart replay. | Raw exchange parsing, Feast registry changes, model inference. |
+| `live_feature_service` | Rolling primitive history, active `market_features/v4_10s` HAR and buyer-volume calculation, atomic checkpoint/output/ACK, restart replay. | Raw exchange parsing, Feast registry changes, model inference. |
 | `gcs_exporter` | Independent archival of five normalized source streams, validation, create-only Parquet uploads, dead letters, ACK after verified storage. | Aggregation, resampling, features, training. |
-| `batch_etl` | GCS-to-BigQuery landing, canonical 10-second bars, offline v2_10s features, future-volatility labels (legacy 1m plus four active horizons), idempotent hourly jobs and backfills. | Live state, Feast definitions, model selection or serving. |
-| `feast_store` | Immutable feature specifications, Feast entities/sources/views/services, registry apply, online push/materialization, historical retrieval configuration, offline/online parity checks. | Feature formulas, labels, model training, pricing. |
+| `batch_etl` | GCS-to-BigQuery landing, canonical 10-second bars, versioned offline features including active v4_10s, future-volatility labels, idempotent hourly jobs and backfills. | Live state, Feast definitions, model selection or serving. |
+| `feast_store` | Immutable feature specifications, Feast entities/sources/views/services, registry apply/materialization, historical retrieval configuration, and direct Redis-to-BigQuery parity checks. | Feature formulas, labels, model training, pricing. |
 | `ml_pipeline` | Point-in-time-safe training data assembly, chronological training/evaluation for 5m/15m/30m/1h, EWMA comparison, promotion decision, Vertex registration. | Feature generation, online inference, pricing. |
 | `model_serving` | Validation and serving of a complete four-horizon forecast. Production uses packaged EWMA for 5m/15m/30m and an immutable promoted XGBoost artifact for 1h. | Redis/Feast access, Kalshi metadata, probability/edge calculation, public access. |
 | `analytics` | Live dependency freshness, Kalshi market metadata, forecast API adaptation, linear annualized-volatility interpolation, KXBTCD midpoint IV, above-strike probability, fair value and quote edges, fail-closed publication. | Model training, feature computation, UI, orders or positions. |
@@ -108,8 +105,8 @@ The repository has a Bybit adapter and configuration fields, but
 | `stream:kalshi_trades` | `ingestion` | `gcs_exporter`; `dashboard` bounded reverse reads |
 | `stream:kalshi_orderbook` | `ingestion` | `gcs_exporter` |
 | `stream:orderbook:v1` | `aggregator` | No durable in-repository consumer; audit/future integration boundary |
-| `stream:primitives:v1` | `aggregator` | `live_feature_service` group `live-features-v2-10s` |
-| `stream:features:v2_10s` | `live_feature_service` | `feast-live-bridge`; parity job reads bounded history |
+| `stream:primitives:v1` | `aggregator` | `live_feature_service` group `live-features-v4-10s` |
+| `stream:features:v4_10s` | `live_feature_service` | Analytics reads the latest key; parity job reads bounded history |
 | `stream:pricing:v1` | `analytics` | No durable in-repository consumer; bounded audit history |
 
 Consumer-group names are persistent delivery identities. Production pins the
@@ -125,9 +122,9 @@ remain code defaults for compatibility, not the deployed delivery identities.
 | `market:candles:BTCUSDT:30s` | `aggregator` | `dashboard` |
 | `market:candle_state:BTCUSDT:10s` and `market:primitive_watermark:BTCUSDT:10s` | `aggregator` | `aggregator` restart recovery |
 | `market:primitive:<venue>:10s:latest` | `aggregator` | Diagnostics |
-| `market:features:v2_10s:BTCUSD:latest` | `live_feature_service` | `analytics`, parity/operations |
-| `market:features:BTCUSD:state:v2_10s` | `live_feature_service` | `live_feature_service` restart recovery |
-| Feast-managed Redis keys | `feast-live-bridge`, Feast materialization jobs | Future Feast clients; HTTP server is currently suspended |
+| `market:features:v4_10s:BTCUSD:latest` | `live_feature_service` | `analytics`, parity/operations |
+| `market:features:BTCUSD:state:v4_10s` | `live_feature_service` | `live_feature_service` restart recovery |
+| Feast-managed Redis keys | Explicit Feast materialization jobs | Future Feast clients; HTTP server is currently suspended |
 | `market:volatility:v2_10s:BTCUSD:latest` | `analytics` | Deployment smoke checks and operations |
 | `market:implied_volatility:v1:BTCUSD:latest` | `analytics` | `dashboard` volatility cone and operations |
 | `market:pricing:v1:<ticker>` | `analytics` | `dashboard` |
@@ -156,9 +153,9 @@ Pub/Sub.
 | `dashboard` | Dash UI `/`, `GET /healthz`, `GET /readyz` on 8050 | ClusterIP `dashboard:8050`; GCE Ingress exposes `crypto-dashboard.kairos-trading.com`. |
 | `feast-server` | Feast HTTP Service on 6566 | Compatibility Service retained, but its Deployment has zero replicas and no active callers. |
 | `aggregator`, `live-feature-service`, `gcs-exporter` | `GET /healthz`, `GET /readyz` on pod-local probe ports | Kubernetes only; no Service object. |
-| `ingestion`, `batch_etl`, `ml_pipeline`, `feast-live-bridge` | No application HTTP API | Process/Job state and logs provide health. |
+| `ingestion`, `batch_etl`, `ml_pipeline` | No application HTTP API | Process/Job state and logs provide health. |
 
-The forecast request contains `market_features/v2_10s`, event and availability
+The forecast request contains `market_features/v4_10s`, event and availability
 timestamps, feature values, source timestamps, and EWMA state. A successful
 response contains exactly `5m`, `15m`, `30m`, and `1h`, plus model
 resources/version and inference timestamps. Invalid or stale requests return a
@@ -173,8 +170,9 @@ resources/version and inference timestamps. Invalid or stale requests return a
 | `market_data.raw_ticks`, `market_data.raw_orderbooks`, `market_data.bars` | `batch_etl` | Feature/label SQL and offline analysis |
 | `feature_store.realized_volatility_v2_10s` | `batch_etl` | Feast offline source, `ml_pipeline` |
 | `feature_store.realized_volatility_v3_10s` | `batch_etl` | Feast offline source and HAR research/training |
+| `feature_store.realized_volatility_v4_10s` | `batch_etl` | Production parity and HAR-volume training |
 | `training_labels.future_realized_volatility_v2_10s` | `batch_etl` | `ml_pipeline` |
-| `gs://<bucket>/feature_store/registry.db` | Feast apply job | Feast bridge/server and ML loaders |
+| `gs://<bucket>/feature_store/registry.db` | Feast apply job | Suspended Feast server and ML loaders |
 | Immutable `model.joblib` + `metadata.json` artifact | `ml_pipeline` promotion | Release CI packages approved 1h bytes |
 | Versioned Vertex model resource | `ml_pipeline` registration | Release CI resolves exact approved 1h resource |
 
@@ -182,8 +180,8 @@ resources/version and inference timestamps. Invalid or stale requests return a
 
 Production runs in GKE `quant-cluster` in `asia-northeast3`. Long-running
 Deployments are `ingestion-service`, `aggregator`, `gcs-exporter`,
-`live-feature-service`, `feast-live-bridge`, `model-serving`, `analytics`, and
-`dashboard`. The `feast-server` Deployment and Service remain as a reversible
+`live-feature-service-v4`, `model-serving`, `analytics`, and `dashboard`. The
+`feast-server` Deployment and Service remain as a reversible
 compatibility shell, with the Deployment intentionally set to zero replicas.
 Batch bars, features, targets, Feast apply/materialization, and feature parity
 run as Jobs or CronJobs. ML training executes as Vertex AI Pipeline components.

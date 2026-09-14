@@ -1,6 +1,6 @@
 # Live feature service
 
-Owns the low-latency `market_features/v2_10s` calculation. It consumes the
+Owns the low-latency `market_features/v4_10s` calculation. It consumes the
 aggregator's completed per-venue primitives, maintains rolling state, and
 publishes an inference-ready feature envelope without requiring changes to
 upstream event schemas.
@@ -10,13 +10,13 @@ upstream event schemas.
 Input:
 
 - `stream:primitives:v1`
-- consumer group `live-features-v2-10s`
+- consumer group `live-features-v4-10s`
 
 Outputs:
 
-- `stream:features:v2_10s`
-- `market:features:v2_10s:BTCUSD:latest`
-- restart checkpoint `market:features:BTCUSD:state:v2_10s`
+- `stream:features:v4_10s`
+- `market:features:v4_10s:BTCUSD:latest`
+- restart checkpoint `market:features:BTCUSD:state:v4_10s`
 
 The feature formula is:
 
@@ -26,20 +26,20 @@ log_return      = ln(synthetic_price / previous_synthetic_price)
 venue_count     = count(non-null per-venue prices)
 ```
 
-The payload also includes source timestamps, event/availability timestamps, and
-an `ewma_states` object containing 5m, 15m, and 30m sampled-candle EWMA
-variances. Feast ignores the inference-only EWMA extension;
-model-serving uses it for the 5m/15m/30m forecasts.
+The payload also includes source timestamps, event/availability timestamps,
+HAR realized-volatility windows, buyer-volume windows, and sampled-candle EWMA
+state used by packaged model fallbacks.
 
 The optional `v3_10s` contract adds annualized trailing realized volatility at
 30s, 1m, 5m, 15m, 30m, 1h, and 3h. It retains 1,100 bars and publishes only after
 the complete three-hour lookback is warm. Select it with `FEATURE_VERSION=v3_10s`;
 versioned Redis keys and defaults are derived automatically.
 
-The `v4_10s` contract retains those HAR inputs and adds causal
+The active `v4_10s` contract retains those HAR inputs and adds causal
 `log1p(sum(v_buy))` windows over 30s, 5m, and 10m. Production runs v4 as a
-parallel consumer with its own stream, latest key, checkpoint, and consumer
-group, leaving v2 warm for rollback.
+single consumer with its own stream, latest key, checkpoint, and consumer
+group. The implementation can still reproduce v2 explicitly for offline tests,
+but no v2 producer is deployed.
 
 State, an optional feature publication, and the source ACK commit in one Redis
 transaction. First startup replays recent primitives; restarts restore the
@@ -74,12 +74,10 @@ uv run pytest
 
 ## Consumers and deployment
 
-Analytics reads the latest feature key. `feast-live-bridge` asynchronously
-consumes the feature stream, and the feature parity job compares recent stream
-history with BigQuery.
+Analytics reads the latest feature key, and the v4 parity job compares recent
+immutable stream history directly with BigQuery.
 
-Kubernetes runs the rollback `deployment/live-feature-service` and active
-`deployment/live-feature-service-v4` from the same image.
+Kubernetes runs only `deployment/live-feature-service-v4`.
 `GET /healthz` is liveness and
 `GET /readyz` becomes ready after Redis setup and state restoration/replay.
 The probe endpoint is pod-local.

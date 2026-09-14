@@ -47,20 +47,18 @@ existing services. Each dependency has a narrow purpose:
 | Dependency | Existing interface used by analytics | Purpose | Required upstream change |
 |---|---|---|---|
 | Aggregator | `GET market:spot:BTCUSDT:latest` | Synthetic spot and spot timestamp | None |
-| Live feature service | `GET market:features:v2_10s:BTCUSD:latest` | One timestamped v2_10s model-feature observation and EWMA state | None |
+| Live feature service | `GET market:features:v4_10s:BTCUSD:latest` | One timestamped v4_10s HAR and buyer-volume observation | None |
 | Ingestion | `stream:kalshi_tickers` | Bid, ask, ticker freshness, event and market identifiers | None |
 | Kalshi REST | Existing authenticated event/market endpoints | Authoritative market definition, strike, settlement/expiry time, and status | None |
 | Model serving | `POST http://model-serving:8080/v1/forecast` | Complete 5m/15m/30m/1h term structure | None |
 | Dashboard | Existing Redis connection and analytics-owned pricing keys | Display model value and edge | None |
 
-The v2_10s analytics path reads the versioned timestamped latest-feature
+The v4_10s analytics path reads the versioned timestamped latest-feature
 envelope directly and forwards it to model-serving. This guarantees that all
 four forecasts use exactly one observation and lets both services validate its
-age. The existing Feast live bridge continues to reconcile the online store.
-The `feast-server:6566` compatibility Service is retained with its Deployment
-at zero replicas; analytics does not put Feast HTTP serving on its critical
-path. A future `ForecastProvider` may use Feast without changing the pricing
-core or any producer.
+age. The `feast-server:6566` compatibility Service is retained with its
+Deployment at zero replicas; analytics does not put Feast HTTP serving or an
+online bridge on its critical path.
 
 Analytics uses its own Redis consumer group, `analytics-pricing-v1`, for
 `stream:kalshi_tickers`; it never acknowledges entries for another consumer.
