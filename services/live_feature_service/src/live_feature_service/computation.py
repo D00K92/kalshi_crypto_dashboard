@@ -18,6 +18,7 @@ REALIZED_VOL_WINDOWS = {
     "1h": 360,
     "3h": 1_080,
 }
+BUY_VOLUME_WINDOWS = {"30s": 3, "5m": 30, "10m": 60}
 SECONDS_PER_YEAR = 365 * 24 * 60 * 60
 FEATURE_SET = "market_features"
 FEATURE_VERSION = "v2_10s"
@@ -38,10 +39,13 @@ class FeatureRow:
     realized_volatilities: dict[str, float]
     ewma_variances: dict[str, float]
     legacy_ewma_variance: float | None
+    log_buy_volumes: dict[str, float] | None = None
 
     def payload(self) -> dict[str, Any]:
         values: dict[str, Any] = {"synthetic_price": self.synthetic_price, "log_return": self.log_return, "venue_count": self.venue_count}
         values.update({f"realized_vol_{window}": value for window, value in self.realized_volatilities.items()})
+        if self.log_buy_volumes:
+            values.update({f"log_buy_volume_{window}": value for window, value in self.log_buy_volumes.items()})
         if self.ewma_variances:
             values["ewma_states"] = {
                 frequency: {"frequency": frequency, "variance": variance}
@@ -76,6 +80,7 @@ class V2TenSecondFeatureComputer:
         self.feature_version = feature_version
         self._history: dict[str, deque[tuple[int, float]]] = defaultdict(lambda: deque(maxlen=history_bars))
         self._pending: dict[int, dict[str, float]] = {}
+        self._pending_buy_volumes: dict[int, dict[str, float]] = {}
         self._last_seen_by_venue: dict[str, int] = {}
         self._last_timestamp_ms: int | None = None
         self._last_price: float | None = None
@@ -83,10 +88,11 @@ class V2TenSecondFeatureComputer:
         self._sample_prices: dict[str, float | None] = {frequency: None for frequency in EWMA_FREQUENCIES}
         self._legacy_ewma_variance: float | None = None
         self._returns: deque[float] = deque(maxlen=history_bars - 1)
+        self._buy_volumes: deque[float] = deque(maxlen=history_bars)
 
     @property
     def required_history_bars(self) -> int:
-        return 1_081 if self.feature_version == "v3_10s" else 361
+        return 1_081 if self.feature_version in {"v3_10s", "v4_10s"} else 361
 
     @property
     def history_count(self) -> int:
@@ -120,13 +126,25 @@ class V2TenSecondFeatureComputer:
             raise ValueError("primitive bar price must be numeric") from exc
         if not math.isfinite(price) or price <= 0:
             raise ValueError("primitive bar price must be positive and finite")
+        buy_volume = 0.0
+        if self.feature_version == "v4_10s":
+            try:
+                buy_volume = float(bar["v_buy"])
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ValueError("primitive bar buyer volume must be numeric") from exc
+            if not math.isfinite(buy_volume) or buy_volume < 0:
+                raise ValueError("primitive bar buyer volume must be non-negative and finite")
         self._last_seen_by_venue[venue] = timestamp
         self._history[venue].append((timestamp, price))
         self._pending.setdefault(timestamp, {})[venue] = price
+        if self.feature_version == "v4_10s":
+            self._pending_buy_volumes.setdefault(timestamp, {})[venue] = buy_volume
         ready = sorted(key for key in self._pending if key < timestamp)
         output: FeatureRow | None = None
         for completed in ready:
             prices = self._pending.pop(completed)
+            if self.feature_version == "v4_10s":
+                self._buy_volumes.append(math.fsum(self._pending_buy_volumes.pop(completed).values()))
             synthetic = math.fsum(prices.values()) / len(prices)
             log_return = None if self._last_price is None else math.log(synthetic / self._last_price)
             forecast_variances = {
@@ -153,8 +171,11 @@ class V2TenSecondFeatureComputer:
                     self._ewma_variances[frequency] = squared if prior is None else self.ewma_decay * prior + (1.0 - self.ewma_decay) * squared
                 self._sample_prices[frequency] = synthetic
             self._last_timestamp_ms, self._last_price = completed, synthetic
-            output = FeatureRow(self.asset, self.feature_version, completed, completed + INTERVAL_MS, now_ms, synthetic, log_return, len(prices), realized_volatilities, forecast_variances, legacy_forecast_variance)
-            if self.feature_version == "v3_10s" and "3h" not in realized_volatilities:
+            log_buy_volumes = self._log_buy_volumes() if self.feature_version == "v4_10s" else None
+            output = FeatureRow(self.asset, self.feature_version, completed, completed + INTERVAL_MS, now_ms, synthetic, log_return, len(prices), realized_volatilities, forecast_variances, legacy_forecast_variance, log_buy_volumes)
+            if self.feature_version in {"v3_10s", "v4_10s"} and "3h" not in realized_volatilities:
+                output = None
+            if self.feature_version == "v4_10s" and not log_buy_volumes:
                 output = None
         return None if replay else output
 
@@ -168,16 +189,27 @@ class V2TenSecondFeatureComputer:
             result[window] = math.sqrt(sum_squared * SECONDS_PER_YEAR / (observations * 10))
         return result
 
+    def _log_buy_volumes(self) -> dict[str, float]:
+        values = list(self._buy_volumes)
+        if len(values) < max(BUY_VOLUME_WINDOWS.values()):
+            return {}
+        return {
+            window: math.log1p(math.fsum(values[-observations:]))
+            for window, observations in BUY_VOLUME_WINDOWS.items()
+        }
+
     def snapshot(self) -> dict[str, Any]:
-        return {"schema_version": 5, "last_timestamp_ms": self._last_timestamp_ms, "last_price": self._last_price,
+        return {"schema_version": 6, "last_timestamp_ms": self._last_timestamp_ms, "last_price": self._last_price,
                 "ewma_variance": self._legacy_ewma_variance, "ewma_variances": self._ewma_variances, "sample_prices": self._sample_prices,
                 "returns": list(self._returns),
+                "buy_volumes": list(self._buy_volumes),
                 "history": {venue: list(values) for venue, values in self._history.items()},
                 "last_seen_by_venue": dict(self._last_seen_by_venue),
-                "pending": {str(timestamp): dict(prices) for timestamp, prices in self._pending.items()}}
+                "pending": {str(timestamp): dict(prices) for timestamp, prices in self._pending.items()},
+                "pending_buy_volumes": {str(timestamp): dict(volumes) for timestamp, volumes in self._pending_buy_volumes.items()}}
 
     def restore(self, state: dict[str, Any]) -> None:
-        if state.get("schema_version") not in (1, 2, 3, 4, 5):
+        if state.get("schema_version") not in (1, 2, 3, 4, 5, 6):
             raise ValueError("unsupported feature state")
         timestamp, price = state.get("last_timestamp_ms"), state.get("last_price")
         timestamp = None if timestamp is None else int(timestamp)
@@ -213,7 +245,7 @@ class V2TenSecondFeatureComputer:
                 history.append((int(item[0]), float(item[1])))
             self._history[str(venue)] = history
         self._returns = deque(maxlen=self.history_bars - 1)
-        if state.get("schema_version") == 5:
+        if state.get("schema_version") in (5, 6):
             for value in state.get("returns") or []:
                 value = float(value)
                 if not math.isfinite(value):
@@ -230,6 +262,13 @@ class V2TenSecondFeatureComputer:
                 if prior is not None:
                     self._returns.append(math.log(synthetic / prior))
                 prior = synthetic
+        self._buy_volumes = deque(maxlen=self.history_bars)
+        if state.get("schema_version") == 6:
+            for value in state.get("buy_volumes") or []:
+                value = float(value)
+                if not math.isfinite(value) or value < 0:
+                    raise ValueError("invalid persisted buyer volume")
+                self._buy_volumes.append(value)
         self._last_seen_by_venue = {str(k): int(v) for k, v in (state.get("last_seen_by_venue") or {}).items()}
         pending = state.get("pending") or {}
         if state.get("schema_version") in (1, 2):
@@ -248,6 +287,13 @@ class V2TenSecondFeatureComputer:
             if any(not math.isfinite(value) or value <= 0 for value in prices.values()):
                 raise ValueError("invalid persisted pending price")
             self._pending[timestamp] = prices
+        self._pending_buy_volumes = {}
+        for raw_timestamp, raw_volumes in (state.get("pending_buy_volumes") or {}).items():
+            timestamp = int(raw_timestamp)
+            volumes = {str(venue): float(value) for venue, value in raw_volumes.items()}
+            if any(not math.isfinite(value) or value < 0 for value in volumes.values()):
+                raise ValueError("invalid persisted pending buyer volume")
+            self._pending_buy_volumes[timestamp] = volumes
 
 
 class V3TenSecondFeatureComputer(V2TenSecondFeatureComputer):
@@ -259,3 +305,14 @@ class V3TenSecondFeatureComputer(V2TenSecondFeatureComputer):
             raise ValueError("v3 history must retain at least 1081 10s bars")
         super().__init__(asset=asset, ewma_decay=ewma_decay, max_bar_age_ms=max_bar_age_ms,
                          history_bars=history_bars, feature_version="v3_10s")
+
+
+class V4TenSecondFeatureComputer(V2TenSecondFeatureComputer):
+    """HAR feature producer with causal buyer-volume windows."""
+
+    def __init__(self, *, asset: str = "BTCUSD", ewma_decay: float = 0.96,
+                 max_bar_age_ms: int = 120_000, history_bars: int = V3_HISTORY_BARS) -> None:
+        if history_bars < 1_081:
+            raise ValueError("v4 history must retain at least 1081 10s bars")
+        super().__init__(asset=asset, ewma_decay=ewma_decay, max_bar_age_ms=max_bar_age_ms,
+                         history_bars=history_bars, feature_version="v4_10s")

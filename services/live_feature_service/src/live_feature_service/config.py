@@ -25,7 +25,7 @@ class Settings:
     @classmethod
     def from_env(cls) -> "Settings":
         feature_version = os.getenv("FEATURE_VERSION", "v2_10s")
-        v3 = feature_version == "v3_10s"
+        har = feature_version in {"v3_10s", "v4_10s"}
         return cls(
             redis_url=os.getenv("REDIS_URL", "redis://127.0.0.1:6379/0"),
             bars_stream=os.getenv("BARS_STREAM", "stream:primitives:v1"),
@@ -38,8 +38,8 @@ class Settings:
             health_port=int(os.getenv("HEALTH_PORT", "8080")),
             ewma_decay=float(os.getenv("EWMA_DECAY", "0.96")),
             max_bar_age_ms=int(os.getenv("MAX_BAR_AGE_MS", "120000")),
-            history_bars=int(os.getenv("HISTORY_BARS", "1100" if v3 else "450")),
-            replay_count=int(os.getenv("REPLAY_COUNT", "10000" if v3 else "5000")),
+            history_bars=int(os.getenv("HISTORY_BARS", "1100" if har else "450")),
+            replay_count=int(os.getenv("REPLAY_COUNT", "10000" if har else "5000")),
             primitive_maxlen=int(os.getenv("PRIMITIVE_STREAM_MAXLEN", "100000")),
             pending_idle_ms=int(os.getenv("LIVE_FEATURE_PENDING_IDLE_MS", "60000")),
         )

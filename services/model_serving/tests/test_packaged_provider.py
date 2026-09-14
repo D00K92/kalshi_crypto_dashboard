@@ -131,6 +131,26 @@ def test_packaged_provider_routes_only_1h_to_model(tmp_path):
     assert result.model_resources["30m"] == "ewma/v2_10s/30m"
 
 
+def test_packaged_provider_accepts_explicit_compatible_training_contract(tmp_path):
+    manifest_path = build_bundle(tmp_path)
+    manifest = json.loads(manifest_path.read_text())
+    manifest["model_version"] = "v4_volume_har_1"
+    manifest["feature_version"] = "v4_10s"
+    for horizon in ("5m", "15m", "30m"):
+        manifest["horizons"][horizon]["resource"] = f"ewma/v4_volume_har_1/{horizon}"
+    manifest["horizons"]["1h"]["trained_feature_version"] = "v2_10s"
+    manifest_path.write_text(json.dumps(manifest))
+
+    provider = PackagedHybridProvider.load(
+        manifest_path,
+        model_version="v4_volume_har_1",
+        feature_version="v4_10s",
+        decay=0.96,
+    )
+
+    assert provider.model_resources["1h"] == "projects/1/locations/test/models/2@1"
+
+
 def test_packaged_provider_routes_all_v3_horizons_to_har_models(tmp_path):
     provider = PackagedHybridProvider.load(
         build_v3_bundle(tmp_path), model_version="v3_har_1", feature_version="v3_10s", decay=0.96

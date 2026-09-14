@@ -59,8 +59,11 @@ term structure produces 500.
 
 ## Immutable bundle
 
-`scripts/prepare_bundle.py` retains the approved v2 1h-artifact interface. For
-v3, pass an artifact root containing `5m/`, `15m/`, `30m/`, and `1h/` directories
+`scripts/prepare_bundle.py` retains the approved v2 1h-artifact interface and
+can add the v4 5m HAR with the `--five-minute-*` options. The manifest records
+the 1h artifact's original training contract while serving it from the
+compatible v4 superset. For a full multi-horizon bundle, pass an artifact root
+containing `5m/`, `15m/`, `30m/`, and `1h/` directories
 plus `--resource-map`, a JSON mapping each horizon to its immutable Vertex
 `resource` and `artifact_uri`. It validates metadata and writes checksums for
 all four models.

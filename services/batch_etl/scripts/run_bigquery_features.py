@@ -13,8 +13,9 @@ FEATURE_SQL = {
     "v1": "011_compute_realized_volatility.sql",
     "v2_10s": "014_compute_v2_10s_features.sql",
     "v3_10s": "016_compute_v3_10s_features.sql",
+    "v4_10s": "018_compute_v4_10s_volume_features.sql",
 }
-ACTIVE_FEATURE_VERSIONS = ("v2_10s", "v3_10s")
+ACTIVE_FEATURE_VERSIONS = ("v2_10s", "v3_10s", "v4_10s")
 
 
 def main() -> None:
@@ -26,7 +27,7 @@ def main() -> None:
         "--feature-version",
         default=os.getenv("FEATURE_VERSION", "v2_10s"),
         choices=(*FEATURE_SQL, "active"),
-        help="One contract or 'active' to materialize v2 and v3 during migration",
+        help="One contract or 'active' to materialize v2, v3, and v4 during migration",
     )
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()

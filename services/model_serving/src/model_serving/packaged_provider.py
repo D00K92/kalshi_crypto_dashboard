@@ -82,7 +82,8 @@ class PackagedHybridProvider:
             metadata = _load_json(metadata_file)
             if metadata.get("horizon") != horizon:
                 raise ValueError("packaged model horizon mismatch")
-            if metadata.get("feature_set") != "market_features" or metadata.get("feature_version") != feature_version:
+            trained_feature_version = entry.get("trained_feature_version", feature_version)
+            if metadata.get("feature_set") != "market_features" or metadata.get("feature_version") != trained_feature_version:
                 raise ValueError("packaged model feature contract mismatch")
             columns = metadata.get("feature_columns")
             if not isinstance(columns, list) or not columns or any(not isinstance(column, str) for column in columns):

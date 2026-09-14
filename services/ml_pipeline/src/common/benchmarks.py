@@ -5,6 +5,8 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from src.common.contracts import HORIZON_SECONDS
+
 SECONDS_PER_YEAR = 365 * 24 * 60 * 60
 FREQUENCY_SECONDS = {
     "10s": 10,
@@ -41,7 +43,7 @@ def _benchmark_frame(table: pd.DataFrame) -> pd.DataFrame:
 
 def ewma_annualized_volatility(table: pd.DataFrame, horizon: str, decay: float = 0.96) -> np.ndarray:
     """Forecast annualized volatility from prior same-frequency returns."""
-    horizon_seconds = {"5m": 300, "15m": 900, "30m": 1800, "1h": 3600}[horizon]
+    horizon_seconds = HORIZON_SECONDS[horizon]
     frame = _benchmark_frame(table)
     frame["timestamp"] = pd.to_datetime(frame["timestamp"], utc=True)
     frame["trade_log_return"] = pd.to_numeric(frame["trade_log_return"], errors="coerce").fillna(0.0)

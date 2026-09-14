@@ -3,22 +3,6 @@
 -- of each venue's completed 10-second p_trade_mean and its consecutive return.
 DECLARE annualization_factor FLOAT64 DEFAULT 365 * 24 * 60 * 60;
 
-CREATE TABLE IF NOT EXISTS `${project}.feature_store.realized_volatility_v2_10s`
-(
-  asset STRING NOT NULL,
-  event_timestamp TIMESTAMP NOT NULL,
-  created_timestamp TIMESTAMP NOT NULL,
-  source_frequency STRING NOT NULL,
-  feature_version STRING NOT NULL,
-  synthetic_price FLOAT64,
-  log_return FLOAT64,
-  venue_count INT64,
-  realized_vol_1h FLOAT64,
-  realized_vol_3h FLOAT64
-)
-PARTITION BY DATE(event_timestamp)
-CLUSTER BY source_frequency, asset;
-
 MERGE `${project}.feature_store.realized_volatility_v2_10s` AS target
 USING (
   WITH venue_prices AS (

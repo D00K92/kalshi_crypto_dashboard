@@ -4,16 +4,16 @@ from __future__ import annotations
 
 import argparse
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import joblib
 import pandas as pd
 from google.cloud import aiplatform as vertex
 
+from src.common.contracts import HORIZONS
 from src.common.evaluation import evaluate_frame, retrain_decision
 
-HORIZONS = ("5m", "15m", "30m", "1h")
 INFERENCE_PREDICTIONS_ROOT = "gs://kalshi-crypto-tick-data/inference_predictions"
 
 
@@ -32,7 +32,7 @@ def main() -> None:
 
     table = pd.read_parquet(args.dataset)
     champions = json.loads(Path(args.champion_metrics).read_text(encoding="utf-8"))
-    report = {"evaluated_at": datetime.now(timezone.utc).isoformat(), "model_version": args.model_version,
+    report = {"evaluated_at": datetime.now(UTC).isoformat(), "model_version": args.model_version,
               "benchmark": {"name": "ewma", "decay": 0.96}, "horizons": {}}
     for horizon in HORIZONS:
         model_path = Path(args.candidate_root) / horizon / "model.joblib"

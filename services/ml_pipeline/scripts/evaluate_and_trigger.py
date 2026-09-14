@@ -6,15 +6,14 @@ import argparse
 import json
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import joblib
 import pandas as pd
 
+from src.common.contracts import HORIZONS
 from src.common.evaluation import evaluate_frame, retrain_decision
-
-HORIZONS = ("5m", "15m", "30m", "1h")
 
 
 def main() -> None:
@@ -38,10 +37,10 @@ def main() -> None:
     champions = json.loads(Path(args.champion_metrics).read_text(encoding="utf-8"))
     state_path = Path(args.state)
     state = json.loads(state_path.read_text(encoding="utf-8")) if state_path.exists() else {}
-    report = {"evaluated_at": datetime.now(timezone.utc).isoformat(), "horizons": {}, "trigger_retraining": False}
+    report = {"evaluated_at": datetime.now(UTC).isoformat(), "horizons": {}, "trigger_retraining": False}
     for horizon in HORIZONS:
         model = joblib.load(Path(args.model_root) / horizon / "model.joblib")
-        champion = champions[horizon] if horizon in champions else champions
+        champion = champions.get(horizon, champions)
         result = evaluate_frame(table, model, horizon)
         result["decision"] = retrain_decision(
             result, champion, prior_failures=state.get("consecutive_failures", 0),

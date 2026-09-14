@@ -7,22 +7,17 @@ import json
 from datetime import date
 from pathlib import Path
 
-import gcsfs
-
 from src.common.benchmarks import ewma_annualized_volatility
-from src.common.contracts import CURRENT_CONTRACT_VERSION
-from src.common.data_io import (
-    DEFAULT_TARGET_TABLE,
-    load_training_table,
-    load_training_table_from_feast,
-)
+from src.common.contracts import CURRENT_CONTRACT_VERSION, HORIZONS, resolve_contract
+from src.common.data_io import DEFAULT_TARGET_TABLE, load_training_table
 from src.common.evaluation import score_predictions
 
-HORIZONS = ("5m", "15m", "30m", "1h")
 
-
-def compute_benchmark(table, decay: float = 0.96) -> dict:
+def compute_benchmark(
+    table, decay: float = 0.96, feature_version: str = CURRENT_CONTRACT_VERSION
+) -> dict:
     """Score EWMA and emit the horizon-keyed champion artifact contract."""
+    contract = resolve_contract(feature_version)
     report = {
         "_metadata": {
             "name": "ewma",
@@ -34,7 +29,10 @@ def compute_benchmark(table, decay: float = 0.96) -> dict:
     }
     for horizon in HORIZONS:
         target = f"target_rv_{horizon}"
-        usable = table.dropna(subset=[target, "log_return", "venue_count"]).sort_values("timestamp").reset_index(drop=True)
+        required = tuple(
+            dict.fromkeys((target, "log_return", "venue_count", *contract.columns_for(horizon)))
+        )
+        usable = table.dropna(subset=list(required)).sort_values("timestamp").reset_index(drop=True)
         test_start = int(len(usable) * 0.85)
         if len(usable) <= test_start:
             raise ValueError(f"not enough rows for benchmark holdout: {horizon}")
@@ -52,27 +50,21 @@ def main() -> None:
     parser.add_argument("--project", required=True)
     parser.add_argument("--output", type=Path, default=Path("benchmark_metrics.json"))
     parser.add_argument("--decay", type=float, default=0.96)
-    parser.add_argument("--feast-repo")
     parser.add_argument("--target-table", default=DEFAULT_TARGET_TABLE)
     parser.add_argument("--feature-version", default=CURRENT_CONTRACT_VERSION)
-    parser.add_argument("--feature-root", default="gs://kalshi-crypto-tick-data/features/v1")
-    parser.add_argument("--target-root", default="gs://kalshi-crypto-tick-data/processed/future_realized_volatility")
     args = parser.parse_args()
     if not 0 < args.decay < 1:
         raise ValueError("decay must be between 0 and 1")
-    if args.feast_repo:
-        table = load_training_table_from_feast(
-            project=args.project,
-            feast_repo=args.feast_repo,
-            start=args.start_date,
-            end=args.end_date,
-            target_table=args.target_table,
-            feature_version=args.feature_version,
-        )
-    else:
-        fs = gcsfs.GCSFileSystem(project=args.project)
-        table = load_training_table(fs, args.feature_root, args.target_root, args.start_date, args.end_date)
-    report = compute_benchmark(table, decay=args.decay)
+    table = load_training_table(
+        project=args.project,
+        start=args.start_date,
+        end=args.end_date,
+        target_table=args.target_table,
+        feature_version=args.feature_version,
+    )
+    report = compute_benchmark(
+        table, decay=args.decay, feature_version=args.feature_version
+    )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     for horizon in HORIZONS:

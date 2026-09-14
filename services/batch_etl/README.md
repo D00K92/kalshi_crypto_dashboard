@@ -2,7 +2,7 @@
 
 Builds the offline data used for model training and feature parity. Production
 lands archived GCS Parquet in BigQuery, replaces canonical 10-second bar
-partitions, and computes active `v2_10s`/`v3_10s` features plus
+partitions, and computes active `v2_10s`/`v3_10s`/`v4_10s` features plus
 future-volatility labels.
 It does not own live features, Feast declarations, or model selection.
 
@@ -11,7 +11,7 @@ It does not own live features, Feast declarations, or model selection.
 | Schedule (UTC) | Kubernetes resource | Command | Output |
 |---|---|---|---|
 | Minute 15 hourly | `cronjob/batch-etl` | `scripts/run_bigquery_hourly.py` | Raw landing tables and `market_data.bars` |
-| Minute 30 hourly | `cronjob/batch-etl-features` | `scripts/run_bigquery_features.py --feature-version active` | `feature_store.realized_volatility_v2_10s` and `realized_volatility_v3_10s` |
+| Minute 30 hourly | `cronjob/batch-etl-features` | `scripts/run_bigquery_features.py --feature-version active` | `feature_store.realized_volatility_v2_10s`, `realized_volatility_v3_10s`, and `realized_volatility_v4_10s` |
 | Minute 45 hourly | `cronjob/batch-etl-targets` | `scripts/run_bigquery_targets.py` | `training_labels.future_realized_volatility_v2_10s` |
 
 The target job defaults to a two-hour delay so each forward window has completed.
@@ -38,9 +38,9 @@ boundary continuity but writes only the requested target hour.
 
 The `v2_10s` feature job derives the same model-facing
 `synthetic_price`, `log_return`, and `venue_count` contract used online.
-The additive `v3_10s` table derives the seven causal trailing realized-
-volatility inputs used by the HAR research/training default; production serving
-still uses `v2_10s`.
+The additive `v3_10s` table derives its seven causal trailing realized-
+volatility inputs from the already aggregated v2 rows, avoiding a second scan
+and aggregation of all venue bars. Production serving still uses `v2_10s`.
 The label job creates `target_rv_1m`, `target_rv_5m`,
 `target_rv_15m`, `target_rv_30m`, and `target_rv_1h`. The 1m column is
 retained in the offline table for compatibility; the active training and
@@ -92,14 +92,16 @@ The targeted v2 feature/label repair utility is
 | `BATCH_ETL_VENUES` | Six production crypto venues |
 | `BATCH_ETL_FREQUENCIES` | `10s` |
 | `BATCH_ETL_PARALLELISM` | `1`; raw BigQuery writes are intentionally serialized |
-| `FEATURE_VERSION` | Script default `v2_10s`; production CronJob uses `active` to build v2 and v3 |
+| `FEATURE_VERSION` | Script default `v2_10s`; production CronJob uses `active` to build v2, v3, and v4 |
 | `LABEL_VERSION` | `v2_10s` |
 | `BATCH_ETL_BACKFILL_STATE` | Local resume-state path for range backfills |
 | `BATCH_ETL_BACKFILL_LOCK` | `/tmp/kalshi-bigquery-resample.lock` |
 
 ## Deployment
 
-CD builds one immutable `batch-etl` image and applies
+Before Feast registration, CD idempotently applies
+`sql/017_create_v2_v3_contract_tables.sql`; hourly feature and target queries
+perform data generation only. CD then builds one immutable `batch-etl` image and applies
 `k8s/batch-etl-cronjob.yaml` plus
 `k8s/batch-etl-feature-cronjobs.yaml`. The `batch-etl` Kubernetes service
 account needs GCS read access and BigQuery job/table permissions. CronJobs use

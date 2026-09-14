@@ -2,7 +2,12 @@
 from __future__ import annotations
 
 import argparse
+
 from google.cloud import aiplatform
+
+from src.common.contracts import CURRENT_CONTRACT_VERSION
+
+DEFAULT_MODEL_VERSION = "v3_har_1"
 
 
 def main() -> None:
@@ -14,8 +19,8 @@ def main() -> None:
     parser.add_argument("--service-account")
     parser.add_argument("--start-date", required=True)
     parser.add_argument("--end-date", required=True)
-    parser.add_argument("--model-version", default="v2_10s")
-    parser.add_argument("--feature-version", default="v2_10s")
+    parser.add_argument("--model-version", default=DEFAULT_MODEL_VERSION)
+    parser.add_argument("--feature-version", default=CURRENT_CONTRACT_VERSION)
     args = parser.parse_args()
     aiplatform.init(project=args.project, location=args.location)
     job = aiplatform.PipelineJob(

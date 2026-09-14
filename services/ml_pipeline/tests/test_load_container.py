@@ -18,11 +18,11 @@ def _load_module():
     return module
 
 
-def test_feast_loader_creates_nested_artifact_parent(tmp_path, monkeypatch):
+def test_bigquery_loader_creates_nested_artifact_parent(tmp_path, monkeypatch):
     module = _load_module()
     monkeypatch.setattr(
         module,
-        "load_training_table_from_feast",
+        "load_training_table",
         lambda **_: pd.DataFrame({"log_return": [0.0], "venue_count": [1]}),
     )
     output = tmp_path / "nested" / "output_dataset"
@@ -30,7 +30,7 @@ def test_feast_loader_creates_nested_artifact_parent(tmp_path, monkeypatch):
         sys,
         "argv",
         [
-            "main.py", "--feast-repo", "/tmp/feast", "--start-date", "2026-08-31",
+            "main.py", "--start-date", "2026-08-31",
             "--end-date", "2026-09-06", "--output", str(output), "--project", "test",
         ],
     )
@@ -41,7 +41,7 @@ def test_feast_loader_creates_nested_artifact_parent(tmp_path, monkeypatch):
     assert len(pd.read_parquet(output)) == 1
 
 
-def test_feast_loader_passes_v3_10s_contract_by_default(tmp_path, monkeypatch):
+def test_bigquery_loader_passes_v3_10s_contract_by_default(tmp_path, monkeypatch):
     module = _load_module()
     calls = []
 
@@ -49,10 +49,10 @@ def test_feast_loader_passes_v3_10s_contract_by_default(tmp_path, monkeypatch):
         calls.append(kwargs)
         return pd.DataFrame({"log_return": [0.0], "venue_count": [1]})
 
-    monkeypatch.setattr(module, "load_training_table_from_feast", load)
+    monkeypatch.setattr(module, "load_training_table", load)
     output = tmp_path / "dataset"
     monkeypatch.setattr(sys, "argv", [
-        "main.py", "--feast-repo", "/tmp/feast", "--start-date", "2026-08-31",
+        "main.py", "--start-date", "2026-08-31",
         "--end-date", "2026-09-06", "--output", str(output), "--project", "test",
     ])
 

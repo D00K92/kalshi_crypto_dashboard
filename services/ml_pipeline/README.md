@@ -2,14 +2,14 @@
 
 Owns training-data assembly, horizon-specific model training, evaluation,
 promotion decisions, and Vertex AI model registration. It consumes the existing
-BigQuery/Feast contracts and does not compute live features or serve inference.
+BigQuery contracts and does not compute live features or serve inference.
 
 ## Model contract
 
 | Item | Current value |
 |---|---|
-| Feature set/version | Training default `market_features/v3_10s`; `v2_10s` remains the live rollback contract |
-| Model inputs | Three horizon-specific trailing realized-volatility components |
+| Feature set/version | Training default `market_features/v3_10s`; live 5m candidate uses `v4_10s` |
+| Model inputs | Horizon-specific realized volatility; v4 5m also uses buyer-volume windows |
 | Label table | `training_labels.future_realized_volatility_v2_10s` |
 | Horizons | `5m`, `15m`, `30m`, `1h` |
 | Split | Chronological 70% train / 15% validation / 15% test |
@@ -19,13 +19,19 @@ BigQuery/Feast contracts and does not compute live features or serve inference.
 | Champion metrics | `gs://kalshi-crypto-tick-data/models/v3_har_1/champion_metrics.json` |
 
 Training rejects current-day ranges and exact-timestamp joins BigQuery labels to
-the immutable Feast feature contract. Promotion requires a candidate to beat
+the immutable feature contract. Feast is not part of the training-data path.
+Promotion requires a candidate to beat
 EWMA by 2% and be no more than 5% worse than the current champion.
 
-The pipeline can train and register all four horizons. The current online
-`model-serving` release packages only the approved 1h XGBoost artifact; its
-5m/15m/30m outputs use EWMA. Training all horizons preserves evaluation history
-and supports a later serving promotion without changing this service boundary.
+The pipeline can train and register all four horizons. The online
+`model-serving` bundle packages the v4 5m HAR and the approved 1h XGBoost;
+15m/30m use EWMA.
+
+`v4_10s` adds
+`log(1 + buyer volume)` over 30-second, 5-minute, and 10-minute trailing windows
+to the existing v3 5m HAR inputs. The live producer publishes this version on
+separate Redis keys while v2 remains warm for rollback; Feast is not on the
+inference path.
 
 ## Pipeline DAG
 
@@ -65,7 +71,8 @@ uv run --locked python scripts/run_pipeline.py \
   --project kalshi-crypto-506614 \
   --location asia-northeast3 \
   --pipeline-root gs://kalshi-crypto-tick-data/pipeline-root \
-  --start-date 2026-08-31 --end-date 2026-09-02
+  --start-date 2026-08-31 --end-date 2026-09-02 \
+  --model-version v3_har_1 --feature-version v3_10s
 ```
 
 Use a service account with the necessary Vertex, BigQuery, GCS, and Artifact
@@ -89,7 +96,6 @@ and immutable artifact URI from an approved promotion.
 the commit SHA and uploads a compiled Vertex template. Publishing the template
 does not submit a run or promote a model.
 
-After an approved 1h model is registered, production release variables
-`VOLATILITY_MODEL_1H` and `VOLATILITY_MODEL_1H_ARTIFACT_URI` identify the
-exact resource and artifact. The services CD workflow validates and packages
-those bytes into the model-serving image.
+Production release variables identify the exact 5m v4 and 1h resources and
+artifact URIs. The services CD workflow validates and packages those bytes
+into the model-serving image.

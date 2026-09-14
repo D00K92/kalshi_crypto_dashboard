@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-HORIZONS = ("5m", "15m", "30m", "1h")
+HORIZON_SECONDS = {"5m": 300, "15m": 900, "30m": 1_800, "1h": 3_600}
+HORIZONS = tuple(HORIZON_SECONDS)
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,6 +70,43 @@ CONTRACTS = {
         # HAR uses a short, horizon-scale, and longer regime component.
         horizon_feature_columns=(
             ("5m", ("realized_vol_30s", "realized_vol_1m", "realized_vol_5m")),
+            ("15m", ("realized_vol_5m", "realized_vol_15m", "realized_vol_1h")),
+            ("30m", ("realized_vol_5m", "realized_vol_30m", "realized_vol_1h")),
+            ("1h", ("realized_vol_15m", "realized_vol_1h", "realized_vol_3h")),
+        ),
+    ),
+    "v4_10s": ModelFeatureContract(
+        feature_set="market_features",
+        feature_version="v4_10s",
+        feature_view="v4_10s_market_features",
+        feature_service="volatility_v4_10s",
+        offline_table="kalshi-crypto-506614.feature_store.realized_volatility_v4_10s",
+        label_version="v2_10s",
+        feature_columns=(
+            "realized_vol_30s",
+            "realized_vol_1m",
+            "realized_vol_5m",
+            "realized_vol_15m",
+            "realized_vol_30m",
+            "realized_vol_1h",
+            "realized_vol_3h",
+            "log_buy_volume_30s",
+            "log_buy_volume_5m",
+            "log_buy_volume_10m",
+        ),
+        default_architecture="har",
+        horizon_feature_columns=(
+            (
+                "5m",
+                (
+                    "realized_vol_30s",
+                    "realized_vol_1m",
+                    "realized_vol_5m",
+                    "log_buy_volume_30s",
+                    "log_buy_volume_5m",
+                    "log_buy_volume_10m",
+                ),
+            ),
             ("15m", ("realized_vol_5m", "realized_vol_15m", "realized_vol_1h")),
             ("30m", ("realized_vol_5m", "realized_vol_30m", "realized_vol_1h")),
             ("1h", ("realized_vol_15m", "realized_vol_1h", "realized_vol_3h")),

@@ -1,9 +1,8 @@
-"""Shared training-data loading for legacy GCS and Feast/BigQuery paths."""
+"""Point-in-time-safe BigQuery training-data loading."""
 
 from __future__ import annotations
 
-from collections.abc import Iterable
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 
 import pandas as pd
 
@@ -13,20 +12,6 @@ DEFAULT_TARGET_TABLE = "kalshi-crypto-506614.training_labels.future_realized_vol
 
 REQUIRED_FREQUENCIES = {"10s"}
 REQUIRED_TARGETS = {"target_rv_1m", "target_rv_5m", "target_rv_15m", "target_rv_30m", "target_rv_1h"}
-
-
-def dates(start: date, end: date) -> Iterable[date]:
-    if end < start:
-        raise ValueError("end date must not precede start date")
-    current = start
-    while current <= end:
-        yield current
-        current += timedelta(days=1)
-
-
-def gcs_uri(path: str) -> str:
-    return path if path.startswith("gs://") else f"gs://{path}"
-
 
 def validate_training_table(table: pd.DataFrame, *, require_all_frequencies: bool = True) -> None:
     """Reject incomplete or malformed joined data before model training."""
@@ -41,56 +26,20 @@ def validate_training_table(table: pd.DataFrame, *, require_all_frequencies: boo
         raise ValueError("training data has no usable target rows")
 
 
-def load_training_table(fs, feature_root: str, target_root: str,
-                        start: date, end: date) -> pd.DataFrame:
-    """Load point-in-time-safe training data through yesterday's UTC cutoff.
-
-    The one-hour target requires a complete future window, so samples after
-    23:00 UTC on the eligible end date are excluded.
-    """
-    yesterday = datetime.now(timezone.utc).date() - timedelta(days=1)
-    if end > yesterday:
-        raise ValueError(f"training end date {end} exceeds policy cutoff {yesterday}")
-    cutoff = pd.Timestamp(end, tz="UTC") + pd.Timedelta(days=1) - pd.Timedelta(hours=1)
-    features = [
-        pd.read_parquet(path, filesystem=fs)
-        for day in dates(start, end)
-        for path in [f"{feature_root.rstrip('/')}/date={day}/features.parquet"]
-        if fs.exists(path)
-    ]
-    targets = [
-        pd.read_parquet(gcs_uri(path), filesystem=fs)
-        for day in dates(start, end)
-        for path in fs.glob(f"{target_root.rstrip('/')}/date={day}/hour=*/targets.parquet")
-    ]
-    if not features or not targets:
-        raise FileNotFoundError("feature or target partitions are missing")
-    left, right = pd.concat(features, ignore_index=True), pd.concat(targets, ignore_index=True)
-    left["timestamp"] = pd.to_datetime(left["timestamp"], utc=True)
-    right["timestamp"] = pd.to_datetime(right["timestamp"], utc=True)
-    left = left[left["timestamp"] <= cutoff]
-    right = right[right["timestamp"] <= cutoff]
-    joined = left.merge(right, on=["timestamp", "frequency"], how="inner", suffixes=("", "_target"))
-    if joined.empty:
-        raise ValueError(f"no eligible feature/target rows at or before {cutoff.isoformat()}")
-    validate_training_table(joined)
-    joined.attrs["training_cutoff"] = cutoff.isoformat()
-    return joined
-
-
-def load_training_table_from_feast(
-    *, project: str, feast_repo: str, start: date, end: date,
+def load_training_table(
+    *, project: str, start: date, end: date,
     target_table: str = DEFAULT_TARGET_TABLE,
     feature_version: str = CURRENT_CONTRACT_VERSION,
 ) -> pd.DataFrame:
-    """Load the BigQuery tables declared by the immutable Feast contract.
+    """Load the BigQuery tables declared by the immutable feature contract.
 
     This contract is exact-timestamp aligned at 10-second boundaries.  Joining
     the two partitioned tables directly avoids Feast's range join over the full
     feature-view TTL while preserving point-in-time correctness.
     """
-    del feast_repo  # Retained in the public loader boundary for pipeline compatibility.
-    yesterday = datetime.now(timezone.utc).date() - timedelta(days=1)
+    if end < start:
+        raise ValueError("end date must not precede start date")
+    yesterday = datetime.now(UTC).date() - timedelta(days=1)
     if end > yesterday:
         raise ValueError(f"training end date {end} exceeds policy cutoff {yesterday}")
     from google.cloud import bigquery

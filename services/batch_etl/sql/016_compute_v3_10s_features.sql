@@ -3,56 +3,19 @@
 -- available when the forecast is made.
 DECLARE seconds_per_year FLOAT64 DEFAULT 365 * 24 * 60 * 60;
 
-CREATE TABLE IF NOT EXISTS `${project}.feature_store.realized_volatility_v3_10s`
-(
-  asset STRING NOT NULL,
-  event_timestamp TIMESTAMP NOT NULL,
-  created_timestamp TIMESTAMP NOT NULL,
-  source_frequency STRING NOT NULL,
-  feature_version STRING NOT NULL,
-  synthetic_price FLOAT64,
-  log_return FLOAT64,
-  venue_count INT64,
-  realized_vol_30s FLOAT64,
-  realized_vol_1m FLOAT64,
-  realized_vol_5m FLOAT64,
-  realized_vol_15m FLOAT64,
-  realized_vol_30m FLOAT64,
-  realized_vol_1h FLOAT64,
-  realized_vol_3h FLOAT64
-)
-PARTITION BY DATE(event_timestamp)
-CLUSTER BY source_frequency, asset;
-
 MERGE `${project}.feature_store.realized_volatility_v3_10s` AS target
 USING (
-  WITH venue_prices AS (
-    SELECT
-      event_timestamp,
-      AVG(COALESCE(p_trade_mean, p_trade)) AS synthetic_price,
-      COUNTIF(COALESCE(p_trade_mean, p_trade) IS NOT NULL) AS venue_count
-    FROM `${project}.market_data.bars`
-    WHERE frequency = '10s'
-      -- Three hours of returns need one additional price observation.
-      AND event_timestamp >= TIMESTAMP_SUB(@target_start, INTERVAL 10810 SECOND)
-      AND event_timestamp < @target_end
-    GROUP BY event_timestamp
-  ),
-  returns AS (
+  WITH returns AS (
     SELECT
       event_timestamp,
       synthetic_price,
       venue_count,
-      IF(previous_price > 0,
-         LN(synthetic_price / previous_price), NULL) AS log_return
-    FROM (
-      SELECT
-        event_timestamp,
-        synthetic_price,
-        venue_count,
-        LAG(synthetic_price) OVER (ORDER BY event_timestamp) AS previous_price
-      FROM venue_prices
-    )
+      log_return
+    FROM `${project}.feature_store.realized_volatility_v2_10s`
+    WHERE asset = 'BTCUSD'
+      AND feature_version = 'v2_10s'
+      AND event_timestamp >= TIMESTAMP_SUB(@target_start, INTERVAL 10790 SECOND)
+      AND event_timestamp < @target_end
   ),
   windows AS (
     SELECT

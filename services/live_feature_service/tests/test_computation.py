@@ -4,13 +4,19 @@ import math
 
 import pytest
 
-from live_feature_service.computation import SECONDS_PER_YEAR, V2TenSecondFeatureComputer, V3TenSecondFeatureComputer
+from live_feature_service.computation import (
+    SECONDS_PER_YEAR,
+    V2TenSecondFeatureComputer,
+    V3TenSecondFeatureComputer,
+    V4TenSecondFeatureComputer,
+)
 
 
-def bar(ts, venue, price, frequency="10s"):
+def bar(ts, venue, price, frequency="10s", buy_volume=0):
     return {
         "event_type": "primitive_bar", "frequency": frequency, "venue": venue,
         "bucket_start_ts_ms": ts, "bucket_end_ts_ms": ts + 10_000, "p_trade_mean": price,
+        "v_buy": buy_volume,
     }
 
 
@@ -176,3 +182,41 @@ def test_v3_does_not_publish_partial_har_feature_rows():
     for index in range(100):
         row = computer.compute(bar(index * 10_000, "a", 100 + index), now_ms=(index + 1) * 10_000)
     assert row is None
+
+
+def test_v4_emits_causal_log_buyer_volume_windows():
+    computer = V4TenSecondFeatureComputer()
+    row = None
+    for index in range(1_082):
+        row = computer.compute(
+            bar(index * 10_000, "a", math.exp(index * 0.001), buy_volume=2),
+            now_ms=(index + 1) * 10_000,
+        )
+
+    assert row is not None
+    values = row.payload()["values"]
+    assert row.payload()["feature_version"] == "v4_10s"
+    assert values["log_buy_volume_30s"] == pytest.approx(math.log1p(6))
+    assert values["log_buy_volume_5m"] == pytest.approx(math.log1p(60))
+    assert values["log_buy_volume_10m"] == pytest.approx(math.log1p(120))
+
+
+def test_v4_sums_buyer_volume_across_venues():
+    computer = V4TenSecondFeatureComputer()
+    row = None
+    for index in range(1_082):
+        timestamp = index * 10_000
+        candidate = computer.compute(bar(timestamp, "a", 100, buy_volume=2), now_ms=timestamp + 10_000)
+        if candidate is not None:
+            row = candidate
+        computer.compute(bar(timestamp, "b", 102, buy_volume=3), now_ms=timestamp + 10_000)
+
+    assert row is not None
+    assert row.payload()["values"]["log_buy_volume_30s"] == pytest.approx(math.log1p(15))
+
+
+def test_v4_rejects_missing_buyer_volume():
+    payload = bar(0, "a", 100)
+    payload.pop("v_buy")
+    with pytest.raises(ValueError, match="buyer volume"):
+        V4TenSecondFeatureComputer().compute(payload, now_ms=10_000)

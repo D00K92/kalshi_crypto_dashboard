@@ -5,10 +5,10 @@ from datetime import date
 import pandas as pd
 from google.cloud import bigquery
 
-from src.common.data_io import load_training_table_from_feast
+from src.common.data_io import load_training_table
 
 
-def test_v2_loader_uses_exact_timestamp_join(monkeypatch) -> None:
+def test_bigquery_loader_uses_exact_timestamp_join(monkeypatch) -> None:
     captured: dict[str, object] = {}
     frame = pd.DataFrame(
         {
@@ -41,9 +41,8 @@ def test_v2_loader_uses_exact_timestamp_join(monkeypatch) -> None:
 
     monkeypatch.setattr(bigquery, "Client", lambda **_: Client())
 
-    result = load_training_table_from_feast(
+    result = load_training_table(
         project="test-project",
-        feast_repo="/unused",
         start=date(2026, 9, 1),
         end=date(2026, 9, 1),
         feature_version="v2_10s",

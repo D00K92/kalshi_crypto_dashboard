@@ -14,6 +14,7 @@ SQL_DIR = Path(__file__).resolve().parents[1] / "sql"
 FEATURE_SQL = {
     "v2_10s": "014_compute_v2_10s_features.sql",
     "v3_10s": "016_compute_v3_10s_features.sql",
+    "v4_10s": "018_compute_v4_10s_volume_features.sql",
 }
 
 

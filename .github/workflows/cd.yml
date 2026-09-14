@@ -99,25 +99,38 @@ jobs:
         docker build --platform linux/amd64 -t "${IMAGE_URI}:${IMAGE_TAG}" services/live_feature_service
         docker push "${IMAGE_URI}:${IMAGE_TAG}"
 
-    - name: Stage approved 1h model bundle
+    - name: Stage approved v4 hybrid model bundle
       env:
-        MODEL_RESOURCE: ${{ vars.VOLATILITY_MODEL_1H }}
-        MODEL_ARTIFACT_URI: ${{ vars.VOLATILITY_MODEL_1H_ARTIFACT_URI }}
+        MODEL_RESOURCE_1H: ${{ vars.VOLATILITY_MODEL_1H }}
+        MODEL_ARTIFACT_URI_1H: ${{ vars.VOLATILITY_MODEL_1H_ARTIFACT_URI }}
+        MODEL_RESOURCE_5M: ${{ vars.VOLATILITY_MODEL_5M_V4 }}
+        MODEL_ARTIFACT_URI_5M: ${{ vars.VOLATILITY_MODEL_5M_ARTIFACT_URI_V4 }}
       run: |
         set -euo pipefail
-        if [[ -z "${MODEL_RESOURCE}" || -z "${MODEL_ARTIFACT_URI}" ]]; then
-          echo "VOLATILITY_MODEL_1H and VOLATILITY_MODEL_1H_ARTIFACT_URI are required." >&2
+        if [[ -z "${MODEL_RESOURCE_1H}" || -z "${MODEL_ARTIFACT_URI_1H}" || \
+              -z "${MODEL_RESOURCE_5M}" || -z "${MODEL_ARTIFACT_URI_5M}" ]]; then
+          echo "The approved 5m v4 and 1h model resources and artifact URIs are required." >&2
           exit 1
         fi
-        artifact_uri="${MODEL_ARTIFACT_URI%/}"
-        artifact_dir="$(mktemp -d)"
-        gcloud storage cp "${artifact_uri}/model.joblib" "${artifact_dir}/model.joblib"
-        gcloud storage cp "${artifact_uri}/metadata.json" "${artifact_dir}/metadata.json"
+        artifact_uri_1h="${MODEL_ARTIFACT_URI_1H%/}"
+        artifact_uri_5m="${MODEL_ARTIFACT_URI_5M%/}"
+        artifact_dir_1h="$(mktemp -d)"
+        artifact_dir_5m="$(mktemp -d)"
+        gcloud storage cp "${artifact_uri_1h}/model.joblib" "${artifact_dir_1h}/model.joblib"
+        gcloud storage cp "${artifact_uri_1h}/metadata.json" "${artifact_dir_1h}/metadata.json"
+        gcloud storage cp "${artifact_uri_5m}/model.joblib" "${artifact_dir_5m}/model.joblib"
+        gcloud storage cp "${artifact_uri_5m}/metadata.json" "${artifact_dir_5m}/metadata.json"
         python services/model_serving/scripts/prepare_bundle.py \
-          --artifact-dir "${artifact_dir}" \
+          --artifact-dir "${artifact_dir_1h}" \
           --output-dir services/model_serving/model_bundle \
-          --resource-name "${MODEL_RESOURCE}" \
-          --artifact-uri "${artifact_uri}"
+          --model-version v4_volume_har_1 \
+          --feature-version v4_10s \
+          --artifact-feature-version v2_10s \
+          --resource-name "${MODEL_RESOURCE_1H}" \
+          --artifact-uri "${artifact_uri_1h}" \
+          --five-minute-artifact-dir "${artifact_dir_5m}" \
+          --five-minute-resource-name "${MODEL_RESOURCE_5M}" \
+          --five-minute-artifact-uri "${artifact_uri_5m}"
 
     - name: Build and push model serving image
       env:
@@ -176,6 +189,15 @@ jobs:
           exit 1
         fi
         echo "host=${redis_host}" >> "${GITHUB_OUTPUT}"
+
+    - name: Ensure active feature contract tables exist
+      run: |
+        set -euo pipefail
+        export project="${GCP_PROJECT_ID}"
+        envsubst '${project}' \
+          < services/batch_etl/sql/017_create_v2_v3_contract_tables.sql \
+          | bq query --project_id="${GCP_PROJECT_ID}" \
+              --location="${GCP_REGION}" --use_legacy_sql=false
 
     - name: Apply Feast v2_10s registry
       env:
@@ -254,6 +276,7 @@ jobs:
         kubectl rollout status deployment/ingestion-service --timeout=5m
         kubectl rollout status deployment/aggregator --timeout=5m
         kubectl rollout status deployment/live-feature-service --timeout=5m
+        kubectl rollout status deployment/live-feature-service-v4 --timeout=5m
         kubectl rollout status deployment/feast-live-bridge --timeout=5m
         kubectl rollout status deployment/feast-server --timeout=5m
         kubectl rollout status deployment/model-serving --timeout=5m
@@ -283,9 +306,12 @@ jobs:
     - name: Smoke check analytics outputs
       env:
         EXPECTED_MODEL_RESOURCE_1H: ${{ vars.VOLATILITY_MODEL_1H }}
+        EXPECTED_MODEL_RESOURCE_5M: ${{ vars.VOLATILITY_MODEL_5M_V4 }}
       run: |
         set -euo pipefail
-        kubectl exec deployment/analytics -- env "EXPECTED_MODEL_RESOURCE_1H=${EXPECTED_MODEL_RESOURCE_1H}" python -c '
+        kubectl exec deployment/analytics -- env \
+          "EXPECTED_MODEL_RESOURCE_1H=${EXPECTED_MODEL_RESOURCE_1H}" \
+          "EXPECTED_MODEL_RESOURCE_5M=${EXPECTED_MODEL_RESOURCE_5M}" python -c '
         import asyncio, json, os, time, urllib.request
         import redis.asyncio as redis
         async def check():
@@ -293,15 +319,23 @@ jobs:
                 assert response.status == 200, "analytics /readyz failed"
             client = redis.Redis(host=os.environ["REDIS_HOST"], port=int(os.environ["REDIS_PORT"]))
             now = int(time.time() * 1000)
+            feature_raw = await client.get("market:features:v4_10s:BTCUSD:latest")
+            assert feature_raw, "missing live v4 feature snapshot"
+            feature = json.loads(feature_raw)
+            assert feature["feature_version"] == "v4_10s", "wrong live feature contract"
+            required = {"log_buy_volume_30s", "log_buy_volume_5m", "log_buy_volume_10m"}
+            assert required <= feature["values"].keys(), "missing live buyer-volume features"
+            assert now - feature["event_timestamp_ms"] <= 90_000, "stale v4 feature snapshot"
             volatility_raw = await client.get("market:volatility:v2_10s:BTCUSD:latest")
             assert volatility_raw, "missing fresh volatility snapshot (check packaged model and live features)"
             volatility = json.loads(volatility_raw)
-            assert volatility["model_version"] == "v2_10s", "wrong model contract"
+            assert volatility["model_version"] == "v4_volume_har_1", "wrong model contract"
             assert now - volatility["generated_ts_ms"] <= 60_000, "stale volatility snapshot"
             resources = volatility["model_resources"]
             assert resources["1h"] == os.environ["EXPECTED_MODEL_RESOURCE_1H"], "1h champion is not live"
-            for horizon in ("5m", "15m", "30m"):
-                assert resources[horizon] == f"ewma/v2_10s/{horizon}", f"wrong {horizon} provider"
+            assert resources["5m"] == os.environ["EXPECTED_MODEL_RESOURCE_5M"], "5m volume HAR is not live"
+            for horizon in ("15m", "30m"):
+                assert resources[horizon] == f"ewma/v4_volume_har_1/{horizon}", f"wrong {horizon} provider"
             assert all(float(value) > 0 for value in volatility["annualized_volatility"].values()), "invalid volatility"
             keys = [key async for key in client.scan_iter(match="market:pricing:v1:KXBTCD-*")]
             fresh = []

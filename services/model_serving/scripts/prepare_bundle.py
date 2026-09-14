@@ -23,6 +23,7 @@ def _load_resources(path: Path) -> dict[str, dict[str, str]]:
 def _copy_model(
     *, source: Path, target_root: Path, horizon: str, resource: str,
     artifact_uri: str, feature_version: str, default_architecture: str | None = None,
+    artifact_feature_version: str | None = None,
 ) -> dict[str, str]:
     source_model = source / "model.joblib"
     source_metadata = source / "metadata.json"
@@ -31,7 +32,8 @@ def _copy_model(
     metadata = json.loads(source_metadata.read_text(encoding="utf-8"))
     if metadata.get("horizon") != horizon:
         raise ValueError(f"{horizon} artifact horizon mismatch")
-    if metadata.get("feature_set") != "market_features" or metadata.get("feature_version") != feature_version:
+    trained_feature_version = artifact_feature_version or feature_version
+    if metadata.get("feature_set") != "market_features" or metadata.get("feature_version") != trained_feature_version:
         raise ValueError(f"{horizon} artifact feature contract mismatch")
     columns = metadata.get("feature_columns")
     if not isinstance(columns, list) or not columns:
@@ -50,7 +52,7 @@ def _copy_model(
     target_metadata = target / "metadata.json"
     shutil.copy2(source_model, target_model)
     shutil.copy2(source_metadata, target_metadata)
-    return {
+    entry = {
         "kind": architecture,
         "resource": resource,
         "artifact_uri": artifact_uri.rstrip("/"),
@@ -59,6 +61,9 @@ def _copy_model(
         "model_sha256": sha256(target_model),
         "metadata_sha256": sha256(target_metadata),
     }
+    if trained_feature_version != feature_version:
+        entry["trained_feature_version"] = trained_feature_version
+    return entry
 
 
 def main() -> None:
@@ -72,6 +77,10 @@ def main() -> None:
     # Compatibility path for the existing v2 one-model release workflow.
     parser.add_argument("--resource-name")
     parser.add_argument("--artifact-uri")
+    parser.add_argument("--artifact-feature-version")
+    parser.add_argument("--five-minute-artifact-dir", type=Path)
+    parser.add_argument("--five-minute-resource-name")
+    parser.add_argument("--five-minute-artifact-uri")
     args = parser.parse_args()
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -103,7 +112,25 @@ def main() -> None:
             artifact_uri=args.artifact_uri,
             feature_version=args.feature_version,
             default_architecture="xgboost",
+            artifact_feature_version=args.artifact_feature_version,
         )
+        five_minute_args = (
+            args.five_minute_artifact_dir,
+            args.five_minute_resource_name,
+            args.five_minute_artifact_uri,
+        )
+        if any(five_minute_args) and not all(five_minute_args):
+            parser.error("5m packaging requires artifact dir, resource name, and artifact URI")
+        if all(five_minute_args):
+            horizons["5m"] = _copy_model(
+                source=args.five_minute_artifact_dir,
+                target_root=args.output_dir,
+                horizon="5m",
+                resource=args.five_minute_resource_name,
+                artifact_uri=args.five_minute_artifact_uri,
+                feature_version=args.feature_version,
+                default_architecture="har",
+            )
 
     manifest = {
         "schema_version": 1,

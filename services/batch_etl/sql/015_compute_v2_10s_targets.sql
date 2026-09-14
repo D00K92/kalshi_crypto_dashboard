@@ -1,22 +1,6 @@
 -- Labels paired exclusively with the market_features/v2_10s contract.
 DECLARE seconds_per_year FLOAT64 DEFAULT 365 * 24 * 60 * 60;
 
-CREATE TABLE IF NOT EXISTS `${project}.training_labels.future_realized_volatility_v2_10s`
-(
-  market_id STRING NOT NULL,
-  prediction_timestamp TIMESTAMP NOT NULL,
-  label_window_end TIMESTAMP NOT NULL,
-  label_created_timestamp TIMESTAMP NOT NULL,
-  target_rv_1m FLOAT64,
-  target_rv_5m FLOAT64,
-  target_rv_15m FLOAT64,
-  target_rv_30m FLOAT64,
-  target_rv_1h FLOAT64,
-  label_version STRING NOT NULL
-)
-PARTITION BY DATE(prediction_timestamp)
-CLUSTER BY market_id, label_version;
-
 MERGE `${project}.training_labels.future_realized_volatility_v2_10s` AS target
 USING (
   WITH synthetic_prices AS (

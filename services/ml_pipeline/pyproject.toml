@@ -1,14 +1,15 @@
 [project]
 name = "kalshi-crypto-ml-pipeline"
 version = "0.2.0"
-description = "Quant ML Training Pipeline and Feast Feature Store"
+description = "Quant ML training pipeline"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "kfp>=2.8.0",
     "google-cloud-aiplatform>=1.60.0",
+    "google-cloud-bigquery>=3.25.0,<4",
     "google-cloud-storage>=2.10.0,<3",
-    "polars>=1.5.0",
+    "db-dtypes>=1.2.0,<2",
     "pandas>=2.2.0",
     "gcsfs>=2024.6.0",
     "pyarrow>=17.0.0",
@@ -16,7 +17,6 @@ dependencies = [
     "scikit-learn==1.6.1",
     "xgboost>=2.1.0",
     "joblib>=1.4.0",
-    "pydantic>=2.8.0",
 ]
 
 [build-system]
@@ -26,11 +26,8 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
 
-[project.optional-dependencies]
-feast = ["feast[gcp,redis]>=0.38.0"]
-
-[tool.uv]
-dev-dependencies = [
+[dependency-groups]
+dev = [
     "pytest>=8.0.0",
     "black>=24.0.0",
     "ruff>=0.5.0",

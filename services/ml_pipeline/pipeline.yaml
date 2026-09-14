@@ -5,7 +5,6 @@
 #    bucket: str [Default: 'kalshi-crypto-tick-data']
 #    champion_metrics_uri: str [Default: 'gs://kalshi-crypto-tick-data/models/v3_har_1/champion_metrics.json']
 #    end_date: str [Default: '2026-09-02']
-#    feast_repo: str [Default: '/app/feast_store']
 #    feature_version: str [Default: 'v3_10s']
 #    location: str [Default: 'asia-northeast3']
 #    model_version: str [Default: 'v3_har_1']
@@ -147,8 +146,6 @@ components:
       parameters:
         end_date:
           parameterType: STRING
-        feast_repo:
-          parameterType: STRING
         feature_version:
           parameterType: STRING
         project:
@@ -235,8 +232,6 @@ deploymentSpec:
     exec-load-container:
       container:
         args:
-        - --feast-repo
-        - '{{$.inputs.parameters[''feast_repo'']}}'
         - --target-table
         - '{{$.inputs.parameters[''target_table'']}}'
         - --start-date
@@ -343,8 +338,6 @@ root:
           parameters:
             end_date:
               componentInputParameter: end_date
-            feast_repo:
-              componentInputParameter: feast_repo
             feature_version:
               componentInputParameter: feature_version
             project:
@@ -371,10 +364,6 @@ root:
         parameterType: STRING
       end_date:
         defaultValue: '2026-09-02'
-        isOptional: true
-        parameterType: STRING
-      feast_repo:
-        defaultValue: /app/feast_store
         isOptional: true
         parameterType: STRING
       feature_version:

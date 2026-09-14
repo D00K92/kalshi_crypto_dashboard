@@ -36,6 +36,11 @@ The optional `v3_10s` contract adds annualized trailing realized volatility at
 the complete three-hour lookback is warm. Select it with `FEATURE_VERSION=v3_10s`;
 versioned Redis keys and defaults are derived automatically.
 
+The `v4_10s` contract retains those HAR inputs and adds causal
+`log1p(sum(v_buy))` windows over 30s, 5m, and 10m. Production runs v4 as a
+parallel consumer with its own stream, latest key, checkpoint, and consumer
+group, leaving v2 warm for rollback.
+
 State, an optional feature publication, and the source ACK commit in one Redis
 transaction. First startup replays recent primitives; restarts restore the
 checkpoint and reclaim abandoned pending entries. Until enough history exists,
@@ -73,7 +78,8 @@ Analytics reads the latest feature key. `feast-live-bridge` asynchronously
 consumes the feature stream, and the feature parity job compares recent stream
 history with BigQuery.
 
-Kubernetes runs `deployment/live-feature-service` from
-`k8s/live-feature-service-deployment.yaml`. `GET /healthz` is liveness and
+Kubernetes runs the rollback `deployment/live-feature-service` and active
+`deployment/live-feature-service-v4` from the same image.
+`GET /healthz` is liveness and
 `GET /readyz` becomes ready after Redis setup and state restoration/replay.
 The probe endpoint is pod-local.

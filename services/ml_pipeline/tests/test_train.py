@@ -74,3 +74,17 @@ def test_v3_har_uses_horizon_specific_feature_columns() -> None:
         assert metadata["architecture"] == "har"
         assert metadata["feature_columns"] == list(contract.columns_for(horizon))
         assert list(model.feature_names_in_) == list(contract.columns_for(horizon))
+
+
+def test_v4_5m_har_adds_buyer_volume_without_changing_other_horizons() -> None:
+    contract = resolve_contract("v4_10s")
+
+    assert contract.columns_for("5m") == (
+        "realized_vol_30s",
+        "realized_vol_1m",
+        "realized_vol_5m",
+        "log_buy_volume_30s",
+        "log_buy_volume_5m",
+        "log_buy_volume_10m",
+    )
+    assert contract.columns_for("15m") == resolve_contract("v3_10s").columns_for("15m")

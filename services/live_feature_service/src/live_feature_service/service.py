@@ -9,7 +9,7 @@ import orjson
 import redis.asyncio as redis
 from redis.exceptions import ResponseError
 
-from .computation import V2TenSecondFeatureComputer, V3TenSecondFeatureComputer
+from .computation import V2TenSecondFeatureComputer, V3TenSecondFeatureComputer, V4TenSecondFeatureComputer
 from .config import Settings
 from .health import HealthServer
 
@@ -23,6 +23,7 @@ class LiveFeatureService:
         computer_type = {
             "v2_10s": V2TenSecondFeatureComputer,
             "v3_10s": V3TenSecondFeatureComputer,
+            "v4_10s": V4TenSecondFeatureComputer,
         }.get(settings.feature_version)
         if computer_type is None:
             raise ValueError(f"unsupported live feature version: {settings.feature_version}")

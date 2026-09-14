@@ -85,3 +85,93 @@ spec:
             cpu: "500m"
             memory: "512Mi"
             ephemeral-storage: "1Gi"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: live-feature-service-v4
+  labels:
+    app: live-feature-service-v4
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: live-feature-service-v4
+  template:
+    metadata:
+      labels:
+        app: live-feature-service-v4
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: live-feature-service
+        image: "${LIVE_FEATURE_SERVICE_IMAGE}"
+        imagePullPolicy: Always
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+        env:
+        - name: REDIS_URL
+          value: "redis://${REDIS_HOST}:${REDIS_PORT}/0"
+        - name: BARS_STREAM
+          value: "stream:primitives:v1"
+        - name: FEATURE_VERSION
+          value: "v4_10s"
+        - name: FEATURE_STREAM
+          value: "stream:features:v4_10s"
+        - name: FEATURE_KEY
+          value: "market:features:v4_10s:BTCUSD:latest"
+        - name: FEATURE_STATE_KEY
+          value: "market:features:BTCUSD:state:v4_10s"
+        - name: LIVE_FEATURE_GROUP
+          value: "live-features-v4-10s"
+        - name: EWMA_DECAY
+          value: "0.96"
+        - name: MAX_BAR_AGE_MS
+          value: "120000"
+        - name: HISTORY_BARS
+          value: "1100"
+        - name: REPLAY_COUNT
+          value: "10000"
+        - name: PRIMITIVE_STREAM_MAXLEN
+          value: "100000"
+        - name: LIVE_FEATURE_PENDING_IDLE_MS
+          value: "60000"
+        - name: HEALTH_PORT
+          value: "8080"
+        ports:
+        - name: health
+          containerPort: 8080
+        startupProbe:
+          httpGet:
+            path: /healthz
+            port: health
+          failureThreshold: 30
+          periodSeconds: 2
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: health
+          periodSeconds: 5
+          timeoutSeconds: 2
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: health
+          periodSeconds: 15
+          timeoutSeconds: 2
+        resources:
+          requests:
+            cpu: "50m"
+            memory: "128Mi"
+            ephemeral-storage: "100Mi"
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+            ephemeral-storage: "1Gi"
