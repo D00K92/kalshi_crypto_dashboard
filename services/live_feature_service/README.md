@@ -5,6 +5,10 @@ aggregator's completed per-venue primitives, maintains rolling state, and
 publishes an inference-ready feature envelope without requiring changes to
 upstream event schemas.
 
+Window sizes and version capabilities come from the repository-level
+`feature_contracts/market_features.json` manifest through a generated module.
+Feature formulas remain explicit in `computation.py` for parity review.
+
 ## Data contract
 
 Input:

@@ -50,3 +50,7 @@ def test_resource_map_accepts_compatible_training_contracts(tmp_path):
     assert manifest["horizons"]["15m"]["trained_feature_version"] == "v3_10s"
     assert manifest["horizons"]["30m"]["trained_feature_version"] == "v3_10s"
     assert manifest["horizons"]["1h"]["trained_feature_version"] == "v2_10s"
+    assert all(
+        len(entry["feature_contract_hash"]) == 64
+        for entry in manifest["horizons"].values()
+    )

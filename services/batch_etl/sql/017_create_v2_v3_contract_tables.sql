@@ -61,6 +61,41 @@ CREATE TABLE IF NOT EXISTS `${project}.feature_store.realized_volatility_v4_10s`
 PARTITION BY DATE(event_timestamp)
 CLUSTER BY source_frequency, asset;
 
+-- Non-storage compatibility surfaces let older training contracts select their
+-- original schemas while v4 remains the only actively written physical table.
+CREATE OR REPLACE VIEW `${project}.feature_store.realized_volatility_v2_10s_compat` AS
+SELECT
+  asset,
+  event_timestamp,
+  created_timestamp,
+  source_frequency,
+  'v2_10s' AS feature_version,
+  synthetic_price,
+  log_return,
+  venue_count,
+  realized_vol_1h,
+  realized_vol_3h
+FROM `${project}.feature_store.realized_volatility_v4_10s`;
+
+CREATE OR REPLACE VIEW `${project}.feature_store.realized_volatility_v3_10s_compat` AS
+SELECT
+  asset,
+  event_timestamp,
+  created_timestamp,
+  source_frequency,
+  'v3_10s' AS feature_version,
+  synthetic_price,
+  log_return,
+  venue_count,
+  realized_vol_30s,
+  realized_vol_1m,
+  realized_vol_5m,
+  realized_vol_15m,
+  realized_vol_30m,
+  realized_vol_1h,
+  realized_vol_3h
+FROM `${project}.feature_store.realized_volatility_v4_10s`;
+
 CREATE TABLE IF NOT EXISTS `${project}.training_labels.future_realized_volatility_v2_10s`
 (
   market_id STRING NOT NULL,

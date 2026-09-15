@@ -3,16 +3,18 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
+from .generated_feature_contracts import CURRENT_CONTRACT_VERSION, REALIZED_VOL_VERSIONS
+
 
 @dataclass(frozen=True, slots=True)
 class Settings:
     redis_url: str = "redis://127.0.0.1:6379/0"
     bars_stream: str = "stream:primitives:v1"
-    feature_stream: str = "stream:features:v2_10s"
-    feature_key: str = "market:features:v2_10s:BTCUSD:latest"
-    state_key: str = "market:features:BTCUSD:state:v2_10s"
-    feature_version: str = "v2_10s"
-    consumer_group: str = "live-features-v2-10s"
+    feature_stream: str = f"stream:features:{CURRENT_CONTRACT_VERSION}"
+    feature_key: str = f"market:features:{CURRENT_CONTRACT_VERSION}:BTCUSD:latest"
+    state_key: str = f"market:features:BTCUSD:state:{CURRENT_CONTRACT_VERSION}"
+    feature_version: str = CURRENT_CONTRACT_VERSION
+    consumer_group: str = f"live-features-{CURRENT_CONTRACT_VERSION.replace('_', '-')}"
     consumer_name: str = "live-features-1"
     health_port: int = 8080
     ewma_decay: float = 0.96
@@ -24,8 +26,8 @@ class Settings:
 
     @classmethod
     def from_env(cls) -> "Settings":
-        feature_version = os.getenv("FEATURE_VERSION", "v2_10s")
-        har = feature_version in {"v3_10s", "v4_10s"}
+        feature_version = os.getenv("FEATURE_VERSION", CURRENT_CONTRACT_VERSION)
+        har = feature_version in REALIZED_VOL_VERSIONS
         return cls(
             redis_url=os.getenv("REDIS_URL", "redis://127.0.0.1:6379/0"),
             bars_stream=os.getenv("BARS_STREAM", "stream:primitives:v1"),

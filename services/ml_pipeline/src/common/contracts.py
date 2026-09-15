@@ -2,9 +2,17 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass
 
-HORIZON_SECONDS = {"5m": 300, "15m": 900, "30m": 1_800, "1h": 3_600}
+from src.common.generated_feature_contracts import (
+    CONTRACT_DEFINITIONS,
+    CURRENT_CONTRACT_VERSION,
+    FEATURE_SET,
+    HORIZON_SECONDS,
+)
+
 HORIZONS = tuple(HORIZON_SECONDS)
 
 
@@ -28,93 +36,30 @@ class ModelFeatureContract:
         return configured.get(horizon, self.feature_columns)
 
 
-CONTRACTS = {
-    "v1": ModelFeatureContract(
-        feature_set="market_features",
-        feature_version="v1",
-        feature_view="v1_market_features",
-        feature_service="volatility_v1",
-        offline_table="kalshi-crypto-506614.feature_store.realized_volatility_v1",
-        # The legacy v1 feature table was paired with the existing v2_10s
-        # labels; keep that rollback loader behavior intact.
-        label_version="v2_10s",
-        feature_columns=("log_return", "venue_count"),
-    ),
-    "v2_10s": ModelFeatureContract(
-        feature_set="market_features",
-        feature_version="v2_10s",
-        feature_view="v2_10s_market_features",
-        feature_service="volatility_v2_10s",
-        offline_table="kalshi-crypto-506614.feature_store.realized_volatility_v2_10s",
-        label_version="v2_10s",
-        feature_columns=("log_return", "venue_count"),
-    ),
-    "v3_10s": ModelFeatureContract(
-        feature_set="market_features",
-        feature_version="v3_10s",
-        feature_view="v3_10s_market_features",
-        feature_service="volatility_v3_10s",
-        offline_table="kalshi-crypto-506614.feature_store.realized_volatility_v3_10s",
-        # The future windows are unchanged; v3 changes predictors only.
-        label_version="v2_10s",
-        feature_columns=(
-            "realized_vol_30s",
-            "realized_vol_1m",
-            "realized_vol_5m",
-            "realized_vol_15m",
-            "realized_vol_30m",
-            "realized_vol_1h",
-            "realized_vol_3h",
-        ),
-        default_architecture="har",
-        # HAR uses a short, horizon-scale, and longer regime component.
-        horizon_feature_columns=(
-            ("5m", ("realized_vol_30s", "realized_vol_1m", "realized_vol_5m")),
-            ("15m", ("realized_vol_5m", "realized_vol_15m", "realized_vol_1h")),
-            ("30m", ("realized_vol_5m", "realized_vol_30m", "realized_vol_1h")),
-            ("1h", ("realized_vol_15m", "realized_vol_1h", "realized_vol_3h")),
-        ),
-    ),
-    "v4_10s": ModelFeatureContract(
-        feature_set="market_features",
-        feature_version="v4_10s",
-        feature_view="v4_10s_market_features",
-        feature_service="volatility_v4_10s",
-        offline_table="kalshi-crypto-506614.feature_store.realized_volatility_v4_10s",
-        label_version="v2_10s",
-        feature_columns=(
-            "realized_vol_30s",
-            "realized_vol_1m",
-            "realized_vol_5m",
-            "realized_vol_15m",
-            "realized_vol_30m",
-            "realized_vol_1h",
-            "realized_vol_3h",
-            "log_buy_volume_30s",
-            "log_buy_volume_5m",
-            "log_buy_volume_10m",
-        ),
-        default_architecture="har",
-        horizon_feature_columns=(
-            (
-                "5m",
-                (
-                    "realized_vol_30s",
-                    "realized_vol_1m",
-                    "realized_vol_5m",
-                    "log_buy_volume_30s",
-                    "log_buy_volume_5m",
-                    "log_buy_volume_10m",
-                ),
-            ),
-            ("15m", ("realized_vol_5m", "realized_vol_15m", "realized_vol_1h")),
-            ("30m", ("realized_vol_5m", "realized_vol_30m", "realized_vol_1h")),
-            ("1h", ("realized_vol_15m", "realized_vol_1h", "realized_vol_3h")),
-        ),
-    ),
-}
+def _build_contract(version: str, definition: dict) -> ModelFeatureContract:
+    inputs = definition["model_inputs"]
+    used_columns = {column for columns in inputs.values() for column in columns}
+    feature_columns = tuple(column for column in definition["fields"] if column in used_columns)
+    horizon_columns = () if "default" in inputs else tuple(
+        (horizon, tuple(inputs[horizon])) for horizon in HORIZONS
+    )
+    return ModelFeatureContract(
+        feature_set=FEATURE_SET,
+        feature_version=version,
+        feature_view=definition["feature_view"],
+        feature_service=definition["feature_service"],
+        offline_table=definition["offline_table"],
+        label_version=definition["label_version"],
+        feature_columns=feature_columns,
+        default_architecture=definition["default_architecture"],
+        horizon_feature_columns=horizon_columns,
+    )
 
-CURRENT_CONTRACT_VERSION = "v3_10s"
+
+CONTRACTS = {
+    version: _build_contract(version, definition)
+    for version, definition in CONTRACT_DEFINITIONS.items()
+}
 
 
 def resolve_contract(version: str = CURRENT_CONTRACT_VERSION) -> ModelFeatureContract:
@@ -122,3 +67,16 @@ def resolve_contract(version: str = CURRENT_CONTRACT_VERSION) -> ModelFeatureCon
         return CONTRACTS[version]
     except KeyError as exc:
         raise ValueError(f"unsupported model feature contract: {version}") from exc
+
+
+def feature_contract_hash(*, feature_set: str, feature_version: str,
+                          horizon: str, feature_columns: tuple[str, ...] | list[str]) -> str:
+    """Return the stable identity of one model's ordered input contract."""
+    payload = {
+        "feature_columns": list(feature_columns),
+        "feature_set": feature_set,
+        "feature_version": feature_version,
+        "horizon": horizon,
+    }
+    encoded = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
+    return hashlib.sha256(encoded).hexdigest()

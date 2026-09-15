@@ -13,6 +13,18 @@ def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def feature_contract_hash(*, feature_set: str, feature_version: str,
+                          horizon: str, feature_columns: list[str]) -> str:
+    payload = {
+        "feature_columns": feature_columns,
+        "feature_set": feature_set,
+        "feature_version": feature_version,
+        "horizon": horizon,
+    }
+    encoded = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def _load_resources(path: Path) -> dict[str, dict[str, str]]:
     value = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(value, dict) or set(value) != set(HORIZONS):
@@ -38,6 +50,15 @@ def _copy_model(
     columns = metadata.get("feature_columns")
     if not isinstance(columns, list) or not columns:
         raise ValueError(f"{horizon} artifact has invalid feature columns")
+    contract_hash = feature_contract_hash(
+        feature_set="market_features",
+        feature_version=trained_feature_version,
+        horizon=horizon,
+        feature_columns=columns,
+    )
+    metadata_hash = metadata.get("feature_contract_hash")
+    if metadata_hash is not None and metadata_hash != contract_hash:
+        raise ValueError(f"{horizon} artifact feature contract hash mismatch")
     architecture = metadata.get("architecture", default_architecture)
     if architecture not in {"har", "xgboost"}:
         raise ValueError(f"{horizon} artifact has unsupported architecture")
@@ -60,6 +81,7 @@ def _copy_model(
         "metadata_path": f"{horizon}/metadata.json",
         "model_sha256": sha256(target_model),
         "metadata_sha256": sha256(target_metadata),
+        "feature_contract_hash": contract_hash,
     }
     if trained_feature_version != feature_version:
         entry["trained_feature_version"] = trained_feature_version

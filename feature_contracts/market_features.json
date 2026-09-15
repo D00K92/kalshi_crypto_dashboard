@@ -1,0 +1,78 @@
+{
+  "schema_version": 1,
+  "feature_set": "market_features",
+  "canonical_version": "v4_10s",
+  "canonical_sql": "018_compute_v4_10s_volume_features.sql",
+  "horizon_seconds": {"5m": 300, "15m": 900, "30m": 1800, "1h": 3600},
+  "features": [
+    {"name": "synthetic_price", "type": "float64"},
+    {"name": "log_return", "type": "float64"},
+    {"name": "venue_count", "type": "int64"},
+    {"name": "realized_vol_30s", "type": "float64", "calculation": {"kind": "realized_volatility", "window": "30s", "window_bars": 3}},
+    {"name": "realized_vol_1m", "type": "float64", "calculation": {"kind": "realized_volatility", "window": "1m", "window_bars": 6}},
+    {"name": "realized_vol_5m", "type": "float64", "calculation": {"kind": "realized_volatility", "window": "5m", "window_bars": 30}},
+    {"name": "realized_vol_15m", "type": "float64", "calculation": {"kind": "realized_volatility", "window": "15m", "window_bars": 90}},
+    {"name": "realized_vol_30m", "type": "float64", "calculation": {"kind": "realized_volatility", "window": "30m", "window_bars": 180}},
+    {"name": "realized_vol_1h", "type": "float64", "calculation": {"kind": "realized_volatility", "window": "1h", "window_bars": 360}},
+    {"name": "realized_vol_3h", "type": "float64", "calculation": {"kind": "realized_volatility", "window": "3h", "window_bars": 1080}},
+    {"name": "log_buy_volume_30s", "type": "float64", "calculation": {"kind": "log_buy_volume", "window": "30s", "window_bars": 3}},
+    {"name": "log_buy_volume_5m", "type": "float64", "calculation": {"kind": "log_buy_volume", "window": "5m", "window_bars": 30}},
+    {"name": "log_buy_volume_10m", "type": "float64", "calculation": {"kind": "log_buy_volume", "window": "10m", "window_bars": 60}}
+  ],
+  "contracts": {
+    "v1": {
+      "feature_view": "v1_market_features",
+      "feature_service": "volatility_v1",
+      "offline_table": "kalshi-crypto-506614.feature_store.realized_volatility_v1",
+      "label_version": "v2_10s",
+      "default_architecture": "xgboost",
+      "capabilities": [],
+      "fields": ["synthetic_price", "log_return", "venue_count"],
+      "required_fields": ["synthetic_price", "venue_count"],
+      "model_inputs": {"default": ["log_return", "venue_count"]}
+    },
+    "v2_10s": {
+      "feature_view": "v2_10s_market_features",
+      "feature_service": "volatility_v2_10s",
+      "offline_table": "kalshi-crypto-506614.feature_store.realized_volatility_v2_10s_compat",
+      "label_version": "v2_10s",
+      "default_architecture": "xgboost",
+      "capabilities": [],
+      "fields": ["synthetic_price", "log_return", "venue_count"],
+      "required_fields": ["synthetic_price", "venue_count"],
+      "model_inputs": {"default": ["log_return", "venue_count"]}
+    },
+    "v3_10s": {
+      "feature_view": "v3_10s_market_features",
+      "feature_service": "volatility_v3_10s",
+      "offline_table": "kalshi-crypto-506614.feature_store.realized_volatility_v3_10s_compat",
+      "label_version": "v2_10s",
+      "default_architecture": "har",
+      "capabilities": ["realized_volatility"],
+      "fields": ["synthetic_price", "log_return", "venue_count", "realized_vol_30s", "realized_vol_1m", "realized_vol_5m", "realized_vol_15m", "realized_vol_30m", "realized_vol_1h", "realized_vol_3h"],
+      "required_fields": ["synthetic_price", "venue_count", "realized_vol_30s", "realized_vol_1m", "realized_vol_5m", "realized_vol_15m", "realized_vol_30m", "realized_vol_1h", "realized_vol_3h"],
+      "model_inputs": {
+        "5m": ["realized_vol_30s", "realized_vol_1m", "realized_vol_5m"],
+        "15m": ["realized_vol_5m", "realized_vol_15m", "realized_vol_1h"],
+        "30m": ["realized_vol_5m", "realized_vol_30m", "realized_vol_1h"],
+        "1h": ["realized_vol_15m", "realized_vol_1h", "realized_vol_3h"]
+      }
+    },
+    "v4_10s": {
+      "feature_view": "v4_10s_market_features",
+      "feature_service": "volatility_v4_10s",
+      "offline_table": "kalshi-crypto-506614.feature_store.realized_volatility_v4_10s",
+      "label_version": "v2_10s",
+      "default_architecture": "har",
+      "capabilities": ["realized_volatility", "log_buy_volume"],
+      "fields": ["synthetic_price", "log_return", "venue_count", "realized_vol_30s", "realized_vol_1m", "realized_vol_5m", "realized_vol_15m", "realized_vol_30m", "realized_vol_1h", "realized_vol_3h", "log_buy_volume_30s", "log_buy_volume_5m", "log_buy_volume_10m"],
+      "required_fields": ["synthetic_price", "venue_count", "realized_vol_30s", "realized_vol_1m", "realized_vol_5m", "realized_vol_15m", "realized_vol_30m", "realized_vol_1h", "realized_vol_3h", "log_buy_volume_30s", "log_buy_volume_5m", "log_buy_volume_10m"],
+      "model_inputs": {
+        "5m": ["realized_vol_30s", "realized_vol_1m", "realized_vol_5m", "log_buy_volume_30s", "log_buy_volume_5m", "log_buy_volume_10m"],
+        "15m": ["realized_vol_5m", "realized_vol_15m", "realized_vol_1h"],
+        "30m": ["realized_vol_5m", "realized_vol_30m", "realized_vol_1h"],
+        "1h": ["realized_vol_15m", "realized_vol_1h", "realized_vol_3h"]
+      }
+    }
+  }
+}

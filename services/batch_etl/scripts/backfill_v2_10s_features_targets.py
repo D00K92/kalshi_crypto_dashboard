@@ -50,7 +50,7 @@ def main() -> None:
     parser.add_argument("--parallelism", type=int, default=2)
     parser.add_argument("--maximum-bytes-billed", type=int, default=None)
     parser.add_argument("--dry-run", action="store_true")
-    parser.add_argument("--feature-version", choices=FEATURE_SQL, default="v3_10s")
+    parser.add_argument("--feature-version", choices=FEATURE_SQL, default="v4_10s")
     args = parser.parse_args()
     if args.end_date <= args.start_date:
         parser.error("--end-date must be after --start-date")

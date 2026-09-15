@@ -53,6 +53,29 @@ def test_v3_contract_registers_all_har_components():
     }.issubset(spec.required_fields)
 
 
+def test_v4_contract_registers_canonical_volume_features():
+    from registry import resolve_feature_spec
+
+    spec = resolve_feature_spec("market_features", "v4_10s")
+    assert spec.feature_view == "v4_10s_market_features"
+    assert {
+        "log_buy_volume_30s", "log_buy_volume_5m", "log_buy_volume_10m",
+    }.issubset(spec.required_fields)
+
+
+def test_canonical_feast_schema_is_generated_from_contract():
+    from definitions.canonical_market_features import (
+        canonical_market_features,
+        canonical_volatility_service,
+    )
+    from registry import resolve_feature_spec
+
+    spec = resolve_feature_spec("market_features", "v4_10s")
+    assert canonical_market_features.name == spec.feature_view
+    assert canonical_volatility_service.name == "volatility_v4_10s"
+    assert {field.name for field in canonical_market_features.schema} == set(spec.fields)
+
+
 def test_backfill_materializes_only_the_registered_feature_view(monkeypatch):
     calls = []
 

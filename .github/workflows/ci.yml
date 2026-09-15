@@ -17,7 +17,20 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  feature-contracts:
+    name: Generated feature contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - name: Reject stale generated contracts
+        run: python3 tools/generate_feature_contracts.py --check
+
   python-tests:
+    needs: feature-contracts
     name: Python tests - ${{ matrix.service }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -82,6 +95,7 @@ jobs:
           fi
 
   docker-builds:
+    needs: feature-contracts
     name: Docker build - ${{ matrix.service }}
     runs-on: ubuntu-latest
     timeout-minutes: 20

@@ -1,8 +1,10 @@
+import json
 from pathlib import Path
 
 
 SQL = Path(__file__).parents[1] / "sql"
 SCRIPTS = Path(__file__).parents[1] / "scripts"
+MANIFEST = Path(__file__).parents[3] / "feature_contracts" / "market_features.json"
 
 
 def test_active_contract_tables_are_created_before_feature_registration():
@@ -11,6 +13,8 @@ def test_active_contract_tables_are_created_before_feature_registration():
     assert "CREATE TABLE IF NOT EXISTS `${project}.feature_store.realized_volatility_v2_10s`" in schema
     assert "CREATE TABLE IF NOT EXISTS `${project}.feature_store.realized_volatility_v3_10s`" in schema
     assert "CREATE TABLE IF NOT EXISTS `${project}.feature_store.realized_volatility_v4_10s`" in schema
+    assert "CREATE OR REPLACE VIEW `${project}.feature_store.realized_volatility_v2_10s_compat`" in schema
+    assert "CREATE OR REPLACE VIEW `${project}.feature_store.realized_volatility_v3_10s_compat`" in schema
     assert "CREATE TABLE IF NOT EXISTS `${project}.training_labels.future_realized_volatility_v2_10s`" in schema
 
 
@@ -61,8 +65,10 @@ def test_v3_har_features_use_complete_trailing_windows():
 def test_v4_5m_features_use_causal_buyer_volume_windows():
     text = (SQL / "018_compute_v4_10s_volume_features.sql").read_text()
 
-    assert "SUM(v_buy) AS buy_volume" in text
-    assert "FROM `${project}.feature_store.realized_volatility_v3_10s`" in text
+    assert "SUM(COALESCE(v_buy, 0.0)) AS buy_volume" in text
+    assert "FROM `${project}.market_data.bars`" in text
+    assert "realized_volatility_v3_10s" not in text
+    assert "FROM returns" in text
     assert "RANGE BETWEEN 20 PRECEDING AND CURRENT ROW" in text
     assert "RANGE BETWEEN 290 PRECEDING AND CURRENT ROW" in text
     assert "RANGE BETWEEN 590 PRECEDING AND CURRENT ROW" in text
@@ -70,11 +76,19 @@ def test_v4_5m_features_use_causal_buyer_volume_windows():
     assert "LN(1 + buy_volume_10m)" in text
 
 
-def test_hourly_active_feature_job_includes_v4_after_its_dependencies():
+def test_canonical_sql_exposes_every_manifest_feature():
+    manifest = json.loads(MANIFEST.read_text())
+    text = (SQL / "018_compute_v4_10s_volume_features.sql").read_text()
+
+    for name in manifest["contracts"][manifest["canonical_version"]]["fields"]:
+        assert name in text
+
+
+def test_hourly_feature_job_uses_generated_canonical_contract():
     text = (SCRIPTS / "run_bigquery_features.py").read_text()
 
-    assert '"v4_10s": "018_compute_v4_10s_volume_features.sql"' in text
-    assert 'ACTIVE_FEATURE_VERSIONS = ("v2_10s", "v3_10s", "v4_10s")' in text
+    assert "from generated_feature_contracts import CANONICAL_FEATURE_SQL" in text
+    assert '"v3_10s": "016_compute_v3_10s_features.sql"' not in text
 
 
 def test_hourly_bar_sql_deduplicates_identified_trades_before_aggregation():

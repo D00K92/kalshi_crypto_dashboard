@@ -8,7 +8,7 @@ BigQuery contracts and does not compute live features or serve inference.
 
 | Item | Current value |
 |---|---|
-| Feature set/version | Training default `market_features/v3_10s`; live 5m candidate uses `v4_10s` |
+| Feature set/version | Canonical `market_features/v4_10s` |
 | Model inputs | Horizon-specific realized volatility; v4 5m also uses buyer-volume windows |
 | Label table | `training_labels.future_realized_volatility_v2_10s` |
 | Horizons | `5m`, `15m`, `30m`, `1h` |
@@ -16,10 +16,12 @@ BigQuery contracts and does not compute live features or serve inference.
 | Candidate model | Non-negative HAR linear regression per horizon; XGBoost remains selectable |
 | Benchmark | Annualized EWMA, decay `0.96` |
 | Primary metric | QLIKE |
-| Champion metrics | `gs://kalshi-crypto-tick-data/models/v3_har_1/champion_metrics.json` |
+| Champion metrics | `gs://kalshi-crypto-tick-data/models/v4_har_1/champion_metrics.json` |
 
 Training rejects current-day ranges and exact-timestamp joins BigQuery labels to
-the immutable feature contract. Feast is not part of the training-data path.
+the immutable feature contract. New runs read the canonical v4 table; v2/v3
+contracts resolve to compatibility views over that table. Feast is not part of
+the training-data path.
 Promotion requires a candidate to beat
 EWMA by 2% and be no more than 5% worse than the current champion.
 
@@ -50,9 +52,14 @@ Task images are:
 - `ml-register`
 
 Registered artifacts contain `model.joblib` and `metadata.json`; metadata
-records the exact horizon, feature set/version, ordered feature columns, label
-version, architecture, row split, and metrics. The `architecture` pipeline
+records the exact horizon, feature set/version, ordered feature columns, stable
+feature-contract hash, label version, architecture, row split, and metrics. The `architecture` pipeline
 parameter selects `har` or `xgboost` without changing the DAG.
+
+Feature names, types, rolling-window sizes, contract membership, and ordered
+model inputs are edited once in `feature_contracts/market_features.json`.
+Run `python tools/generate_feature_contracts.py` from the repository root after
+changing it. CI rejects stale generated service modules.
 
 ## Run locally
 
@@ -72,7 +79,7 @@ uv run --locked python scripts/run_pipeline.py \
   --location asia-northeast3 \
   --pipeline-root gs://kalshi-crypto-tick-data/pipeline-root \
   --start-date 2026-08-31 --end-date 2026-09-02 \
-  --model-version v3_har_1 --feature-version v3_10s
+  --model-version v4_har_1 --feature-version v4_10s
 ```
 
 Use a service account with the necessary Vertex, BigQuery, GCS, and Artifact

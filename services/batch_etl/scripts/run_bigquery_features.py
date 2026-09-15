@@ -8,14 +8,7 @@ from pathlib import Path
 
 from google.cloud import bigquery
 
-
-FEATURE_SQL = {
-    "v1": "011_compute_realized_volatility.sql",
-    "v2_10s": "014_compute_v2_10s_features.sql",
-    "v3_10s": "016_compute_v3_10s_features.sql",
-    "v4_10s": "018_compute_v4_10s_volume_features.sql",
-}
-ACTIVE_FEATURE_VERSIONS = ("v2_10s", "v3_10s", "v4_10s")
+from generated_feature_contracts import CANONICAL_FEATURE_SQL, CURRENT_CONTRACT_VERSION
 
 
 def main() -> None:
@@ -25,9 +18,9 @@ def main() -> None:
     parser.add_argument("--location", default="asia-northeast3")
     parser.add_argument(
         "--feature-version",
-        default=os.getenv("FEATURE_VERSION", "v2_10s"),
-        choices=(*FEATURE_SQL, "active"),
-        help="One contract or 'active' to materialize v2, v3, and v4 during migration",
+        default=os.getenv("FEATURE_VERSION", CURRENT_CONTRACT_VERSION),
+        choices=(CURRENT_CONTRACT_VERSION, "active"),
+        help=f"Compatibility flag; both choices materialize canonical {CURRENT_CONTRACT_VERSION}",
     )
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
@@ -38,23 +31,21 @@ def main() -> None:
     )
     if target.minute or target.second or target.microsecond:
         parser.error("target hour must be aligned to UTC hour")
-    versions = ACTIVE_FEATURE_VERSIONS if args.feature_version == "active" else (args.feature_version,)
     client = bigquery.Client(project=args.project, location=args.location)
-    for version in versions:
-        sql = (Path(__file__).resolve().parents[1] / "sql" / FEATURE_SQL[version]).read_text()
-        sql = sql.replace("${project}", args.project)
-        job_config = bigquery.QueryJobConfig(query_parameters=[
-            bigquery.ScalarQueryParameter("target_start", "TIMESTAMP", target),
-            bigquery.ScalarQueryParameter("target_end", "TIMESTAMP", target + timedelta(hours=1)),
-        ], dry_run=args.dry_run, use_query_cache=False)
-        job = client.query(sql, job_config=job_config)
-        if not args.dry_run:
-            job.result()
-        print(
-            f"{'validated' if args.dry_run else 'wrote'} {version} "
-            f"realized-volatility features for {target.isoformat()}",
-            flush=True,
-        )
+    sql = (Path(__file__).resolve().parents[1] / "sql" / CANONICAL_FEATURE_SQL).read_text()
+    sql = sql.replace("${project}", args.project)
+    job_config = bigquery.QueryJobConfig(query_parameters=[
+        bigquery.ScalarQueryParameter("target_start", "TIMESTAMP", target),
+        bigquery.ScalarQueryParameter("target_end", "TIMESTAMP", target + timedelta(hours=1)),
+    ], dry_run=args.dry_run, use_query_cache=False)
+    job = client.query(sql, job_config=job_config)
+    if not args.dry_run:
+        job.result()
+    print(
+        f"{'validated' if args.dry_run else 'wrote'} {CURRENT_CONTRACT_VERSION} "
+        f"realized-volatility features for {target.isoformat()}",
+        flush=True,
+    )
 
 
 if __name__ == "__main__":

@@ -18,10 +18,10 @@ def volatility_training_pipeline(
     end_date: str = "2026-09-02",
     project: str = "kalshi-crypto-506614",
     location: str = "asia-northeast3",
-    model_version: str = "v3_har_1",
-    feature_version: str = "v3_10s",
+    model_version: str = "v4_har_1",
+    feature_version: str = "v4_10s",
     architecture: str = "har",
-    champion_metrics_uri: str = "gs://kalshi-crypto-tick-data/models/v3_har_1/champion_metrics.json",
+    champion_metrics_uri: str = "gs://kalshi-crypto-tick-data/models/v4_har_1/champion_metrics.json",
     bucket: str = "kalshi-crypto-tick-data",
 ) -> None:
     data = load_container(target_table=target_table,

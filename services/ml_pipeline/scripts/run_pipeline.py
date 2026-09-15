@@ -7,7 +7,7 @@ from google.cloud import aiplatform
 
 from src.common.contracts import CURRENT_CONTRACT_VERSION
 
-DEFAULT_MODEL_VERSION = "v3_har_1"
+DEFAULT_MODEL_VERSION = "v4_har_1"
 
 
 def main() -> None:

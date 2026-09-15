@@ -2,7 +2,7 @@ import pandas as pd
 import pytest
 from sklearn.linear_model import LinearRegression
 
-from src.common.contracts import HORIZONS, resolve_contract
+from src.common.contracts import HORIZONS, feature_contract_hash, resolve_contract
 from src.common.modeling import train_horizon
 
 
@@ -25,6 +25,12 @@ def test_training_uses_only_live_serving_features() -> None:
     assert metadata["feature_service"] == "volatility_v2_10s"
     assert metadata["label_version"] == "v2_10s"
     assert metadata["entity"] == "BTCUSD"
+    assert metadata["feature_contract_hash"] == feature_contract_hash(
+        feature_set="market_features",
+        feature_version="v2_10s",
+        horizon="5m",
+        feature_columns=["log_return", "venue_count"],
+    )
 
 
 def test_training_rejects_missing_live_feature() -> None:

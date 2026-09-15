@@ -216,6 +216,21 @@ def test_packaged_provider_rejects_modified_model(tmp_path):
         )
 
 
+def test_packaged_provider_rejects_wrong_declared_feature_contract_hash(tmp_path):
+    manifest_path = build_bundle(tmp_path)
+    manifest = json.loads(manifest_path.read_text())
+    manifest["horizons"]["1h"]["feature_contract_hash"] = "0" * 64
+    manifest_path.write_text(json.dumps(manifest))
+
+    with pytest.raises(ValueError, match="feature contract hash mismatch"):
+        PackagedHybridProvider.load(
+            manifest_path,
+            model_version="v2_10s",
+            feature_version="v2_10s",
+            decay=0.96,
+        )
+
+
 def test_api_becomes_ready_only_after_packaged_bundle_loads(tmp_path):
     manifest = build_bundle(tmp_path)
     settings = Settings(model_bundle_manifest=str(manifest))

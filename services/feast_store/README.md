@@ -6,6 +6,10 @@ operations. `batch_etl` computes offline values and
 active Redis stream directly with BigQuery; Feast remains available for
 offline definitions, registry operations, and research materialization.
 
+The human-edited contract source is `feature_contracts/market_features.json` at
+the repository root. Files named `generated_feature_contracts.py` are generated
+with `python tools/generate_feature_contracts.py` and must not be edited.
+
 ## Current contract
 
 | Item | Value |

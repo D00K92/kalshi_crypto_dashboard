@@ -6,21 +6,19 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
+from .generated_feature_contracts import (
+    BUY_VOLUME_VERSIONS,
+    BUY_VOLUME_WINDOWS,
+    CURRENT_CONTRACT_VERSION,
+    FEATURE_SET,
+    REALIZED_VOL_VERSIONS,
+    REALIZED_VOL_WINDOWS,
+)
+
 INTERVAL_MS = 10_000
 SUPPORTED_FREQUENCY = "10s"
 EWMA_FREQUENCIES = {"5m": 300_000, "15m": 900_000, "30m": 1_800_000}
-REALIZED_VOL_WINDOWS = {
-    "30s": 3,
-    "1m": 6,
-    "5m": 30,
-    "15m": 90,
-    "30m": 180,
-    "1h": 360,
-    "3h": 1_080,
-}
-BUY_VOLUME_WINDOWS = {"30s": 3, "5m": 30, "10m": 60}
 SECONDS_PER_YEAR = 365 * 24 * 60 * 60
-FEATURE_SET = "market_features"
 FEATURE_VERSION = "v2_10s"
 DEFAULT_HISTORY_BARS = 450
 V3_HISTORY_BARS = 1_100
@@ -92,7 +90,7 @@ class V2TenSecondFeatureComputer:
 
     @property
     def required_history_bars(self) -> int:
-        return 1_081 if self.feature_version in {"v3_10s", "v4_10s"} else 361
+        return 1_081 if self.feature_version in REALIZED_VOL_VERSIONS else 361
 
     @property
     def history_count(self) -> int:
@@ -127,7 +125,7 @@ class V2TenSecondFeatureComputer:
         if not math.isfinite(price) or price <= 0:
             raise ValueError("primitive bar price must be positive and finite")
         buy_volume = 0.0
-        if self.feature_version == "v4_10s":
+        if self.feature_version in BUY_VOLUME_VERSIONS:
             try:
                 buy_volume = float(bar["v_buy"])
             except (KeyError, TypeError, ValueError) as exc:
@@ -137,13 +135,13 @@ class V2TenSecondFeatureComputer:
         self._last_seen_by_venue[venue] = timestamp
         self._history[venue].append((timestamp, price))
         self._pending.setdefault(timestamp, {})[venue] = price
-        if self.feature_version == "v4_10s":
+        if self.feature_version in BUY_VOLUME_VERSIONS:
             self._pending_buy_volumes.setdefault(timestamp, {})[venue] = buy_volume
         ready = sorted(key for key in self._pending if key < timestamp)
         output: FeatureRow | None = None
         for completed in ready:
             prices = self._pending.pop(completed)
-            if self.feature_version == "v4_10s":
+            if self.feature_version in BUY_VOLUME_VERSIONS:
                 self._buy_volumes.append(math.fsum(self._pending_buy_volumes.pop(completed).values()))
             synthetic = math.fsum(prices.values()) / len(prices)
             log_return = None if self._last_price is None else math.log(synthetic / self._last_price)
@@ -171,11 +169,11 @@ class V2TenSecondFeatureComputer:
                     self._ewma_variances[frequency] = squared if prior is None else self.ewma_decay * prior + (1.0 - self.ewma_decay) * squared
                 self._sample_prices[frequency] = synthetic
             self._last_timestamp_ms, self._last_price = completed, synthetic
-            log_buy_volumes = self._log_buy_volumes() if self.feature_version == "v4_10s" else None
+            log_buy_volumes = self._log_buy_volumes() if self.feature_version in BUY_VOLUME_VERSIONS else None
             output = FeatureRow(self.asset, self.feature_version, completed, completed + INTERVAL_MS, now_ms, synthetic, log_return, len(prices), realized_volatilities, forecast_variances, legacy_forecast_variance, log_buy_volumes)
-            if self.feature_version in {"v3_10s", "v4_10s"} and "3h" not in realized_volatilities:
+            if self.feature_version in REALIZED_VOL_VERSIONS and "3h" not in realized_volatilities:
                 output = None
-            if self.feature_version == "v4_10s" and not log_buy_volumes:
+            if self.feature_version in BUY_VOLUME_VERSIONS and not log_buy_volumes:
                 output = None
         return None if replay else output
 
@@ -315,4 +313,4 @@ class V4TenSecondFeatureComputer(V2TenSecondFeatureComputer):
         if history_bars < 1_081:
             raise ValueError("v4 history must retain at least 1081 10s bars")
         super().__init__(asset=asset, ewma_decay=ewma_decay, max_bar_age_ms=max_bar_age_ms,
-                         history_bars=history_bars, feature_version="v4_10s")
+                         history_bars=history_bars, feature_version=CURRENT_CONTRACT_VERSION)

@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from .generated_feature_contracts import CONTRACT_DEFINITIONS, FEATURE_SET
+
 
 @dataclass(frozen=True)
 class FeatureSpec:
@@ -22,38 +24,15 @@ class FeatureSpec:
 
 
 FEATURE_REGISTRY: dict[tuple[str, str], FeatureSpec] = {
-    ("market_features", "v1"): FeatureSpec(
-        feature_set="market_features",
-        version="v1",
-        feature_view="v1_market_features",
-        push_source="v1_market_features_push",
-        fields=("synthetic_price", "log_return", "venue_count"),
-        required_fields=("synthetic_price", "venue_count"),
-    ),
-    ("market_features", "v2_10s"): FeatureSpec(
-        feature_set="market_features",
-        version="v2_10s",
-        feature_view="v2_10s_market_features",
-        push_source="v2_10s_market_features_push",
-        fields=("synthetic_price", "log_return", "venue_count"),
-        required_fields=("synthetic_price", "venue_count"),
-    ),
-    ("market_features", "v3_10s"): FeatureSpec(
-        feature_set="market_features",
-        version="v3_10s",
-        feature_view="v3_10s_market_features",
-        push_source="v3_10s_market_features_push",
-        fields=(
-            "synthetic_price", "log_return", "venue_count",
-            "realized_vol_30s", "realized_vol_1m", "realized_vol_5m", "realized_vol_15m",
-            "realized_vol_30m", "realized_vol_1h", "realized_vol_3h",
-        ),
-        required_fields=(
-            "synthetic_price", "venue_count", "realized_vol_30s", "realized_vol_1m",
-            "realized_vol_5m", "realized_vol_15m", "realized_vol_30m",
-            "realized_vol_1h", "realized_vol_3h",
-        ),
-    ),
+    (FEATURE_SET, version): FeatureSpec(
+        feature_set=FEATURE_SET,
+        version=version,
+        feature_view=definition["feature_view"],
+        push_source=f'{definition["feature_view"]}_push',
+        fields=tuple(definition["fields"]),
+        required_fields=tuple(definition["required_fields"]),
+    )
+    for version, definition in CONTRACT_DEFINITIONS.items()
 }
 
 

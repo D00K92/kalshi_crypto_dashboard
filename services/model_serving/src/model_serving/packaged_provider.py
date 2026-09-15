@@ -12,6 +12,18 @@ import pandas as pd
 from .inference_service import HORIZONS, EWMAProvider, ForecastRequest, ForecastResponse
 
 
+def _feature_contract_hash(*, feature_set: str, feature_version: str,
+                           horizon: str, feature_columns: list[str]) -> str:
+    payload = {
+        "feature_columns": feature_columns,
+        "feature_set": feature_set,
+        "feature_version": feature_version,
+        "horizon": horizon,
+    }
+    encoded = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
 class PackagedHybridProvider:
     """Serve packaged horizon models, with EWMA entries kept for rollback."""
 
@@ -88,6 +100,18 @@ class PackagedHybridProvider:
             columns = metadata.get("feature_columns")
             if not isinstance(columns, list) or not columns or any(not isinstance(column, str) for column in columns):
                 raise ValueError("packaged model has invalid feature columns")
+            contract_hash = _feature_contract_hash(
+                feature_set="market_features",
+                feature_version=trained_feature_version,
+                horizon=horizon,
+                feature_columns=columns,
+            )
+            declared_hash = entry.get("feature_contract_hash")
+            metadata_hash = metadata.get("feature_contract_hash")
+            if declared_hash is not None and declared_hash != contract_hash:
+                raise ValueError("packaged model feature contract hash mismatch")
+            if metadata_hash is not None and metadata_hash != contract_hash:
+                raise ValueError("packaged model metadata contract hash mismatch")
             architecture = metadata.get("architecture", entry.get("kind"))
             if architecture != entry.get("kind"):
                 raise ValueError("packaged model architecture mismatch")

@@ -8,7 +8,11 @@ from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from xgboost import XGBRegressor
 
-from src.common.contracts import CURRENT_CONTRACT_VERSION, resolve_contract
+from src.common.contracts import (
+    CURRENT_CONTRACT_VERSION,
+    feature_contract_hash,
+    resolve_contract,
+)
 
 SUPPORTED_ARCHITECTURES = ("har", "xgboost")
 
@@ -82,6 +86,12 @@ def train_horizon(
         "feature_version": contract.feature_version,
         "feature_view": contract.feature_view,
         "feature_service": contract.feature_service,
+        "feature_contract_hash": feature_contract_hash(
+            feature_set=contract.feature_set,
+            feature_version=contract.feature_version,
+            horizon=horizon,
+            feature_columns=columns,
+        ),
         "label_version": contract.label_version,
         "entity": "BTCUSD",
         "rows": {"total": n, "train": train_end, "validation": valid_end - train_end,
