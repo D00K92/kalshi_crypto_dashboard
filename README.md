@@ -57,6 +57,15 @@ for the complete service and interface catalog.
 Each service README documents its exact inputs, outputs, configuration,
 development commands, and deployment boundary.
 
+## Developing model features
+
+Data Scientists should begin with
+[`feature_contracts/README.md`](feature_contracts/README.md). It identifies the
+files to edit for an existing-feature subset change, a new calculated feature,
+or a new contract version. Feature registration is governed by the single
+`feature_contracts/market_features.json` manifest; generated contract modules
+must not be edited manually.
+
 ## Canonical 10-second contracts
 
 `v2_10s` remains the historical base contract. Active inference and parity use
@@ -67,7 +76,7 @@ and buyer-volume features.
 |---|---|
 | Raw archive | Partitioned crypto and Kalshi Parquet in GCS |
 | Canonical bars | BigQuery `market_data.bars`, frequency `10s` |
-| Offline features | BigQuery `feature_store.realized_volatility_v2_10s` and active `realized_volatility_v4_10s` |
+| Offline features | Canonical BigQuery `feature_store.realized_volatility_v4_10s`; v2/v3 compatibility views preserve older training contracts |
 | Offline targets | BigQuery `training_labels.future_realized_volatility_v2_10s` |
 | Live primitives | Redis `stream:primitives:v1` |
 | Live features | Redis `market:features:v4_10s:BTCUSD:latest` |
@@ -147,11 +156,11 @@ Git commit SHA as the image tag.
 
 ## Current production contract
 
-- Feature contract: `market_features/v2_10s`
+- Feature contract: `market_features/v4_10s`
 - Forecast horizons: `5m`, `15m`, `30m`, `1h`
 - The offline-only `target_rv_1m` column is retained for compatibility; 1m is
   not served.
-- Live feature key: `market:features:v2_10s:BTCUSD:latest`
+- Live feature key: `market:features:v4_10s:BTCUSD:latest`
 - Volatility key: `market:volatility:v2_10s:BTCUSD:latest`
 - Kalshi IV key: `market:implied_volatility:v1:BTCUSD:latest`
 - Pricing keys: `market:pricing:v1:<KXBTCD market ticker>`
