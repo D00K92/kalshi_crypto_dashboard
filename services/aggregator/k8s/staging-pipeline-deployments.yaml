@@ -117,6 +117,8 @@ spec:
           value: "${REDIS_URL}"
         - name: BARS_STREAM
           value: "${PRIMITIVE_STREAM}"
+        - name: FEATURE_VERSION
+          value: "v2_10s"
         - name: FEATURE_STREAM
           value: "${FEATURE_STREAM}"
         - name: FEATURE_KEY
