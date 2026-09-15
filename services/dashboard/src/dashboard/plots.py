@@ -9,6 +9,7 @@ VENUE_COLORS = {"binance": "#f0b90b", "coinbase": "#1652f0", "bybit": "#f5a623"}
 PAPER = "#111827"
 GRID = "#243244"
 VOLATILITY_HORIZONS = (("5m", 5), ("15m", 15), ("30m", 30), ("1h", 60))
+VOLATILITY_CONE_HALF_RANGE_POINTS = 10.0
 
 
 def _figure(**kwargs: Any) -> go.Figure:
@@ -87,12 +88,19 @@ def volatility_cone_figure(payload: dict[str, Any]) -> go.Figure:
             line=dict(color="#facc15", width=2, dash="dot"),
             hovertemplate="Kalshi IV · %{y:.2f}%<extra></extra>",
         ))
+    yaxis = {"title": "vol (%,annum)"}
+    if points:
+        center = math.fsum(point[1] for point in points) / len(points)
+        yaxis["range"] = [
+            center - VOLATILITY_CONE_HALF_RANGE_POINTS,
+            center + VOLATILITY_CONE_HALF_RANGE_POINTS,
+        ]
     fig.update_layout(
         title=dict(text="Volatility cone", x=0, xanchor="left", font=dict(size=12, color="#cbd5e1")),
         margin=dict(l=42, r=12, t=30, b=28),
         xaxis=dict(tickmode="array", tickvals=[5, 15, 30, 60], ticktext=["5m", "15m", "30m", "1h"]),
         xaxis_title="Forecast horizon",
-        yaxis_title="vol (%,annum)",
+        yaxis=yaxis,
         height=170,
         showlegend=len(fig.data) > 1,
         uirevision="btc-volatility-cone",

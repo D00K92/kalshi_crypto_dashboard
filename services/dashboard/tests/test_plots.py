@@ -39,6 +39,7 @@ def test_volatility_cone_orders_and_formats_four_forecast_horizons():
     assert list(figure.data[0].customdata) == ["5m", "15m", "30m", "1h"]
     assert figure.layout.title.text == "Volatility cone"
     assert figure.layout.yaxis.title.text == "vol (%,annum)"
+    assert figure.layout.yaxis.range == (12.5, 32.5)
 
 
 def test_volatility_cone_overlays_kalshi_implied_iv_at_its_actual_tte():
@@ -53,6 +54,16 @@ def test_volatility_cone_overlays_kalshi_implied_iv_at_its_actual_tte():
     assert list(figure.data[1].y) == [31.0, 31.0]
     assert figure.data[1].line.color == "#facc15"
     assert figure.data[1].line.dash == "dot"
+    assert figure.layout.yaxis.range == (12.5, 32.5)
+
+
+def test_volatility_cone_iv_does_not_change_forecast_centered_axis():
+    figure = volatility_cone_figure({
+        "annualized_volatility": {"5m": .20, "15m": .22, "30m": .24, "1h": .26},
+        "kalshi_implied_volatility": {"annualized_implied_volatility": .80},
+    })
+
+    assert figure.layout.yaxis.range == (13.0, 33.0)
 
 
 def test_candle_figure_replaces_current_bar_with_forming_candle():
