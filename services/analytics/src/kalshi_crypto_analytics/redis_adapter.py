@@ -125,13 +125,19 @@ class RedisPricingPublisher:
         await self.client.set(key, json.dumps(payload, separators=(",", ":"), allow_nan=False), ex=self.ttl_seconds)
 
     async def publish_price(self, market_ticker: str, payload: dict[str, Any]) -> None:
-        encoded = json.dumps(payload, separators=(",", ":"), allow_nan=False)
+        await self.publish_prices([(market_ticker, payload)])
+
+    async def publish_prices(self, prices: list[tuple[str, dict[str, Any]]]) -> None:
+        if not prices:
+            return
         pipe = self.client.pipeline(transaction=False)
-        pipe.set(f"market:pricing:v1:{market_ticker}", encoded, ex=self.ttl_seconds)
-        pipe.delete(f"market:pricing:v1:status:{market_ticker}")
-        pipe.zadd("market:pricing:v1:active", {market_ticker: payload["generated_ts_ms"]})
-        pipe.xadd("stream:pricing:v1", {"payload": encoded}, maxlen=5000, approximate=True)
-        pipe.publish("pub:pricing:v1", encoded)
+        for market_ticker, payload in prices:
+            encoded = json.dumps(payload, separators=(",", ":"), allow_nan=False)
+            pipe.set(f"market:pricing:v1:{market_ticker}", encoded, ex=self.ttl_seconds)
+            pipe.delete(f"market:pricing:v1:status:{market_ticker}")
+            pipe.zadd("market:pricing:v1:active", {market_ticker: payload["generated_ts_ms"]})
+            pipe.xadd("stream:pricing:v1", {"payload": encoded}, maxlen=5000, approximate=True)
+            pipe.publish("pub:pricing:v1", encoded)
         await pipe.execute()
 
     async def unavailable(self, market_ticker: str, reason: str, now_ms: int) -> None:

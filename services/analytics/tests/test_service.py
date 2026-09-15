@@ -51,6 +51,7 @@ class Publisher:
     async def publish_volatility(self, snapshot): self.vol = snapshot
     async def publish_kalshi_iv(self, payload): self.kalshi_iv = payload
     async def publish_price(self, ticker, payload): self.prices.append(payload)
+    async def publish_prices(self, prices): self.prices.extend(payload for _, payload in prices)
     async def unavailable(self, ticker, reason, now): self.unavailable_reasons.append((ticker, reason))
     async def expire_inactive(self, active, now): self.active = active
     async def ping(self): return True
@@ -152,6 +153,54 @@ async def test_kalshi_iv_uses_seven_near_atm_contract_mids():
 
     assert out.kalshi_iv["contracts_used"] == 7
     assert out.kalshi_iv["event_ticker"] == "KXBTCD-E"
+
+
+async def test_prices_only_freshest_event_near_atm_window():
+    old = [ticker(f"KXBTCD-OLD-T{strike}", "KXBTCD-OLD", NOW - 1) for strike in range(80, 121)]
+    current = [ticker(f"KXBTCD-NEW-T{strike}", "KXBTCD-NEW", NOW) for strike in range(80, 121)]
+    items = old + current
+    metadata = {
+        item.market_ticker: MarketMetadata(
+            item.market_ticker, item.event_ticker,
+            float(item.market_ticker.rsplit("T", 1)[1]), NOW + 300_000, "open",
+        )
+        for item in items
+    }
+    out = Publisher()
+    service = AnalyticsService(Data(bootstrap=items), Meta(metadata), Forecast(), out, clock_ms=lambda: NOW)
+
+    await service.start(); await service.cycle()
+
+    assert len(out.prices) == 13
+    assert {price["event_ticker"] for price in out.prices} == {"KXBTCD-NEW"}
+    assert [price["strike"] for price in out.prices] == list(range(95, 108))
+    assert out.active == {f"KXBTCD-NEW-T{strike}" for strike in range(95, 108)}
+
+
+async def test_feature_failure_invalidates_only_previously_published_window():
+    items = [ticker(f"KXBTCD-E-T{strike}") for strike in range(80, 121)]
+    data = Data(bootstrap=items)
+    metadata = {
+        item.market_ticker: MarketMetadata(
+            item.market_ticker, item.event_ticker,
+            float(item.market_ticker.rsplit("T", 1)[1]), NOW + 300_000, "open",
+        )
+        for item in items
+    }
+    out = Publisher()
+    service = AnalyticsService(data, Meta(metadata), Forecast(), out, clock_ms=lambda: NOW)
+    await service.start(); await service.cycle()
+
+    async def stale_features():
+        return FeatureObservation({"x": 1}, NOW - 100_000, NOW - 100_000)
+
+    data.read_features = stale_features
+    await service.cycle()
+
+    assert len(out.unavailable_reasons) == 13
+    assert {ticker for ticker, _ in out.unavailable_reasons} == {
+        f"KXBTCD-E-T{strike}" for strike in range(95, 108)
+    }
 
 
 async def test_future_contract_is_retained_until_it_enters_pricing_window():

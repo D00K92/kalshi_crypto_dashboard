@@ -36,6 +36,32 @@ from .schemas import (
 LOGGER = logging.getLogger(__name__)
 OPEN_STATUSES = {"open", "active"}
 QUOTE_LOG_INTERVAL_MS = 60_000
+PRICING_WINDOW_LOWER = 6
+PRICING_WINDOW_UPPER = 6
+MIN_CYCLE_INTERVAL_SECONDS = 1.0
+
+
+def _pricing_window(
+    tickers: list[Ticker], metadata: dict[str, MarketMetadata], spot: float,
+) -> list[Ticker]:
+    """Select the freshest event and the same 13-strike window shown by the dashboard."""
+    candidates = [
+        ticker for ticker in tickers
+        if ticker.series_ticker == "KXBTCD" and ticker.market_ticker in metadata
+    ]
+    if not candidates:
+        return []
+    active_event = max(candidates, key=lambda ticker: ticker.exchange_ts_ms).event_ticker
+    event = sorted(
+        (ticker for ticker in candidates if ticker.event_ticker == active_event),
+        key=lambda ticker: metadata[ticker.market_ticker].strike,
+    )
+    atm_index = min(
+        range(len(event)),
+        key=lambda index: abs(metadata[event[index].market_ticker].strike - spot),
+    )
+    start = max(0, atm_index - PRICING_WINDOW_LOWER)
+    return event[start:atm_index + PRICING_WINDOW_UPPER + 1]
 
 
 class AnalyticsService:
@@ -51,6 +77,7 @@ class AnalyticsService:
         self._last_forecast_available_ts_ms: int | None = None
         self._cached_volatility: VolatilitySnapshot | None = None
         self._last_quote_summary_log_ts_ms: int | None = None
+        self._published_tickers: set[str] = set()
 
     async def start(self) -> None:
         await self.market_data.ensure_group()
@@ -77,8 +104,9 @@ class AnalyticsService:
             validate_fresh(volatility.generated_ts_ms, now_ms, self.volatility_max_age_ms, UnavailableReason.STALE_VOLATILITY, self.future_skew_ms)
             await self.publisher.publish_volatility(volatility)
         except PricingUnavailable as exc:
-            for ticker in self.tickers.values():
-                await self.publisher.unavailable(ticker.market_ticker, exc.reason.value, now_ms)
+            for market_ticker in self._published_tickers:
+                await self.publisher.unavailable(market_ticker, exc.reason.value, now_ms)
+            self._published_tickers.clear()
             self.ready = False
             if entries:
                 await self.market_data.acknowledge([entry_id for entry_id, _ in entries])
@@ -96,19 +124,29 @@ class AnalyticsService:
         unavailable_quote_counts: dict[str, int] = {}
         for ticker in list(self.tickers.values()):
             market_metadata = metadata.get(ticker.market_ticker)
+            expired = market_metadata is not None and market_metadata.expiry_ts_ms <= now_ms
+            inactive_event = bool(metadata) and ticker.event_ticker not in known_events
+            if expired or inactive_event:
+                reason = (
+                    UnavailableReason.OUTSIDE_SUPPORTED_LIFETIME
+                    if expired else UnavailableReason.MISSING_MARKET_METADATA
+                )
+                await self.publisher.unavailable(ticker.market_ticker, reason.value, now_ms)
+                self.tickers.pop(ticker.market_ticker, None)
+
+        published: list[tuple[str, dict[str, object]]] = []
+        for ticker in _pricing_window(list(self.tickers.values()), metadata, spot.price):
+            market_metadata = metadata.get(ticker.market_ticker)
             result = await self._price(ticker, market_metadata, spot, volatility, now_ms)
             if isinstance(result, PricingResult):
                 active.add(ticker.market_ticker)
-                await self.publisher.publish_price(ticker.market_ticker, result.payload)
+                published.append((ticker.market_ticker, result.payload))
                 if result.quote_reason is not None:
                     reason = result.quote_reason.value
                     unavailable_quote_counts[reason] = unavailable_quote_counts.get(reason, 0) + 1
             else:
                 await self.publisher.unavailable(ticker.market_ticker, result.value, now_ms)
-                expired = market_metadata is not None and market_metadata.expiry_ts_ms <= now_ms
-                inactive_event = bool(metadata) and ticker.event_ticker not in known_events
-                if expired or inactive_event:
-                    self.tickers.pop(ticker.market_ticker, None)
+        await self.publisher.publish_prices(published)
         if unavailable_quote_counts and (
             self._last_quote_summary_log_ts_ms is None
             or now_ms - self._last_quote_summary_log_ts_ms >= QUOTE_LOG_INTERVAL_MS
@@ -116,6 +154,7 @@ class AnalyticsService:
             LOGGER.info("pricing_quotes_unavailable counts=%s", unavailable_quote_counts)
             self._last_quote_summary_log_ts_ms = now_ms
         await self.publisher.expire_inactive(active, now_ms)
+        self._published_tickers = active
         if entries:
             await self.market_data.acknowledge([entry_id for entry_id, _ in entries])
         self.ready = bool(active) and self.forecasts.ready and await self.publisher.ping()
@@ -191,9 +230,17 @@ class AnalyticsService:
     async def run(self, stop: asyncio.Event) -> None:
         await self.start()
         while not stop.is_set():
+            started = time.monotonic()
             try:
                 await self.cycle()
             except Exception:
                 self.ready = False
                 LOGGER.exception("analytics_cycle_failed")
                 await asyncio.sleep(1)
+                continue
+            remaining = MIN_CYCLE_INTERVAL_SECONDS - (time.monotonic() - started)
+            if remaining > 0:
+                try:
+                    await asyncio.wait_for(stop.wait(), timeout=remaining)
+                except asyncio.TimeoutError:
+                    pass

@@ -30,6 +30,18 @@ async def test_unavailable_atomically_deletes_price_and_active_member():
     assert any(call[0] == "set" and call[1][0] == "market:pricing:v1:status:TICKER" for call in calls)
 
 
+async def test_prices_are_published_in_one_pipeline():
+    client = Redis(); publisher = RedisPricingPublisher(client)
+    await publisher.publish_prices([
+        ("A", {"generated_ts_ms": 100}),
+        ("B", {"generated_ts_ms": 100}),
+    ])
+    assert len(client.pipes) == 1
+    calls = client.pipes[0].calls
+    assert len([call for call in calls if call[0] == "zadd"]) == 2
+    assert len([call for call in calls if call[0] == "publish"]) == 2
+
+
 async def test_publication_cleanup_removes_expired_and_no_longer_active_keys():
     client = Redis(); publisher = RedisPricingPublisher(client)
     await publisher.expire_inactive({"CURRENT"}, 100_000)
